@@ -1,0 +1,25 @@
+{
+  "name": "mersey",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "pnpm build && node --test dist/harness/src/*.test.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "lint": "oxlint harness apps",
+    "lint:fix": "oxlint --fix harness apps",
+    "cli": "node --env-file=.env dist/apps/cli/src/index.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.80.0"
+  },
+  "devDependencies": {
+    "@types/node": "25.5.0",
+    "oxfmt": "0.42.0",
+    "oxlint": "1.57.0",
+    "typescript": "6.0.2"
+  },
+  "packageManager": "pnpm@10.33.0"
+}
