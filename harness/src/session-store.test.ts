@@ -73,3 +73,40 @@ test('FilesystemSessionStore rejects traversal-style session ids', async () => {
     await rm(rootDir, { force: true, recursive: true });
   }
 });
+
+test('FilesystemSessionStore createSession does not clobber existing messages', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
+
+  try {
+    const store = new FilesystemSessionStore({ rootDir });
+    const session: Session = {
+      id: 'session-1',
+      createdAt: '2026-03-29T00:00:00.000Z',
+      messages: [],
+    };
+
+    await store.createSession(session);
+    await store.appendMessage(session.id, {
+      role: 'user',
+      content: 'hello',
+      createdAt: '2026-03-29T00:00:01.000Z',
+    });
+
+    const returnedSession = await store.createSession({
+      id: session.id,
+      createdAt: '2026-03-29T00:00:02.000Z',
+      messages: [],
+    });
+
+    assert.deepEqual(
+      returnedSession.messages.map((message) => message.content),
+      ['hello'],
+    );
+    assert.deepEqual(
+      (await store.listMessages(session.id)).map((message) => message.content),
+      ['hello'],
+    );
+  } finally {
+    await rm(rootDir, { force: true, recursive: true });
+  }
+});

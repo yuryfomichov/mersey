@@ -46,7 +46,10 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
           return;
         }
 
-        await sessionStore.createSession(session);
+        const createdSession = await sessionStore.createSession(session);
+
+        session.createdAt = createdSession.createdAt;
+        session.messages = createdSession.messages;
       } catch (error: unknown) {
         initializedSessionPromise = null;
         throw error;

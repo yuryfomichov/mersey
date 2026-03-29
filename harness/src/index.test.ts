@@ -76,3 +76,35 @@ test('createHarness retries session initialization after a transient store failu
 
   assert.equal(reply.content, 'reply:hello again');
 });
+
+test('createHarness uses the canonical session returned by the store', async () => {
+  class CanonicalSessionStore extends MemorySessionStore {
+    override async getSession(_sessionId: string): Promise<Session | null> {
+      return null;
+    }
+
+    override async createSession(session: Session): Promise<Session> {
+      return {
+        ...session,
+        createdAt: '2026-03-29T00:00:00.000Z',
+        messages: [
+          {
+            role: 'assistant',
+            content: 'from-store',
+            createdAt: '2026-03-29T00:00:01.000Z',
+          },
+        ],
+      };
+    }
+  }
+
+  const harness = createHarness({
+    providerInstance: new FakeProvider(),
+    sessionStore: new CanonicalSessionStore(),
+  });
+
+  await harness.sendUserMessage('hello');
+
+  assert.equal(harness.session.createdAt, '2026-03-29T00:00:00.000Z');
+  assert.equal(harness.session.messages[0]?.content, 'from-store');
+});

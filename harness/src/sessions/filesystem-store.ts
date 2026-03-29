@@ -10,6 +10,10 @@ export type FilesystemSessionStoreOptions = {
 
 type SessionMetadata = Omit<Session, 'messages'>;
 
+function isErrnoCode(error: unknown, code: string): boolean {
+  return error instanceof Error && 'code' in error && error.code === code;
+}
+
 function assertValidSessionId(sessionId: string): void {
   if (!sessionId || sessionId === '.' || sessionId === '..') {
     throw new Error(`Invalid session id: ${sessionId}`);
@@ -39,17 +43,43 @@ export class FilesystemSessionStore implements SessionStore {
       return existingSession;
     }
 
-    await mkdir(this.getSessionDir(session.id), { recursive: true });
-    await writeFile(
-      this.getSessionPath(session.id),
-      `${JSON.stringify(this.toSessionMetadata(session), null, 2)}\n`,
-      'utf8',
-    );
-    await writeFile(this.getMessagesPath(session.id), '', 'utf8');
+    const sessionDir = this.getSessionDir(session.id);
+    const sessionPath = this.getSessionPath(session.id);
+    const messagesPath = this.getMessagesPath(session.id);
+
+    await mkdir(sessionDir, { recursive: true });
+
+    try {
+      await writeFile(sessionPath, `${JSON.stringify(this.toSessionMetadata(session), null, 2)}\n`, {
+        encoding: 'utf8',
+        flag: 'wx',
+      });
+    } catch (error: unknown) {
+      if (isErrnoCode(error, 'EEXIST')) {
+        const concurrentSession = await this.getSession(session.id);
+
+        if (concurrentSession) {
+          return concurrentSession;
+        }
+      }
+
+      throw error;
+    }
+
+    try {
+      await writeFile(messagesPath, '', {
+        encoding: 'utf8',
+        flag: 'wx',
+      });
+    } catch (error: unknown) {
+      if (!isErrnoCode(error, 'EEXIST')) {
+        throw error;
+      }
+    }
 
     return {
       ...session,
-      messages: [],
+      messages: await this.listMessages(session.id),
     };
   }
 
@@ -63,7 +93,7 @@ export class FilesystemSessionStore implements SessionStore {
         messages: await this.listMessages(sessionId),
       };
     } catch (error: unknown) {
-      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      if (isErrnoCode(error, 'ENOENT')) {
         return null;
       }
 
@@ -78,7 +108,7 @@ export class FilesystemSessionStore implements SessionStore {
 
       return lines.map((line) => JSON.parse(line) as Message);
     } catch (error: unknown) {
-      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      if (isErrnoCode(error, 'ENOENT')) {
         return [];
       }
 
