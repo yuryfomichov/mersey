@@ -1,8 +1,10 @@
 import type { ModelProvider, ModelRequest, ModelResponse } from '../models/index.js';
 
+type FakeProviderReply = string | ModelResponse | ((input: ModelRequest) => string | ModelResponse);
+
 export type FakeProviderOptions = {
   model?: string;
-  reply?: string | ((input: ModelRequest) => string);
+  reply?: FakeProviderReply;
 };
 
 export class FakeProvider implements ModelProvider {
@@ -10,7 +12,7 @@ export class FakeProvider implements ModelProvider {
   readonly name: string = 'fake';
   readonly requests: ModelRequest[] = [];
 
-  private readonly reply: string | ((input: ModelRequest) => string);
+  private readonly reply: FakeProviderReply;
 
   constructor(options: FakeProviderOptions = {}) {
     this.model = options.model ?? 'fake-model';
@@ -19,9 +21,8 @@ export class FakeProvider implements ModelProvider {
 
   async generate(input: ModelRequest): Promise<ModelResponse> {
     this.requests.push(input);
+    const reply = typeof this.reply === 'function' ? this.reply(input) : this.reply;
 
-    return {
-      text: typeof this.reply === 'function' ? this.reply(input) : this.reply,
-    };
+    return typeof reply === 'string' ? { text: reply } : reply;
   }
 }

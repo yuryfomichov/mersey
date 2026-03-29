@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { FilesystemSessionStore, MemorySessionStore, type Message, type Session } from './index.js';
+import { FilesystemSessionStore, MemorySessionStore, type Message, type Session } from './sessions.js';
 
 async function verifyStoreRoundTrip(store: {
   appendMessage(sessionId: string, message: Message): Promise<void>;
@@ -28,15 +28,43 @@ async function verifyStoreRoundTrip(store: {
     role: 'assistant',
     content: 'hi',
     createdAt: '2026-03-29T00:00:02.000Z',
+    toolCalls: [
+      {
+        id: 'call-1',
+        input: { path: 'note.txt' },
+        name: 'read_file',
+      },
+    ],
+  });
+  await store.appendMessage(session.id, {
+    content: 'file contents',
+    createdAt: '2026-03-29T00:00:03.000Z',
+    name: 'read_file',
+    role: 'tool',
+    toolCallId: 'call-1',
   });
 
   assert.deepEqual(
     (await store.listMessages(session.id)).map((message) => message.content),
-    ['hello', 'hi'],
+    ['hello', 'hi', 'file contents'],
   );
   assert.deepEqual(
     (await store.getSession(session.id))?.messages.map((message) => message.content),
-    ['hello', 'hi'],
+    ['hello', 'hi', 'file contents'],
+  );
+
+  const storedMessages = await store.listMessages(session.id);
+
+  assert.deepEqual(storedMessages[1] && 'toolCalls' in storedMessages[1] ? storedMessages[1].toolCalls : undefined, [
+    {
+      id: 'call-1',
+      input: { path: 'note.txt' },
+      name: 'read_file',
+    },
+  ]);
+  assert.equal(
+    storedMessages[2] && 'toolCallId' in storedMessages[2] ? storedMessages[2].toolCallId : undefined,
+    'call-1',
   );
 }
 

@@ -1,10 +1,11 @@
 import { argv, stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
 
-import { createHarness } from '../../../harness/src/index.js';
-import { parseProviderName, type ProviderName } from '../../../harness/src/providers/factory.js';
+import { createHarness } from '../../../harness/index.js';
+import { parseProviderName, type ProviderName } from '../../../harness/providers.js';
 import { getProviderDefinition } from './provider-config.js';
 import { createSessionStore, formatSessionStore, getSessionStoreDefinition } from './session-store.js';
+import { createTools } from './tools.js';
 
 function getProviderName(args: string[]): ProviderName {
   for (let index = 0; index < args.length; index += 1) {
@@ -65,6 +66,7 @@ async function main(): Promise<void> {
     provider: providerDefinition,
     sessionId,
     sessionStore: createSessionStore(sessionStoreDefinition),
+    tools: createTools(),
   });
   const providerModel = getProviderModel(providerDefinition);
 
