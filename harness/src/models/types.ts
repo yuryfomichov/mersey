@@ -1,12 +1,51 @@
-export type ModelMessage = {
-  role: 'user' | 'assistant';
+export type ModelToolInput = {
+  [key: string]: unknown;
+};
+
+export type ModelToolDefinition = {
+  description: string;
+  inputSchema: {
+    type: 'object';
+    properties?: Record<string, unknown>;
+    required?: string[];
+    [key: string]: unknown;
+  };
+  name: string;
+};
+
+export type ModelToolCall = {
+  id: string;
+  input: ModelToolInput;
+  name: string;
+};
+
+export type ModelUserMessage = {
+  role: 'user';
   content: string;
 };
 
+export type ModelAssistantMessage = {
+  role: 'assistant';
+  content: string;
+  toolCalls?: ModelToolCall[];
+};
+
+export type ModelToolResultMessage = {
+  role: 'tool';
+  content: string;
+  isError?: boolean;
+  name: string;
+  toolCallId: string;
+};
+
+export type ModelMessage = ModelUserMessage | ModelAssistantMessage | ModelToolResultMessage;
+
 export type ModelRequest = {
   messages: ModelMessage[];
+  tools?: ModelToolDefinition[];
 };
 
 export type ModelResponse = {
   text: string;
+  toolCalls?: ModelToolCall[];
 };
