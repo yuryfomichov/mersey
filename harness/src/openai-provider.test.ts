@@ -46,7 +46,7 @@ test('OpenAILikeProvider rejects incomplete function calls', async () => {
           parallel_tool_calls: false,
           temperature: null,
           tool_choice: 'auto',
-        } as OpenAI.Responses.Response;
+        } as unknown as OpenAI.Responses.Response;
       },
     },
   };
@@ -71,4 +71,50 @@ test('OpenAILikeProvider rejects incomplete function calls', async () => {
       }),
     /OpenAI response returned incomplete tool calls/,
   );
+});
+
+test('OpenAILikeProvider falls back when a non-tool reply is only whitespace', async () => {
+  const provider = new OpenAILikeProvider({
+    apiKey: 'test-key',
+    baseUrl: 'https://example.com',
+    maxTokens: 256,
+    model: 'gpt-test-model',
+  });
+
+  (
+    provider as unknown as {
+      client: {
+        responses: {
+          create(): Promise<OpenAI.Responses.Response>;
+        };
+      };
+    }
+  ).client = {
+    responses: {
+      async create(): Promise<OpenAI.Responses.Response> {
+        return {
+          created_at: 0,
+          error: null,
+          id: 'resp_456',
+          incomplete_details: null,
+          instructions: null,
+          metadata: null,
+          model: 'gpt-test-model',
+          object: 'response',
+          output: [],
+          output_text: '   ',
+          parallel_tool_calls: false,
+          temperature: null,
+          tool_choice: 'auto',
+        } as unknown as OpenAI.Responses.Response;
+      },
+    },
+  };
+
+  const response = await provider.generate({
+    messages: [{ content: 'hello', role: 'user' }],
+  });
+
+  assert.equal(response.text, 'Model returned no text response.');
+  assert.deepEqual(response.toolCalls, []);
 });

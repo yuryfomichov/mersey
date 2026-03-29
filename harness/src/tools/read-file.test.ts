@@ -21,6 +21,21 @@ test('ReadFileTool reads files relative to the workspace root', async () => {
   }
 });
 
+test('ReadFileTool allows in-workspace paths that start with two dots', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
+
+  try {
+    await writeFile(join(rootDir, '..note.txt'), 'hidden but valid', 'utf8');
+
+    const tool = new ReadFileTool({ workspaceRoot: rootDir });
+    const content = await tool.execute({ path: '..note.txt' });
+
+    assert.equal(content, 'hidden but valid');
+  } finally {
+    await rm(rootDir, { force: true, recursive: true });
+  }
+});
+
 test('ReadFileTool rejects paths outside the workspace root', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
   const workspaceRoot = join(rootDir, 'workspace');

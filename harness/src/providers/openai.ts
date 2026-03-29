@@ -134,10 +134,12 @@ export class OpenAILikeProvider implements ModelProvider {
       model: this.model,
       tools: getOpenAITools(input),
     });
+    const toolCalls = getOpenAIToolCalls(response);
+    const text = response.output_text.trim();
 
     return {
-      text: response.output_text.trim(),
-      toolCalls: getOpenAIToolCalls(response),
+      text: text || (toolCalls?.length ? '' : 'Model returned no text response.'),
+      toolCalls,
     };
   }
 }

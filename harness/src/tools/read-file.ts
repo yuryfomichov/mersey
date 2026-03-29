@@ -1,5 +1,5 @@
 import { readFile, realpath, stat } from 'node:fs/promises';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 
 import type { ModelToolInput } from '../models/index.js';
 import type { Tool } from './types.js';
@@ -18,14 +18,23 @@ function resolveToolPath(path: string, workspaceRoot: string): string {
 async function assertPathInWorkspace(path: string, workspaceRoot: string): Promise<void> {
   const relativeResolvedPath = relative(workspaceRoot, path);
 
-  if (relativeResolvedPath.startsWith('..') || isAbsolute(relativeResolvedPath)) {
+  if (
+    relativeResolvedPath === '..' ||
+    relativeResolvedPath.startsWith(`..${sep}`) ||
+    isAbsolute(relativeResolvedPath)
+  ) {
     throw new Error(`read_file path must stay inside workspace root: ${path}`);
   }
 
   const canonicalPath = await realpath(path);
   const relativeCanonicalPath = relative(workspaceRoot, canonicalPath);
 
-  if (!relativeCanonicalPath || (!relativeCanonicalPath.startsWith('..') && !isAbsolute(relativeCanonicalPath))) {
+  if (
+    !relativeCanonicalPath ||
+    (relativeCanonicalPath !== '..' &&
+      !relativeCanonicalPath.startsWith(`..${sep}`) &&
+      !isAbsolute(relativeCanonicalPath))
+  ) {
     return;
   }
 
