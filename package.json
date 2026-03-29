@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "pnpm build && node --test dist/harness/src/*.test.js",
+    "pretest": "tsc -p tsconfig.json",
+    "test": "node --test dist/harness/src/*.test.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",

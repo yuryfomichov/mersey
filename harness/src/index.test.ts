@@ -4,6 +4,7 @@ import test from 'node:test';
 import { createHarness, MemorySessionStore } from './index.js';
 import { parseProviderName } from './providers/factory.js';
 import { FakeProvider } from './providers/fake.js';
+import type { Message, Session, SessionStore } from './sessions/index.js';
 
 test('createHarness uses the injected provider and appends session history', async () => {
   const provider = new FakeProvider();
@@ -35,4 +36,43 @@ test('parseProviderName supports minimax and rejects unknown providers', () => {
   assert.equal(parseProviderName('minimax'), 'minimax');
   assert.equal(parseProviderName('openai'), 'openai');
   assert.throws(() => parseProviderName('openrouter'), /Unsupported provider/);
+});
+
+test('createHarness retries session initialization after a transient store failure', async () => {
+  class FlakySessionStore implements SessionStore {
+    private failed = false;
+
+    async appendMessage(_sessionId: string, _message: Message): Promise<void> {}
+
+    async createSession(session: Session): Promise<Session> {
+      return {
+        ...session,
+        messages: [],
+      };
+    }
+
+    async getSession(_sessionId: string): Promise<Session | null> {
+      if (!this.failed) {
+        this.failed = true;
+        throw new Error('temporary failure');
+      }
+
+      return null;
+    }
+
+    async listMessages(_sessionId: string): Promise<Message[]> {
+      return [];
+    }
+  }
+
+  const harness = createHarness({
+    providerInstance: new FakeProvider(),
+    sessionStore: new FlakySessionStore(),
+  });
+
+  await assert.rejects(() => harness.sendUserMessage('hello'), /temporary failure/);
+
+  const reply = await harness.sendUserMessage('hello again');
+
+  assert.equal(reply.content, 'reply:hello again');
 });

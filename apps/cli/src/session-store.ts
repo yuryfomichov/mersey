@@ -72,6 +72,6 @@ export function getSessionStoreDefinition(args: string[]): SessionStoreDefinitio
 
   return {
     kind,
-    rootDir: getArgValue(args, '--sessions-dir') ?? join(process.cwd(), 'tmp', 'session'),
+    rootDir: getArgValue(args, '--sessions-dir') ?? join(process.cwd(), 'tmp', 'sessions'),
   };
 }

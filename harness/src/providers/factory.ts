@@ -22,6 +22,10 @@ export type ProviderDefinition =
       name: 'openai';
     };
 
+function getUnsupportedProviderName(definition: ProviderDefinition): string {
+  return String((definition as { name?: unknown }).name ?? 'unknown');
+}
+
 export function createProvider(definition: ProviderDefinition): ModelProvider {
   switch (definition.name) {
     case 'fake':
@@ -31,7 +35,7 @@ export function createProvider(definition: ProviderDefinition): ModelProvider {
     case 'openai':
       return new OpenAIProvider(definition.config);
     default:
-      throw new Error('Unsupported provider definition.');
+      throw new Error(`Unsupported provider definition: ${getUnsupportedProviderName(definition)}`);
   }
 }
 

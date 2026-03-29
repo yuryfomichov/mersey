@@ -24,7 +24,7 @@ export class FilesystemSessionStore implements SessionStore {
   private readonly rootDir: string;
 
   constructor(options: FilesystemSessionStoreOptions = {}) {
-    this.rootDir = options.rootDir ?? join(process.cwd(), '.mersey', 'sessions');
+    this.rootDir = options.rootDir ?? join(process.cwd(), 'tmp', 'sessions');
   }
 
   async appendMessage(sessionId: string, message: Message): Promise<void> {

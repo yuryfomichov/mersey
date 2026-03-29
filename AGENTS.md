@@ -54,3 +54,4 @@ Main goals:
 - Use `oxfmt` and `oxlint`.
 - Keep tests small and important.
 - Prefer `FakeProvider` for non-network tests.
+- Do not use `git` or `gh` without explicit user permission.

@@ -37,15 +37,20 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
     }
 
     initializedSessionPromise = (async () => {
-      const existingSession = await sessionStore.getSession(session.id);
+      try {
+        const existingSession = await sessionStore.getSession(session.id);
 
-      if (existingSession) {
-        session.createdAt = existingSession.createdAt;
-        session.messages = existingSession.messages;
-        return;
+        if (existingSession) {
+          session.createdAt = existingSession.createdAt;
+          session.messages = existingSession.messages;
+          return;
+        }
+
+        await sessionStore.createSession(session);
+      } catch (error: unknown) {
+        initializedSessionPromise = null;
+        throw error;
       }
-
-      await sessionStore.createSession(session);
     })();
 
     return initializedSessionPromise;
