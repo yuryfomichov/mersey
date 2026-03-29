@@ -1,13 +1,20 @@
-import type { Message, Session } from './harness.js';
 import type { ModelProvider } from './models/index.js';
+import type { SessionStore } from './sessions/index.js';
+import type { Message, Session } from './sessions/index.js';
 
-export async function runLoop(session: Session, provider: ModelProvider, content: string): Promise<Message> {
+export async function runLoop(
+  session: Session,
+  sessionStore: SessionStore,
+  provider: ModelProvider,
+  content: string,
+): Promise<Message> {
   const userMessage: Message = {
     role: 'user',
     content,
     createdAt: new Date().toISOString(),
   };
 
+  await sessionStore.appendMessage(session.id, userMessage);
   session.messages.push(userMessage);
 
   const response = await provider.generate({
@@ -23,6 +30,7 @@ export async function runLoop(session: Session, provider: ModelProvider, content
     createdAt: new Date().toISOString(),
   };
 
+  await sessionStore.appendMessage(session.id, assistantMessage);
   session.messages.push(assistantMessage);
   return assistantMessage;
 }

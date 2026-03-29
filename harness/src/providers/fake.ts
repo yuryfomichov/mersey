@@ -7,7 +7,7 @@ export type FakeProviderOptions = {
 
 export class FakeProvider implements ModelProvider {
   readonly model: string;
-  readonly name = 'fake';
+  readonly name: string = 'fake';
   readonly requests: ModelRequest[] = [];
 
   private readonly reply: string | ((input: ModelRequest) => string);

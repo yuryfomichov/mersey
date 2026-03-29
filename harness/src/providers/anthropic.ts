@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 
 import type { ModelProvider, ModelRequest, ModelResponse } from '../models/index.js';
 
-export type AnthropicProviderConfig = {
+export type AnthropicLikeProviderConfig = {
   apiKey: string;
   baseUrl: string;
   model: string;
@@ -19,13 +19,13 @@ function getResponseText(response: Anthropic.Message): string {
   return text || 'Model returned no text response.';
 }
 
-export class AnthropicBaseProvider implements ModelProvider {
+export class AnthropicLikeProvider implements ModelProvider {
   protected readonly client: Anthropic;
   readonly maxTokens: number;
   readonly model: string;
   readonly name: string = 'anthropic-compatible';
 
-  constructor(config: AnthropicProviderConfig) {
+  constructor(config: AnthropicLikeProviderConfig) {
     this.client = new Anthropic({
       apiKey: config.apiKey,
       baseURL: config.baseUrl,
