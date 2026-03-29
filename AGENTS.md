@@ -20,6 +20,8 @@ Main goals:
   - provider-agnostic model contracts
 - `harness/src/providers/`
   - provider implementations and factory
+- `harness/src/sessions/`
+  - session types and storage implementations
 - `apps/cli/`
   - thin terminal app over `harness`
 
@@ -35,7 +37,7 @@ Main goals:
 ## Providers
 
 - Provider selection is string-based through `harness/src/providers/factory.ts`.
-- Supported now: `minimax`, `fake`.
+- Supported now: `minimax`, `openai`, `fake`.
 
 ## Commands
 
@@ -44,6 +46,7 @@ Main goals:
 - `pnpm lint`
 - `pnpm format`
 - `pnpm cli -- --provider minimax`
+- `pnpm cli -- --provider openai`
 - `pnpm cli -- --provider fake`
 
 ## Notes

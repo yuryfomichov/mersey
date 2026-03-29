@@ -3,6 +3,8 @@ import { createInterface } from 'node:readline/promises';
 
 import { createHarness } from '../../../harness/src/index.js';
 import { parseProviderName, type ProviderName } from '../../../harness/src/providers/factory.js';
+import { getProviderDefinition } from './provider-config.js';
+import { createSessionStore, formatSessionStore, getSessionStoreDefinition } from './session-store.js';
 
 function getProviderName(args: string[]): ProviderName {
   for (let index = 0; index < args.length; index += 1) {
@@ -26,13 +28,53 @@ function getProviderName(args: string[]): ProviderName {
   return 'minimax';
 }
 
+function getSessionId(args: string[]): string | undefined {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === '--session-id') {
+      const value = args[index + 1];
+
+      if (!value) {
+        throw new Error('Missing value for --session-id.');
+      }
+
+      return value;
+    }
+
+    if (arg.startsWith('--session-id=')) {
+      return arg.slice('--session-id='.length);
+    }
+  }
+
+  return undefined;
+}
+
+function getProviderModel(provider: ReturnType<typeof getProviderDefinition>): string | null {
+  return 'config' in provider && provider.config?.model ? provider.config.model : null;
+}
+
 async function main(): Promise<void> {
-  const provider = getProviderName(argv.slice(2));
+  const args = argv.slice(2);
+  const providerName = getProviderName(args);
+  const providerDefinition = getProviderDefinition(providerName);
+  const sessionId = getSessionId(args);
+  const sessionStoreDefinition = getSessionStoreDefinition(args);
   const cli = createInterface({ input, output });
-  const harness = createHarness({ provider });
+  const harness = createHarness({
+    provider: providerDefinition,
+    sessionId,
+    sessionStore: createSessionStore(sessionStoreDefinition),
+  });
+  const providerModel = getProviderModel(providerDefinition);
 
   output.write('Mersey CLI\n');
-  output.write(`provider: ${provider}\n`);
+  output.write(`provider: ${providerName}\n`);
+  if (providerModel) {
+    output.write(`model: ${providerModel}\n`);
+  }
+  output.write(`session: ${harness.session.id}\n`);
+  output.write(`${formatSessionStore(sessionStoreDefinition)}\n`);
   output.write("Type a message or 'exit' to quit.\n\n");
 
   try {

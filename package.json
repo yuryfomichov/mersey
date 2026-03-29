@@ -13,7 +13,8 @@
     "cli": "node --env-file=.env dist/apps/cli/src/index.js"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "0.80.0"
+    "@anthropic-ai/sdk": "0.80.0",
+    "openai": "6.33.0"
   },
   "devDependencies": {
     "@types/node": "25.5.0",
