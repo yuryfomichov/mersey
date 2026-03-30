@@ -16,7 +16,7 @@ test('WriteFileTool writes files relative to the workspace root', async () => {
     const content = await readFile(join(rootDir, 'notes/note.txt'), 'utf8');
 
     assert.equal(content, 'hello from write');
-    assert.match(result, /^Wrote file: .*notes\/note\.txt$/);
+    assert.match(result.replaceAll('\\', '/'), /^Wrote file: .*notes\/note\.txt$/);
   } finally {
     await rm(rootDir, { force: true, recursive: true });
   }

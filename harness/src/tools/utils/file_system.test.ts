@@ -29,7 +29,7 @@ test('resolvePathInWorkspace allows missing paths inside the workspace when allo
       toolName: 'test_tool',
     });
 
-    assert.match(resolvedPath, /notes\/new\.txt$/);
+    assert.ok(resolvedPath.endsWith(join('notes', 'new.txt')));
   } finally {
     await rm(rootDir, { force: true, recursive: true });
   }
