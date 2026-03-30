@@ -1,8 +1,10 @@
-import { readFile, realpath, stat } from 'node:fs/promises';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { z } from 'zod';
 
 import type { ModelToolInput } from '../models/index.js';
 import type { Tool } from './types.js';
+import { assertFileSizeWithinLimit, resolvePathInWorkspace } from './utils/file_system.js';
+import { parseToolInput, toToolInputSchema } from './utils/schema.js';
 
 const DEFAULT_MAX_BYTES = 64 * 1024;
 
@@ -11,56 +13,16 @@ export type ReadFileToolOptions = {
   workspaceRoot: string;
 };
 
-function resolveToolPath(path: string, workspaceRoot: string): string {
-  return isAbsolute(path) ? path : resolve(workspaceRoot, path);
-}
-
-async function assertPathInWorkspace(path: string, workspaceRoot: string): Promise<void> {
-  const relativeResolvedPath = relative(workspaceRoot, path);
-
-  if (
-    relativeResolvedPath === '..' ||
-    relativeResolvedPath.startsWith(`..${sep}`) ||
-    isAbsolute(relativeResolvedPath)
-  ) {
-    throw new Error(`read_file path must stay inside workspace root: ${path}`);
-  }
-
-  const canonicalPath = await realpath(path);
-  const relativeCanonicalPath = relative(workspaceRoot, canonicalPath);
-
-  if (
-    !relativeCanonicalPath ||
-    (relativeCanonicalPath !== '..' &&
-      !relativeCanonicalPath.startsWith(`..${sep}`) &&
-      !isAbsolute(relativeCanonicalPath))
-  ) {
-    return;
-  }
-
-  throw new Error(`read_file path must stay inside workspace root: ${path}`);
-}
-
-async function assertFileSizeWithinLimit(path: string, maxBytes: number): Promise<void> {
-  const file = await stat(path);
-
-  if (file.size > maxBytes) {
-    throw new Error(`read_file refuses files larger than ${maxBytes} bytes: ${path}`);
-  }
-}
-
 export class ReadFileTool implements Tool {
+  private static readonly input = z.object({
+    path: z
+      .string({ error: 'read_file requires a string path.' })
+      .min(1, { error: 'read_file requires a string path.' })
+      .describe('Absolute path or a path relative to the workspace root.'),
+  });
+
   readonly description = 'Read a UTF-8 text file from disk.';
-  readonly inputSchema = {
-    properties: {
-      path: {
-        description: 'Absolute path or a path relative to the workspace root.',
-        type: 'string',
-      },
-    },
-    required: ['path'],
-    type: 'object' as const,
-  };
+  readonly inputSchema = toToolInputSchema(ReadFileTool.input);
   readonly name = 'read_file';
 
   private readonly maxBytes: number;
@@ -72,17 +34,11 @@ export class ReadFileTool implements Tool {
   }
 
   async execute(input: ModelToolInput): Promise<string> {
-    const path = input.path;
+    const { path } = parseToolInput(ReadFileTool.input, input);
 
-    if (typeof path !== 'string' || !path) {
-      throw new Error('read_file requires a string path.');
-    }
+    const resolvedPath = await resolvePathInWorkspace(path, this.workspaceRoot, { toolName: this.name });
 
-    const canonicalWorkspaceRoot = await realpath(this.workspaceRoot);
-    const resolvedPath = resolveToolPath(path, canonicalWorkspaceRoot);
-
-    await assertPathInWorkspace(resolvedPath, canonicalWorkspaceRoot);
-    await assertFileSizeWithinLimit(resolvedPath, this.maxBytes);
+    await assertFileSizeWithinLimit(resolvedPath, this.maxBytes, this.name);
     return readFile(resolvedPath, 'utf8');
   }
 }

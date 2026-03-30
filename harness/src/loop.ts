@@ -79,6 +79,14 @@ export async function runLoop({
       tools: toolDefinitions,
     });
 
+    if (response.toolCalls?.length) {
+      toolIterations += 1;
+
+      if (toolIterations > maxToolIterations) {
+        throw new Error(`Tool loop exceeded ${maxToolIterations} iterations.`);
+      }
+    }
+
     const assistantMessage: Message = {
       content: response.text,
       createdAt: new Date().toISOString(),
@@ -90,12 +98,6 @@ export async function runLoop({
 
     if (!response.toolCalls?.length) {
       return assistantMessage;
-    }
-
-    toolIterations += 1;
-
-    if (toolIterations > maxToolIterations) {
-      throw new Error(`Tool loop exceeded ${maxToolIterations} iterations.`);
     }
 
     for (const toolCall of response.toolCalls) {
