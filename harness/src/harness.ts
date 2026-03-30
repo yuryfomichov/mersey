@@ -26,6 +26,8 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
     throw new Error('Missing provider. Pass providerInstance or provider config to createHarness().');
   }
 
+  const resolvedProvider = provider;
+
   const session: Session = {
     id: options.sessionId ?? 'local-session',
     createdAt: new Date().toISOString(),
@@ -33,6 +35,8 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
   };
 
   let initializedSessionPromise: Promise<void> | null = null;
+  // Queue sendUserMessage calls so one session cannot mutate its transcript concurrently.
+  let sendQueue: Promise<void> = Promise.resolve();
 
   async function ensureSession(): Promise<void> {
     if (initializedSessionPromise) {
@@ -62,17 +66,34 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
     return initializedSessionPromise;
   }
 
-  return {
-    session,
-    async sendUserMessage(content: string): Promise<Message> {
-      await ensureSession();
-      return runLoop({
+  async function enqueueSend(content: string): Promise<Message> {
+    const waitForTurn = sendQueue;
+    let releaseTurn!: () => void;
+
+    sendQueue = new Promise((resolve) => {
+      releaseTurn = resolve;
+    });
+
+    await waitForTurn;
+
+    try {
+      return await runLoop({
         content,
-        provider,
+        provider: resolvedProvider,
         session,
         sessionStore,
         tools,
       });
+    } finally {
+      releaseTurn();
+    }
+  }
+
+  return {
+    session,
+    async sendUserMessage(content: string): Promise<Message> {
+      await ensureSession();
+      return enqueueSend(content);
     },
   };
 }

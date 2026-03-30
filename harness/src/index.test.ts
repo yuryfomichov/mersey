@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 
 import { createHarness } from './harness.js';
+import type { ModelProvider, ModelRequest, ModelResponse } from './models/index.js';
 import { parseProviderName } from './providers/factory.js';
 import { FakeProvider } from './providers/fake.js';
 import { MemorySessionStore } from './sessions.js';
@@ -185,4 +187,77 @@ test('createHarness executes read_file tool calls and continues the loop', async
   } finally {
     await rm(rootDir, { force: true, recursive: true });
   }
+});
+
+test('createHarness serializes concurrent sendUserMessage calls for one session', async () => {
+  let releaseFirstRequest!: () => void;
+  let firstRequestStarted!: () => void;
+
+  const firstRequestStartedPromise = new Promise<void>((resolve) => {
+    firstRequestStarted = resolve;
+  });
+  const releaseFirstRequestPromise = new Promise<void>((resolve) => {
+    releaseFirstRequest = resolve;
+  });
+
+  const requests: ModelRequest[] = [];
+  const provider: ModelProvider = {
+    model: 'fake-model',
+    name: 'fake',
+    async generate(input: ModelRequest): Promise<ModelResponse> {
+      requests.push(input);
+
+      const lastMessage = input.messages.at(-1);
+
+      if (lastMessage?.role !== 'user') {
+        throw new Error('Expected the last message to be a user message.');
+      }
+
+      if (lastMessage.content === 'first') {
+        firstRequestStarted();
+        await releaseFirstRequestPromise;
+      }
+
+      return { text: `reply:${lastMessage.content}` };
+    },
+  };
+  const harness = createHarness({
+    providerInstance: provider,
+    sessionId: 'concurrent-session',
+    sessionStore: new MemorySessionStore(),
+  });
+
+  const firstReplyPromise = harness.sendUserMessage('first');
+
+  await firstRequestStartedPromise;
+
+  const secondReplyPromise = harness.sendUserMessage('second');
+
+  await delay(0);
+  assert.equal(requests.length, 1);
+
+  releaseFirstRequest();
+
+  const [firstReply, secondReply] = await Promise.all([firstReplyPromise, secondReplyPromise]);
+
+  assert.equal(firstReply.content, 'reply:first');
+  assert.equal(secondReply.content, 'reply:second');
+  assert.equal(requests.length, 2);
+  assert.deepEqual(
+    requests[1]?.messages,
+    [
+      { content: 'first', role: 'user' },
+      { content: 'reply:first', role: 'assistant', toolCalls: undefined },
+      { content: 'second', role: 'user' },
+    ],
+  );
+  assert.deepEqual(
+    harness.session.messages.map((message) => ({ content: message.content, role: message.role })),
+    [
+      { content: 'first', role: 'user' },
+      { content: 'reply:first', role: 'assistant' },
+      { content: 'second', role: 'user' },
+      { content: 'reply:second', role: 'assistant' },
+    ],
+  );
 });

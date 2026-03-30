@@ -28,6 +28,7 @@ Main goals:
 ## Architecture
 
 - Always think about architecture and refactoring before adding new code.
+- Before adding a new helper or tool-specific logic, check nearby code for reusable pieces and extract the smallest shared abstraction that improves the shape of the system.
 - Prefer improving the shape of the system first if that avoids piling messy code on top.
 - CLI owns the user interaction loop.
 - `harness` owns the model turn loop.
@@ -53,5 +54,6 @@ Main goals:
 
 - Use `oxfmt` and `oxlint`.
 - Keep tests small and important.
+- Add or update tests with behavior changes.
 - Prefer `FakeProvider` for non-network tests.
 - Do not use `git` or `gh` without explicit user permission.
