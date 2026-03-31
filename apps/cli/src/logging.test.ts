@@ -49,6 +49,13 @@ test('getCliLogPaths rejects traversal-style session ids', () => {
   assert.throws(() => getCliLogPaths('../../outside', '/workspace/project'), /Invalid session id/);
 });
 
+test('getCliLogPaths does not echo the raw invalid session id in the error', () => {
+  assert.throws(
+    () => getCliLogPaths('bad\nvalue', '/workspace/project'),
+    (error: unknown) => error instanceof Error && error.message === 'Invalid session id.',
+  );
+});
+
 test('writeCliRunMarker appends a session_started marker to both log files', async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'mersey-cli-'));
 
@@ -70,4 +77,32 @@ test('writeCliRunMarker appends a session_started marker to both log files', asy
   } finally {
     await rm(cwd, { force: true, recursive: true });
   }
+});
+
+test('writeCliRunMarker swallows individual logger failures', async () => {
+  const events: Array<Record<string, unknown>> = [];
+
+  const marker = await writeCliRunMarker(
+    [
+      {
+        log(event): void {
+          events.push(event as Record<string, unknown>);
+        },
+      },
+      {
+        async log(): Promise<void> {
+          throw new Error('logger failed');
+        },
+      },
+    ],
+    {
+      debug: false,
+      provider: 'fake',
+      sessionId: 'session-999',
+    },
+  );
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.type, 'session_started');
+  assert.equal(marker.sessionId, 'session-999');
 });

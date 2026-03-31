@@ -61,7 +61,15 @@ export async function writeCliRunMarker(loggers: HarnessLogger[], marker: Omit<C
     type: 'session_started',
   } as const;
 
-  await Promise.all(loggers.map((logger) => logger.log(event)));
+  await Promise.allSettled(
+    loggers.map(async (logger) => {
+      try {
+        await logger.log(event);
+      } catch {
+        // CLI logging is best-effort and must not block startup.
+      }
+    }),
+  );
 
   return {
     ...marker,
