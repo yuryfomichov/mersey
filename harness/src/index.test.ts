@@ -11,7 +11,7 @@ import { parseProviderName } from './providers/factory.js';
 import { FakeProvider } from './providers/fake.js';
 import { MemorySessionStore } from './sessions.js';
 import type { Message, Session, SessionStore } from './sessions/index.js';
-import { ReadFileTool } from './tools.js';
+import { ReadFileTool, RunCommandTool } from './tools.js';
 
 test('createHarness uses the injected provider and appends session history', async () => {
   const provider = new FakeProvider();
@@ -141,8 +141,20 @@ test('createHarness executes read_file tool calls and continues the loop', async
           };
         }
 
-        assert.equal(input.messages.at(-1)?.role, 'tool');
-        assert.equal(input.messages.at(-1)?.content, 'hello from file');
+        const lastMessage = input.messages.at(-1);
+
+        assert.equal(lastMessage?.role, 'tool');
+        assert.equal(lastMessage?.content, 'hello from file');
+        assert.deepEqual(
+          lastMessage?.role === 'tool' && lastMessage.data && 'truncated' in lastMessage.data
+            ? lastMessage.data.truncated
+            : undefined,
+          false,
+        );
+        assert.match(
+          String(lastMessage?.role === 'tool' && lastMessage.data && 'path' in lastMessage.data ? lastMessage.data.path : ''),
+          /note\.txt$/,
+        );
 
         return {
           text: 'done:hello from file',
@@ -153,7 +165,8 @@ test('createHarness executes read_file tool calls and continues the loop', async
       providerInstance: provider,
       sessionId: 'tool-session',
       sessionStore: new MemorySessionStore(),
-      tools: [new ReadFileTool({ workspaceRoot: rootDir })],
+      toolPolicy: { workspaceRoot: rootDir },
+      tools: [new ReadFileTool()],
     });
 
     const reply = await harness.sendUserMessage('read the note');
@@ -260,4 +273,42 @@ test('createHarness serializes concurrent sendUserMessage calls for one session'
       { content: 'reply:second', role: 'assistant' },
     ],
   );
+});
+
+test('createHarness falls back cleanly after a blank post-tool reply', async () => {
+  let callCount = 0;
+  const provider = new FakeProvider({
+    reply: () => {
+      callCount += 1;
+
+      if (callCount === 1) {
+        return {
+          text: '',
+          toolCalls: [
+            {
+              id: 'call-pwd-1',
+              input: { args: ['pwd'], command: 'pwd' },
+              name: 'run_command',
+            },
+          ],
+        };
+      }
+
+      return {
+        text: '   ',
+      };
+    },
+  });
+  const harness = createHarness({
+    providerInstance: provider,
+    sessionId: 'pwd-recovery-session',
+    sessionStore: new MemorySessionStore(),
+    toolPolicy: { commandAllowlist: ['pwd'], workspaceRoot: process.cwd() },
+    tools: [new RunCommandTool()],
+  });
+
+  const reply = await harness.sendUserMessage('what is your current directory?');
+
+  assert.equal(reply.role, 'assistant');
+  assert.equal(reply.content, 'I could not produce a response for that request.');
 });

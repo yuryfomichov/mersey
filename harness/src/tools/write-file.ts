@@ -4,13 +4,9 @@ import { dirname } from 'node:path';
 import { z } from 'zod';
 
 import type { ModelToolInput } from '../models/index.js';
-import type { Tool } from './types.js';
-import { resolvePathInWorkspace } from './utils/file_system.js';
+import type { ToolContext } from './context.js';
+import type { Tool, ToolExecuteResult } from './types.js';
 import { parseToolInput, toToolInputSchema } from './utils/schema.js';
-
-export type WriteFileToolOptions = {
-  workspaceRoot: string;
-};
 
 export class WriteFileTool implements Tool {
   private static readonly input = z.object({
@@ -28,19 +24,11 @@ export class WriteFileTool implements Tool {
   readonly inputSchema = toToolInputSchema(WriteFileTool.input);
   readonly name = 'write_file';
 
-  private readonly workspaceRoot: string;
-
-  constructor(options: WriteFileToolOptions) {
-    this.workspaceRoot = options.workspaceRoot;
-  }
-
-  async execute(input: ModelToolInput): Promise<string> {
+  async execute(input: ModelToolInput, context: ToolContext): Promise<ToolExecuteResult> {
     const { content, overwrite, path } = parseToolInput(WriteFileTool.input, input);
 
-    const resolvedPath = await resolvePathInWorkspace(path, this.workspaceRoot, {
-      allowMissing: true,
-      toolName: this.name,
-    });
+    const resolvedPath = await context.files.resolveForWrite(path, this.name);
+    context.files.assertWriteSize(content, this.name);
 
     await mkdir(dirname(resolvedPath), { recursive: true });
 
@@ -56,6 +44,12 @@ export class WriteFileTool implements Tool {
       throw error;
     }
 
-    return `Wrote file: ${resolvedPath}`;
+    return {
+      content: `Wrote file: ${resolvedPath}`,
+      data: {
+        overwritten: Boolean(overwrite),
+        path: resolvedPath,
+      },
+    };
   }
 }

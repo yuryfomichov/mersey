@@ -137,7 +137,7 @@ export class AnthropicLikeProvider implements ModelProvider {
     const text = getResponseText(response);
 
     return {
-      text: text || (toolCalls.length > 0 ? '' : 'Model returned no text response.'),
+      text: text || (toolCalls.length > 0 ? '' : 'I could not produce a response for that request.'),
       toolCalls,
     };
   }

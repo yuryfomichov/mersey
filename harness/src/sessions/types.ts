@@ -17,6 +17,7 @@ export type ToolMessage = {
   role: 'tool';
   content: string;
   createdAt: string;
+  data?: Record<string, unknown>;
   isError?: boolean;
   name: string;
   toolCallId: string;

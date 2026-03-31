@@ -3,9 +3,9 @@ import { createInterface } from 'node:readline/promises';
 
 import { createHarness } from '../../../harness/index.js';
 import { parseProviderName, type ProviderName } from '../../../harness/providers.js';
+import { EditFileTool, ReadFileTool, RunCommandTool, WriteFileTool } from '../../../harness/tools.js';
 import { getProviderDefinition } from './provider-config.js';
 import { createSessionStore, formatSessionStore, getSessionStoreDefinition } from './session-store.js';
-import { createTools } from './tools.js';
 
 function getProviderName(args: string[]): ProviderName {
   for (let index = 0; index < args.length; index += 1) {
@@ -66,7 +66,15 @@ async function main(): Promise<void> {
     provider: providerDefinition,
     sessionId,
     sessionStore: createSessionStore(sessionStoreDefinition),
-    tools: createTools(),
+    toolPolicy: {
+      commandAllowlist: ['git', 'ls', 'pwd'],
+      defaultCommandTimeoutMs: 5_000,
+      maxCommandOutputBytes: 16 * 1024,
+      maxCommandTimeoutMs: 15_000,
+      maxToolResultBytes: 16 * 1024,
+      workspaceRoot: process.cwd(),
+    },
+    tools: [new ReadFileTool(), new WriteFileTool(), new EditFileTool(), new RunCommandTool()],
   });
   const providerModel = getProviderModel(providerDefinition);
 
