@@ -138,7 +138,7 @@ export class OpenAILikeProvider implements ModelProvider {
     const text = response.output_text.trim();
 
     return {
-      text: text || (toolCalls?.length ? '' : 'Model returned no text response.'),
+      text: text || (toolCalls?.length ? '' : 'I could not produce a response for that request.'),
       toolCalls,
     };
   }

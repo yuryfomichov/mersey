@@ -3,13 +3,9 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { z } from 'zod';
 
 import type { ModelToolInput } from '../models/index.js';
-import type { Tool } from './types.js';
-import { resolvePathInWorkspace } from './utils/file_system.js';
+import type { ToolContext } from './context.js';
+import type { Tool, ToolExecuteResult } from './types.js';
 import { parseToolInput, toToolInputSchema } from './utils/schema.js';
-
-export type EditFileToolOptions = {
-  workspaceRoot: string;
-};
 
 function getMatchCount(content: string, oldText: string): number {
   let count = 0;
@@ -46,16 +42,12 @@ export class EditFileTool implements Tool {
   readonly inputSchema = toToolInputSchema(EditFileTool.input);
   readonly name = 'edit_file';
 
-  private readonly workspaceRoot: string;
-
-  constructor(options: EditFileToolOptions) {
-    this.workspaceRoot = options.workspaceRoot;
-  }
-
-  async execute(input: ModelToolInput): Promise<string> {
+  async execute(input: ModelToolInput, context: ToolContext): Promise<ToolExecuteResult> {
     const { newText, oldText, path } = parseToolInput(EditFileTool.input, input);
 
-    const resolvedPath = await resolvePathInWorkspace(path, this.workspaceRoot, { toolName: this.name });
+    const resolvedPath = await context.files.resolveForRead(path, this.name);
+    await context.files.resolveForWrite(path, this.name);
+    await context.files.assertReadSize(resolvedPath, this.name);
     const content = await readFile(resolvedPath, 'utf8');
     const matchCount = getMatchCount(content, oldText);
 
@@ -67,7 +59,15 @@ export class EditFileTool implements Tool {
       throw new Error(`edit_file requires oldText to match exactly once: ${resolvedPath}`);
     }
 
-    await writeFile(resolvedPath, content.replace(oldText, newText), 'utf8');
-    return `Edited file: ${resolvedPath}`;
+    const nextContent = content.replace(oldText, newText);
+
+    context.files.assertWriteSize(nextContent, this.name);
+    await writeFile(resolvedPath, nextContent, 'utf8');
+    return {
+      content: `Edited file: ${resolvedPath}`,
+      data: {
+        path: resolvedPath,
+      },
+    };
   }
 }

@@ -1,2 +1,2 @@
-export { EditFileTool, ReadFileTool, WriteFileTool } from './src/tools/index.js';
-export type { EditFileToolOptions, ReadFileToolOptions, Tool, WriteFileToolOptions } from './src/tools/index.js';
+export { EditFileTool, ReadFileTool, RunCommandTool, WriteFileTool } from './src/tools/index.js';
+export type { Tool, ToolContext, ToolExecuteResult, ToolPolicy } from './src/tools/index.js';

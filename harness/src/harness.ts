@@ -2,7 +2,7 @@ import { runLoop } from './loop.js';
 import type { ModelProvider } from './models/index.js';
 import { createProvider, type ProviderDefinition } from './providers/index.js';
 import { MemorySessionStore, type Message, type Session, type SessionStore } from './sessions/index.js';
-import type { Tool } from './tools/index.js';
+import type { Tool, ToolPolicy } from './tools/index.js';
 
 export type Harness = {
   session: Session;
@@ -14,12 +14,14 @@ export type CreateHarnessOptions = {
   provider?: ProviderDefinition;
   sessionStore?: SessionStore;
   sessionId?: string;
+  toolPolicy?: ToolPolicy;
   tools?: Tool[];
 };
 
 export function createHarness(options: CreateHarnessOptions = {}): Harness {
   const provider = options.providerInstance ?? (options.provider ? createProvider(options.provider) : null);
   const sessionStore = options.sessionStore ?? new MemorySessionStore();
+  const toolPolicy = options.toolPolicy ?? { workspaceRoot: process.cwd() };
   const tools = options.tools ?? [];
 
   if (!provider) {
@@ -82,6 +84,7 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
         provider: resolvedProvider,
         session,
         sessionStore,
+        toolPolicy,
         tools,
       });
     } finally {

@@ -2,8 +2,8 @@ import type { ModelProvider } from './models/index.js';
 import type { ModelMessage } from './models/index.js';
 import type { SessionStore } from './sessions/index.js';
 import type { Message, Session } from './sessions/index.js';
-import { executeToolCall, getToolDefinitions, getToolMap } from './tools/index.js';
-import type { Tool } from './tools/index.js';
+import { createToolContext, executeToolCall, getToolDefinitions, getToolMap } from './tools/index.js';
+import type { Tool, ToolPolicy } from './tools/index.js';
 
 export type RunLoopOptions = {
   maxToolIterations?: number;
@@ -15,16 +15,30 @@ export type RunLoopInput = {
   provider: ModelProvider;
   session: Session;
   sessionStore: SessionStore;
+  toolPolicy: ToolPolicy;
   tools: Tool[];
 };
 
 const DEFAULT_MAX_TOOL_ITERATIONS = 8;
+
+function getFallbackAssistantContent(response: { text: string; toolCalls?: { length: number } }): string {
+  if (response.text.trim()) {
+    return response.text;
+  }
+
+  if (response.toolCalls?.length) {
+    return '';
+  }
+
+  return 'I could not produce a response for that request.';
+}
 
 function toModelMessages(messages: Message[]): ModelMessage[] {
   return messages.map((message) => {
     if (message.role === 'tool') {
       return {
         content: message.content,
+        data: message.data,
         isError: message.isError,
         name: message.name,
         role: 'tool',
@@ -58,6 +72,7 @@ export async function runLoop({
   provider,
   session,
   sessionStore,
+  toolPolicy,
   tools,
 }: RunLoopInput): Promise<Message> {
   const userMessage: Message = {
@@ -70,6 +85,7 @@ export async function runLoop({
 
   const toolDefinitions = getToolDefinitions(tools);
   const toolsByName = getToolMap(tools);
+  const toolContext = createToolContext(toolPolicy);
   const maxToolIterations = options?.maxToolIterations ?? DEFAULT_MAX_TOOL_ITERATIONS;
   let toolIterations = 0;
 
@@ -88,7 +104,7 @@ export async function runLoop({
     }
 
     const assistantMessage: Message = {
-      content: response.text,
+      content: getFallbackAssistantContent(response),
       createdAt: new Date().toISOString(),
       role: 'assistant',
       toolCalls: response.toolCalls,
@@ -101,7 +117,7 @@ export async function runLoop({
     }
 
     for (const toolCall of response.toolCalls) {
-      const toolResult = await executeToolCall(toolCall, toolsByName);
+      const toolResult = await executeToolCall(toolCall, toolsByName, toolContext);
 
       await appendMessage(session, sessionStore, {
         ...toolResult,

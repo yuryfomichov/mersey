@@ -2,16 +2,9 @@ import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
 
 import type { ModelToolInput } from '../models/index.js';
-import type { Tool } from './types.js';
-import { assertFileSizeWithinLimit, resolvePathInWorkspace } from './utils/file_system.js';
+import type { ToolContext } from './context.js';
+import type { Tool, ToolExecuteResult } from './types.js';
 import { parseToolInput, toToolInputSchema } from './utils/schema.js';
-
-const DEFAULT_MAX_BYTES = 64 * 1024;
-
-export type ReadFileToolOptions = {
-  maxBytes?: number;
-  workspaceRoot: string;
-};
 
 export class ReadFileTool implements Tool {
   private static readonly input = z.object({
@@ -25,20 +18,20 @@ export class ReadFileTool implements Tool {
   readonly inputSchema = toToolInputSchema(ReadFileTool.input);
   readonly name = 'read_file';
 
-  private readonly maxBytes: number;
-  private readonly workspaceRoot: string;
-
-  constructor(options: ReadFileToolOptions) {
-    this.maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
-    this.workspaceRoot = options.workspaceRoot;
-  }
-
-  async execute(input: ModelToolInput): Promise<string> {
+  async execute(input: ModelToolInput, context: ToolContext): Promise<ToolExecuteResult> {
     const { path } = parseToolInput(ReadFileTool.input, input);
 
-    const resolvedPath = await resolvePathInWorkspace(path, this.workspaceRoot, { toolName: this.name });
+    const resolvedPath = await context.files.resolveForRead(path, this.name);
+    await context.files.assertReadSize(resolvedPath, this.name);
+    const content = await readFile(resolvedPath, 'utf8');
+    const limited = context.output.limitResult(content);
 
-    await assertFileSizeWithinLimit(resolvedPath, this.maxBytes, this.name);
-    return readFile(resolvedPath, 'utf8');
+    return {
+      content: limited.text,
+      data: {
+        path: resolvedPath,
+        truncated: limited.truncated,
+      },
+    };
   }
 }

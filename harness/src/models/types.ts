@@ -33,6 +33,7 @@ export type ModelAssistantMessage = {
 export type ModelToolResultMessage = {
   role: 'tool';
   content: string;
+  data?: Record<string, unknown>;
   isError?: boolean;
   name: string;
   toolCallId: string;

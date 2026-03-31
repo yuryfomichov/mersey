@@ -35,6 +35,7 @@ test('runLoop does not persist assistant tool calls when the tool iteration cap 
         }),
         session,
         sessionStore,
+        toolPolicy: { workspaceRoot: process.cwd() },
         tools: [],
       }),
     /Tool loop exceeded 0 iterations/,

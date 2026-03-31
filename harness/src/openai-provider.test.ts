@@ -115,6 +115,6 @@ test('OpenAILikeProvider falls back when a non-tool reply is only whitespace', a
     messages: [{ content: 'hello', role: 'user' }],
   });
 
-  assert.equal(response.text, 'Model returned no text response.');
+  assert.equal(response.text, 'I could not produce a response for that request.');
   assert.deepEqual(response.toolCalls, []);
 });
