@@ -125,6 +125,7 @@ export class AnthropicLikeProvider implements ModelProvider {
       max_tokens: this.maxTokens,
       messages: getAnthropicMessages(input),
       model: this.model,
+      system: input.systemPrompt,
       tools: getAnthropicTools(input),
     });
     const toolCalls = response.content

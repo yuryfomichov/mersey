@@ -130,6 +130,7 @@ export class OpenAILikeProvider implements ModelProvider {
   async generate(input: ModelRequest): Promise<ModelResponse> {
     const response = await this.client.responses.create({
       input: getOpenAIInputItems(input),
+      instructions: input.systemPrompt,
       max_output_tokens: this.maxTokens,
       model: this.model,
       tools: getOpenAITools(input),

@@ -15,6 +15,7 @@ export type RunLoopInput = {
   provider: ModelProvider;
   session: Session;
   sessionStore: SessionStore;
+  systemPrompt?: string;
   toolPolicy: ToolPolicy;
   tools: Tool[];
 };
@@ -72,6 +73,7 @@ export async function runLoop({
   provider,
   session,
   sessionStore,
+  systemPrompt,
   toolPolicy,
   tools,
 }: RunLoopInput): Promise<Message> {
@@ -83,6 +85,7 @@ export async function runLoop({
 
   await appendMessage(session, sessionStore, userMessage);
 
+  const resolvedSystemPrompt = systemPrompt?.trim() ? systemPrompt : undefined;
   const toolDefinitions = getToolDefinitions(tools);
   const toolsByName = getToolMap(tools);
   const toolContext = createToolContext(toolPolicy);
@@ -92,6 +95,7 @@ export async function runLoop({
   while (true) {
     const response = await provider.generate({
       messages: toModelMessages(session.messages),
+      systemPrompt: resolvedSystemPrompt,
       tools: toolDefinitions,
     });
 
