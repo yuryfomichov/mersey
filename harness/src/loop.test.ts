@@ -44,3 +44,55 @@ test('runLoop does not persist assistant tool calls when the tool iteration cap 
   assert.deepEqual(session.messages.map((message) => message.role), ['user']);
   assert.deepEqual((await sessionStore.listMessages(session.id)).map((message) => message.role), ['user']);
 });
+
+test('runLoop swallows event sink failures', async () => {
+  const sessionStore = new MemorySessionStore();
+  const session: Session = {
+    createdAt: new Date().toISOString(),
+    id: 'event-sink-session',
+    messages: [],
+  };
+
+  await sessionStore.createSession(session);
+
+  const reply = await runLoop({
+    content: 'hello',
+    emitEvent(): void {
+      throw new Error('sink failed');
+    },
+    provider: new FakeProvider(),
+    session,
+    sessionStore,
+    toolPolicy: { workspaceRoot: process.cwd() },
+    tools: [],
+  });
+
+  assert.equal(reply.content, 'reply:hello');
+  assert.deepEqual(session.messages.map((message) => message.role), ['user', 'assistant']);
+});
+
+test('runLoop owns fallback text when provider returns an empty non-tool reply', async () => {
+  const sessionStore = new MemorySessionStore();
+  const session: Session = {
+    createdAt: new Date().toISOString(),
+    id: 'fallback-session',
+    messages: [],
+  };
+
+  await sessionStore.createSession(session);
+
+  const reply = await runLoop({
+    content: 'hello',
+    provider: new FakeProvider({
+      reply: {
+        text: '',
+      },
+    }),
+    session,
+    sessionStore,
+    toolPolicy: { workspaceRoot: process.cwd() },
+    tools: [],
+  });
+
+  assert.equal(reply.content, 'I could not produce a response for that request.');
+});

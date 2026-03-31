@@ -217,3 +217,35 @@ test('AnthropicLikeProvider groups consecutive tool results into one user messag
     role: 'user',
   });
 });
+
+test('AnthropicLikeProvider leaves empty non-tool replies for the loop to normalize', async () => {
+  const provider = new AnthropicLikeProvider({
+    apiKey: 'test-key',
+    baseUrl: 'https://example.com',
+    maxTokens: 256,
+    model: 'claude-test-model',
+  });
+
+  (
+    provider as unknown as {
+      client: {
+        messages: {
+          create(): Promise<Anthropic.Message>;
+        };
+      };
+    }
+  ).client = {
+    messages: {
+      async create(): Promise<Anthropic.Message> {
+        return createAnthropicMessage([{ citations: null, text: '   ', type: 'text' }]);
+      },
+    },
+  };
+
+  const response = await provider.generate({
+    messages: [{ content: 'hello', role: 'user' }],
+  });
+
+  assert.equal(response.text, '');
+  assert.deepEqual(response.toolCalls, []);
+});

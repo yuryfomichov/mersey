@@ -1,6 +1,10 @@
 import type { SessionStore } from './store.js';
 import type { Message, Session } from './types.js';
 
+function cloneMessage<T extends Message>(message: T): T {
+  return structuredClone(message);
+}
+
 export class MemorySessionStore implements SessionStore {
   private readonly messages = new Map<string, Message[]>();
   private readonly sessions = new Map<string, Session>();
@@ -8,7 +12,7 @@ export class MemorySessionStore implements SessionStore {
   async appendMessage(sessionId: string, message: Message): Promise<void> {
     const messages = this.messages.get(sessionId) ?? [];
 
-    messages.push({ ...message });
+    messages.push(cloneMessage(message));
     this.messages.set(sessionId, messages);
   }
 
@@ -48,6 +52,6 @@ export class MemorySessionStore implements SessionStore {
   }
 
   async listMessages(sessionId: string): Promise<Message[]> {
-    return (this.messages.get(sessionId) ?? []).map((message) => ({ ...message }));
+    return (this.messages.get(sessionId) ?? []).map((message) => cloneMessage(message));
   }
 }

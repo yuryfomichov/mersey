@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { appendFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -137,4 +137,71 @@ test('FilesystemSessionStore createSession does not clobber existing messages', 
   } finally {
     await rm(rootDir, { force: true, recursive: true });
   }
+});
+
+test('FilesystemSessionStore skips corrupt JSONL lines and returns the valid messages', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
+
+  try {
+    const store = new FilesystemSessionStore({ rootDir });
+    const session: Session = {
+      id: 'session-1',
+      createdAt: '2026-03-29T00:00:00.000Z',
+      messages: [],
+    };
+
+    await store.createSession(session);
+    await store.appendMessage(session.id, {
+      role: 'user',
+      content: 'hello',
+      createdAt: '2026-03-29T00:00:01.000Z',
+    });
+    await appendFile(join(rootDir, session.id, 'messages.jsonl'), '{bad json}\n', 'utf8');
+    await store.appendMessage(session.id, {
+      role: 'assistant',
+      content: 'hi',
+      createdAt: '2026-03-29T00:00:02.000Z',
+    });
+
+    assert.deepEqual(
+      (await store.listMessages(session.id)).map((message) => message.content),
+      ['hello', 'hi'],
+    );
+  } finally {
+    await rm(rootDir, { force: true, recursive: true });
+  }
+});
+
+test('MemorySessionStore isolates nested message mutations', async () => {
+  const store = new MemorySessionStore();
+  const session: Session = {
+    id: 'session-1',
+    createdAt: '2026-03-29T00:00:00.000Z',
+    messages: [],
+  };
+  const message: Message = {
+    content: 'hi',
+    createdAt: '2026-03-29T00:00:02.000Z',
+    role: 'assistant',
+    toolCalls: [
+      {
+        id: 'call-1',
+        input: { path: 'note.txt' },
+        name: 'read_file',
+      },
+    ],
+  };
+
+  await store.createSession(session);
+  await store.appendMessage(session.id, message);
+
+  if (message.toolCalls?.[0]) {
+    message.toolCalls[0].input = { path: 'changed.txt' };
+  }
+
+  const storedMessage = (await store.listMessages(session.id))[0];
+
+  assert.deepEqual(storedMessage && 'toolCalls' in storedMessage ? storedMessage.toolCalls?.[0]?.input : undefined, {
+    path: 'note.txt',
+  });
 });

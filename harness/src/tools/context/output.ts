@@ -31,6 +31,12 @@ export function limitText(text: string, maxBytes: number): ToolOutputLimitResult
     limitedText = limitedText.slice(0, -1);
   }
 
+  const lastCodeUnit = limitedText.charCodeAt(limitedText.length - 1);
+
+  if (lastCodeUnit >= 0xd800 && lastCodeUnit <= 0xdbff) {
+    limitedText = limitedText.slice(0, -1);
+  }
+
   return {
     originalBytes,
     text: limitedText,

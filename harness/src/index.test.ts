@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 
+import type { HarnessEvent, HarnessRuntimeTrace } from './index.js';
 import { createHarness } from './harness.js';
 import type { ModelProvider, ModelRequest, ModelResponse } from './models/index.js';
 import { parseProviderName } from './providers/factory.js';
@@ -311,4 +312,398 @@ test('createHarness falls back cleanly after a blank post-tool reply', async () 
 
   assert.equal(reply.role, 'assistant');
   assert.equal(reply.content, 'I could not produce a response for that request.');
+});
+
+test('createHarness emits live events in stable order without leaking raw content', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
+
+  try {
+    await writeFile(join(rootDir, 'note.txt'), 'secret file body', 'utf8');
+
+    let callCount = 0;
+    const events: HarnessEvent[] = [];
+    const harness = createHarness({
+      providerInstance: new FakeProvider({
+        reply: () => {
+          callCount += 1;
+
+          if (callCount === 1) {
+            return {
+              text: '',
+              toolCalls: [
+                {
+                  id: 'call-read-1',
+                  input: { path: 'note.txt' },
+                  name: 'read_file',
+                },
+              ],
+            };
+          }
+
+          return {
+            text: 'done',
+          };
+        },
+      }),
+      sessionId: 'events-session',
+      sessionStore: new MemorySessionStore(),
+      toolPolicy: { workspaceRoot: rootDir },
+      tools: [new ReadFileTool()],
+    });
+
+    harness.subscribe((event) => {
+      events.push(event);
+    });
+
+    await harness.sendUserMessage('read the secret note');
+
+    assert.deepEqual(
+      events.map((event) => event.type),
+      [
+        'turn_started',
+        'provider_requested',
+        'provider_responded',
+        'tool_requested',
+        'tool_started',
+        'tool_finished',
+        'provider_requested',
+        'provider_responded',
+        'turn_finished',
+      ],
+    );
+    const toolRequestedEvent = events[3];
+
+    assert.equal(toolRequestedEvent?.type, 'tool_requested');
+    assert.deepEqual(toolRequestedEvent, {
+      id: toolRequestedEvent?.id,
+      iteration: 1,
+      safeArgs: {
+        path: {
+          basename: 'note.txt',
+          digest: toolRequestedEvent?.safeArgs.path?.digest,
+          length: 8,
+          looksAbsolute: false,
+          present: true,
+        },
+      },
+      sessionId: 'events-session',
+      timestamp: toolRequestedEvent?.timestamp,
+      toolCallId: 'call-read-1',
+      toolName: 'read_file',
+      turnId: toolRequestedEvent?.turnId,
+      type: 'tool_requested',
+    });
+    assert.deepEqual(
+      events[5] && events[5].type === 'tool_finished' ? events[5].resultDataKeys : undefined,
+      ['path', 'truncated'],
+    );
+
+    const serializedEvents = JSON.stringify(events);
+
+    assert.doesNotMatch(serializedEvents, /read the secret note/);
+    assert.doesNotMatch(serializedEvents, /secret file body/);
+    assert.doesNotMatch(serializedEvents, /"path":"note\.txt"/);
+    assert.doesNotMatch(serializedEvents, /\/note\.txt/);
+  } finally {
+    await rm(rootDir, { force: true, recursive: true });
+  }
+});
+
+test('createHarness includes debugArgs when debug is enabled', async () => {
+  const events: HarnessEvent[] = [];
+  const traces: HarnessRuntimeTrace[] = [];
+  let callCount = 0;
+  const harness = createHarness({
+    debug: true,
+    loggers: [
+      {
+        log(trace): void {
+          traces.push(trace);
+        },
+      },
+    ],
+    providerInstance: new FakeProvider({
+      reply: () => {
+        callCount += 1;
+
+        if (callCount === 1) {
+          return {
+            text: '',
+            toolCalls: [
+              {
+                id: 'call-run-1',
+                input: { args: ['status'], command: 'git', cwd: '.' },
+                name: 'run_command',
+              },
+            ],
+          };
+        }
+
+        return { text: 'done' };
+      },
+    }),
+    sessionStore: new MemorySessionStore(),
+    toolPolicy: { workspaceRoot: process.cwd() },
+    tools: [new RunCommandTool()],
+  });
+
+  harness.subscribe((event) => {
+    events.push(event);
+  });
+
+  const reply = await harness.sendUserMessage('run git status');
+  const toolRequestedEvent = events.find((event) => event.type === 'tool_requested');
+  const toolTrace = traces.find((trace) => trace.type === 'tool_execution_started');
+
+  assert.equal(reply.content, 'done');
+  assert.equal(toolRequestedEvent?.type, 'tool_requested');
+  assert.deepEqual(toolRequestedEvent?.type === 'tool_requested' ? toolRequestedEvent.debugArgs : undefined, {
+    args: ['status'],
+    command: 'git',
+    cwd: '.',
+  });
+  assert.deepEqual((toolTrace?.detail.debugArgs as Record<string, unknown> | undefined) ?? undefined, {
+    args: ['status'],
+    command: 'git',
+    cwd: '.',
+  });
+});
+
+test('createHarness unsubscribe stops future event delivery', async () => {
+  const harness = createHarness({
+    providerInstance: new FakeProvider(),
+    sessionStore: new MemorySessionStore(),
+  });
+  const events: HarnessEvent[] = [];
+  const unsubscribe = harness.subscribe((event) => {
+    events.push(event);
+  });
+
+  await harness.sendUserMessage('first');
+  unsubscribe();
+  await harness.sendUserMessage('second');
+
+  assert.deepEqual(
+    events.map((event) => event.type),
+    ['turn_started', 'provider_requested', 'provider_responded', 'turn_finished'],
+  );
+});
+
+test('createHarness emits sanitized turn_failed events for provider errors', async () => {
+  const events: HarnessEvent[] = [];
+  const harness = createHarness({
+    providerInstance: {
+      model: 'broken-model',
+      name: 'broken-provider',
+      async generate(): Promise<ModelResponse> {
+        throw new Error('provider secret: leaked prompt contents');
+      },
+    },
+    sessionStore: new MemorySessionStore(),
+  });
+
+  harness.subscribe((event) => {
+    events.push(event);
+  });
+
+  await assert.rejects(() => harness.sendUserMessage('top secret prompt'), /provider secret/);
+
+  const failedEvent = events.at(-1);
+
+  assert.equal(failedEvent?.type, 'turn_failed');
+  assert.equal(failedEvent && failedEvent.type === 'turn_failed' ? failedEvent.errorType : undefined, 'provider');
+  assert.equal(
+    failedEvent && failedEvent.type === 'turn_failed' ? failedEvent.errorMessage : undefined,
+    'Provider request failed.',
+  );
+  assert.doesNotMatch(JSON.stringify(events), /top secret prompt/);
+  assert.doesNotMatch(JSON.stringify(events), /leaked prompt contents/);
+});
+
+test('createHarness degrades malformed tool input into a normal tool error', async () => {
+  let callCount = 0;
+  const events: HarnessEvent[] = [];
+  const provider = new FakeProvider({
+    reply: (input) => {
+      callCount += 1;
+
+      if (callCount === 1) {
+        return {
+          text: '',
+          toolCalls: [
+            {
+              id: 'call-bad-1',
+              input: null as unknown as Record<string, unknown>,
+              name: 'read_file',
+            },
+          ],
+        };
+      }
+
+      const lastMessage = input.messages.at(-1);
+
+      assert.equal(lastMessage?.role, 'tool');
+      assert.equal(lastMessage?.role === 'tool' ? lastMessage.isError : undefined, true);
+      assert.match(String(lastMessage?.content), /expected object|requires a string path/);
+
+      return {
+        text: 'recovered',
+      };
+    },
+  });
+  const harness = createHarness({
+    providerInstance: provider,
+    sessionStore: new MemorySessionStore(),
+    toolPolicy: { workspaceRoot: process.cwd() },
+    tools: [new ReadFileTool()],
+  });
+
+  harness.subscribe((event) => {
+    events.push(event);
+  });
+
+  const reply = await harness.sendUserMessage('trigger malformed tool call');
+
+  assert.equal(reply.content, 'recovered');
+  assert.deepEqual(
+    events[3] && events[3].type === 'tool_requested' ? events[3].safeArgs : undefined,
+    {},
+  );
+  assert.equal(events.some((event) => event.type === 'turn_failed'), false);
+});
+
+test('createHarness fans out traces to multiple loggers and isolates failures', async () => {
+  const recordedTraces: HarnessRuntimeTrace[] = [];
+  const harness = createHarness({
+    loggers: [
+      {
+        log(trace): void {
+          recordedTraces.push(trace);
+        },
+      },
+      {
+        log(): void {
+          throw new Error('logger failed');
+        },
+      },
+    ],
+    providerInstance: new FakeProvider(),
+    sessionStore: new MemorySessionStore(),
+  });
+
+  const reply = await harness.sendUserMessage('hello');
+
+  assert.equal(reply.content, 'reply:hello');
+  assert.ok(recordedTraces.some((trace) => trace.type === 'event_emitted'));
+  assert.ok(recordedTraces.some((trace) => trace.type === 'loop_iteration_started'));
+  assert.equal(recordedTraces.some((trace) => trace.type === 'provider_request_mapped'), false);
+});
+
+test('createHarness does not wait for async loggers', async () => {
+  const harness = createHarness({
+    loggers: [
+      {
+        log(): Promise<void> {
+          return new Promise(() => {});
+        },
+      },
+    ],
+    providerInstance: new FakeProvider(),
+    sessionStore: new MemorySessionStore(),
+  });
+
+  const completed = await Promise.race([
+    harness.sendUserMessage('hello').then(() => true),
+    delay(50).then(() => false),
+  ]);
+
+  assert.equal(completed, true);
+});
+
+test('createHarness swallows listener failures and logs them', async () => {
+  const traces: HarnessRuntimeTrace[] = [];
+  const harness = createHarness({
+    loggers: [
+      {
+        log(trace): void {
+          traces.push(trace);
+        },
+      },
+    ],
+    providerInstance: new FakeProvider(),
+    sessionStore: new MemorySessionStore(),
+  });
+
+  harness.subscribe(() => {
+    throw new Error('listener boom');
+  });
+
+  const reply = await harness.sendUserMessage('hello');
+
+  assert.equal(reply.content, 'reply:hello');
+  assert.ok(traces.some((trace) => trace.type === 'listener_failed'));
+});
+
+test('createHarness protects listeners from event mutation by other listeners', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
+
+  try {
+    await writeFile(join(rootDir, 'note.txt'), 'hello from file', 'utf8');
+
+    let mutationThrew = false;
+    let seenBasename: string | undefined;
+    let callCount = 0;
+    const harness = createHarness({
+      providerInstance: new FakeProvider({
+        reply: () => {
+          callCount += 1;
+
+          if (callCount === 1) {
+            return {
+              text: '',
+              toolCalls: [
+                {
+                  id: 'call-read-1',
+                  input: { path: 'note.txt' },
+                  name: 'read_file',
+                },
+              ],
+            };
+          }
+
+          return { text: 'done' };
+        },
+      }),
+      sessionStore: new MemorySessionStore(),
+      toolPolicy: { workspaceRoot: rootDir },
+      tools: [new ReadFileTool()],
+    });
+
+    harness.subscribe((event) => {
+      if (event.type !== 'tool_requested' || !event.safeArgs.path) {
+        return;
+      }
+
+      try {
+        const pathSummary = event.safeArgs.path;
+
+        pathSummary.basename = 'mutated.txt';
+      } catch {
+        mutationThrew = true;
+      }
+    });
+
+    harness.subscribe((event) => {
+      if (event.type === 'tool_requested') {
+        seenBasename = event.safeArgs.path?.basename;
+      }
+    });
+
+    await harness.sendUserMessage('read the note');
+
+    assert.equal(mutationThrew, true);
+    assert.equal(seenBasename, 'note.txt');
+  } finally {
+    await rm(rootDir, { force: true, recursive: true });
+  }
 });

@@ -9,6 +9,48 @@ import type {
 
 import type { ModelProvider, ModelRequest, ModelResponse } from '../models/index.js';
 
+function normalizeOpenAIObjectSchema(schema: unknown): unknown {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
+    return schema;
+  }
+
+  const normalizedEntries = Object.entries(schema).map(([key, value]) => {
+    if (key === 'properties' && value && typeof value === 'object' && !Array.isArray(value)) {
+      return [
+        key,
+        Object.fromEntries(Object.entries(value).map(([propertyName, propertySchema]) => [propertyName, normalizeOpenAIObjectSchema(propertySchema)])),
+      ];
+    }
+
+    if (key === 'items') {
+      return [key, normalizeOpenAIObjectSchema(value)];
+    }
+
+    if ((key === 'anyOf' || key === 'allOf' || key === 'oneOf') && Array.isArray(value)) {
+      return [key, value.map((item) => normalizeOpenAIObjectSchema(item))];
+    }
+
+    return [key, value];
+  });
+
+  const normalizedSchema = Object.fromEntries(normalizedEntries);
+
+  if (normalizedSchema.type === 'object') {
+    const propertyNames =
+      normalizedSchema.properties && typeof normalizedSchema.properties === 'object' && !Array.isArray(normalizedSchema.properties)
+        ? Object.keys(normalizedSchema.properties)
+        : [];
+
+    return {
+      ...normalizedSchema,
+      additionalProperties: normalizedSchema.additionalProperties ?? false,
+      required: propertyNames,
+    };
+  }
+
+  return normalizedSchema;
+}
+
 function parseToolInput(argumentsText: string): Record<string, unknown> {
   let parsed: unknown;
 
@@ -74,7 +116,7 @@ function getOpenAITools(input: ModelRequest): FunctionTool[] | undefined {
     (tool): FunctionTool => ({
       description: tool.description,
       name: tool.name,
-      parameters: tool.inputSchema,
+      parameters: normalizeOpenAIObjectSchema(tool.inputSchema) as FunctionTool['parameters'],
       strict: true,
       type: 'function',
     }),
@@ -90,10 +132,8 @@ function getOpenAIToolCalls(response: Response): ModelResponse['toolCalls'] {
     throw new Error(`OpenAI response returned incomplete tool calls: ${reason}`);
   }
 
-  if (response.incomplete_details && toolCalls.length > 0) {
-    throw new Error(
-      `OpenAI response was incomplete before tool calls finished: ${JSON.stringify(response.incomplete_details)}`,
-    );
+  if (response.incomplete_details) {
+    throw new Error(`OpenAI response was incomplete: ${JSON.stringify(response.incomplete_details)}`);
   }
 
   return toolCalls.map((item) => ({
@@ -128,17 +168,19 @@ export class OpenAILikeProvider implements ModelProvider {
   }
 
   async generate(input: ModelRequest): Promise<ModelResponse> {
+    const inputItems = getOpenAIInputItems(input);
+
     const response = await this.client.responses.create({
-      input: getOpenAIInputItems(input),
+      input: inputItems,
       max_output_tokens: this.maxTokens,
       model: this.model,
       tools: getOpenAITools(input),
     });
-    const toolCalls = getOpenAIToolCalls(response);
+    const toolCalls = getOpenAIToolCalls(response) ?? [];
     const text = response.output_text.trim();
 
     return {
-      text: text || (toolCalls?.length ? '' : 'I could not produce a response for that request.'),
+      text,
       toolCalls,
     };
   }

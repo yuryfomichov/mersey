@@ -153,3 +153,14 @@ test('ToolContext output limiter handles zero-byte limits without hanging', () =
     truncated: true,
   });
 });
+
+test('ToolContext output limiter does not leave a dangling surrogate at the truncation boundary', () => {
+  const context = createToolContext({ workspaceRoot: process.cwd() });
+  const result = context.output.limitText('ok 😀', 5);
+
+  assert.deepEqual(result, {
+    originalBytes: 7,
+    text: 'ok ',
+    truncated: true,
+  });
+});

@@ -121,9 +121,11 @@ export class AnthropicLikeProvider implements ModelProvider {
   }
 
   async generate(input: ModelRequest): Promise<ModelResponse> {
+    const messages = getAnthropicMessages(input);
+
     const response = await this.client.messages.create({
       max_tokens: this.maxTokens,
-      messages: getAnthropicMessages(input),
+      messages,
       model: this.model,
       tools: getAnthropicTools(input),
     });
@@ -137,7 +139,7 @@ export class AnthropicLikeProvider implements ModelProvider {
     const text = getResponseText(response);
 
     return {
-      text: text || (toolCalls.length > 0 ? '' : 'I could not produce a response for that request.'),
+      text,
       toolCalls,
     };
   }
