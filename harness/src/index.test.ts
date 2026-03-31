@@ -276,6 +276,21 @@ test('createHarness serializes concurrent sendUserMessage calls for one session'
   );
 });
 
+test('createHarness forwards systemPrompt to provider requests', async () => {
+  const provider = new FakeProvider();
+
+  const harness = createHarness({
+    providerInstance: provider,
+    sessionStore: new MemorySessionStore(),
+    systemPrompt: 'You are a helpful assistant.',
+  });
+
+  await harness.sendUserMessage('hello');
+
+  assert.equal(provider.requests.length, 1);
+  assert.equal(provider.requests[0].systemPrompt, 'You are a helpful assistant.');
+});
+
 test('createHarness falls back cleanly after a blank post-tool reply', async () => {
   let callCount = 0;
   const provider = new FakeProvider({

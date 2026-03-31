@@ -21,6 +21,7 @@ export type RunLoopInput = {
   provider: ModelProvider;
   session: Session;
   sessionStore: SessionStore;
+  systemPrompt?: string;
   toolPolicy: ToolPolicy;
   tools: Tool[];
 };
@@ -81,6 +82,7 @@ export async function runLoop({
   provider,
   session,
   sessionStore,
+  systemPrompt,
   toolPolicy,
   tools,
 }: RunLoopInput): Promise<Message> {
@@ -106,8 +108,8 @@ export async function runLoop({
     sessionId: session.id,
     toolDefinitions,
   });
-
   observer.turnStarted(content.length);
+  const resolvedSystemPrompt = systemPrompt?.trim() ? systemPrompt : undefined;
 
   try {
     await appendMessage(session, sessionStore, userMessage);
@@ -121,6 +123,7 @@ export async function runLoop({
       const providerStartTime = Date.now();
       const response = await provider.generate({
         messages: toModelMessages(session.messages),
+        systemPrompt: resolvedSystemPrompt,
         tools: toolDefinitions,
       });
       currentErrorType = 'runtime';

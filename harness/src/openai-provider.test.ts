@@ -73,6 +73,63 @@ test('OpenAILikeProvider rejects incomplete function calls', async () => {
   );
 });
 
+test('OpenAILikeProvider passes systemPrompt as instructions to responses.create', async () => {
+  const capturedRequests: Array<{ instructions?: string | null }> = [];
+  const provider = new OpenAILikeProvider({
+    apiKey: 'test-key',
+    baseUrl: 'https://example.com',
+    maxTokens: 256,
+    model: 'gpt-test-model',
+  });
+
+  (
+    provider as unknown as {
+      client: {
+        responses: {
+          create(request: { instructions?: string | null }): Promise<OpenAI.Responses.Response>;
+        };
+      };
+    }
+  ).client = {
+    responses: {
+      async create(request: { instructions?: string | null }): Promise<OpenAI.Responses.Response> {
+        capturedRequests.push(request);
+
+        return {
+          created_at: 0,
+          error: null,
+          id: 'resp_789',
+          incomplete_details: null,
+          instructions: null,
+          metadata: null,
+          model: 'gpt-test-model',
+          object: 'response',
+          output: [],
+          output_text: 'ok',
+          parallel_tool_calls: false,
+          temperature: null,
+          tool_choice: 'auto',
+        } as unknown as OpenAI.Responses.Response;
+      },
+    },
+  };
+
+  await provider.generate({
+    messages: [{ content: 'hello', role: 'user' }],
+    systemPrompt: 'You are a helpful assistant.',
+  });
+
+  assert.equal(capturedRequests.length, 1);
+  assert.equal(capturedRequests[0].instructions, 'You are a helpful assistant.');
+
+  await provider.generate({
+    messages: [{ content: 'hello', role: 'user' }],
+  });
+
+  assert.equal(capturedRequests.length, 2);
+  assert.equal(capturedRequests[1].instructions, undefined);
+});
+
 test('OpenAILikeProvider falls back when a non-tool reply is only whitespace', async () => {
   const provider = new OpenAILikeProvider({
     apiKey: 'test-key',

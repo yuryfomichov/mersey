@@ -19,6 +19,7 @@ export type CreateHarnessOptions = {
   provider?: ProviderDefinition;
   sessionStore?: SessionStore;
   sessionId?: string;
+  systemPrompt?: string;
   toolPolicy?: ToolPolicy;
   tools?: Tool[];
 };
@@ -61,6 +62,7 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
   const provider = options.providerInstance ?? (options.provider ? createProvider(options.provider) : null);
   const runtimeLogger = createFanoutLogger(options.loggers);
   const sessionStore = options.sessionStore ?? new MemorySessionStore();
+  const systemPrompt = options.systemPrompt;
   const toolPolicy = options.toolPolicy ?? { workspaceRoot: process.cwd() };
   const tools = options.tools ?? [];
   const listeners = new Set<HarnessEventListener>();
@@ -154,6 +156,7 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
         provider: resolvedProvider,
         session,
         sessionStore,
+        systemPrompt,
         toolPolicy,
         tools,
       });

@@ -172,6 +172,7 @@ export class OpenAILikeProvider implements ModelProvider {
 
     const response = await this.client.responses.create({
       input: inputItems,
+      instructions: input.systemPrompt,
       max_output_tokens: this.maxTokens,
       model: this.model,
       tools: getOpenAITools(input),
