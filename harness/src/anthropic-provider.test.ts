@@ -122,6 +122,49 @@ test('AnthropicLikeProvider replays tool-only responses without fake text', asyn
   });
 });
 
+test('AnthropicLikeProvider passes systemPrompt as system parameter', async () => {
+  const capturedRequests: Array<{ system?: string }> = [];
+  const provider = new AnthropicLikeProvider({
+    apiKey: 'test-key',
+    baseUrl: 'https://example.com',
+    maxTokens: 256,
+    model: 'claude-test-model',
+  });
+
+  (
+    provider as unknown as {
+      client: {
+        messages: {
+          create(request: { system?: string }): Promise<Anthropic.Message>;
+        };
+      };
+    }
+  ).client = {
+    messages: {
+      async create(request: { system?: string }): Promise<Anthropic.Message> {
+        capturedRequests.push(request);
+
+        return createAnthropicMessage([{ citations: null, text: 'ok', type: 'text' }]);
+      },
+    },
+  };
+
+  await provider.generate({
+    messages: [{ content: 'hello', role: 'user' }],
+    systemPrompt: 'You are a helpful assistant.',
+  });
+
+  assert.equal(capturedRequests.length, 1);
+  assert.equal(capturedRequests[0].system, 'You are a helpful assistant.');
+
+  await provider.generate({
+    messages: [{ content: 'hello', role: 'user' }],
+  });
+
+  assert.equal(capturedRequests.length, 2);
+  assert.equal(capturedRequests[1].system, undefined);
+});
+
 test('AnthropicLikeProvider groups consecutive tool results into one user message', async () => {
   const anthropicRequests: Array<{ messages: unknown }> = [];
   const provider = new AnthropicLikeProvider({
