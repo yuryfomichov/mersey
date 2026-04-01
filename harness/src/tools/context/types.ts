@@ -68,4 +68,5 @@ export type ToolContext = {
     limitText(text: string, maxBytes?: number): ToolOutputLimitResult;
   };
   policy: ToolPolicy;
+  signal?: AbortSignal;
 };

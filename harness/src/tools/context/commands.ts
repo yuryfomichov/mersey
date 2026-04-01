@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 
-import type { ToolCommandResult, ToolCommandSpec, ToolOutputLimitResult, ToolPolicy } from './types.js';
 import { limitText } from './output.js';
+import type { ToolCommandResult, ToolCommandSpec, ToolOutputLimitResult, ToolPolicy } from './types.js';
 
 const DEFAULT_MAX_COMMAND_OUTPUT_BYTES = 32 * 1024;
 const DEFAULT_COMMAND_TIMEOUT_MS = 10_000;
@@ -84,8 +84,10 @@ export async function runCommand(
   policy: ToolPolicy,
   getDefaultCwd: () => Promise<string>,
   resolveCwd: (cwd: string, toolName: string) => Promise<string>,
+  signal?: AbortSignal,
 ): Promise<ToolCommandResult> {
   assertCommandAllowed(spec.command, toolName, policy);
+  signal?.throwIfAborted();
 
   const timeoutMs = resolveCommandTimeout(spec.timeoutMs, toolName, policy);
   const cwd = spec.cwd ? await resolveCwd(spec.cwd, toolName) : await getDefaultCwd();
@@ -95,6 +97,7 @@ export async function runCommand(
   const child = spawn(spec.command, spec.args ?? [], {
     cwd,
     shell: false,
+    signal,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let exited = false;

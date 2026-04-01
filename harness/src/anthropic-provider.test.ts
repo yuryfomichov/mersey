@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import Anthropic from '@anthropic-ai/sdk';
 
+import type { ModelStreamEvent } from './models/index.js';
 import type { ModelRequest } from './models/index.js';
 import { AnthropicLikeProvider } from './providers/anthropic.js';
 
@@ -291,4 +292,81 @@ test('AnthropicLikeProvider leaves empty non-tool replies for the loop to normal
 
   assert.equal(response.text, '');
   assert.deepEqual(response.toolCalls, []);
+});
+
+test('AnthropicLikeProvider streams text deltas and returns the final response', async () => {
+  const provider = new AnthropicLikeProvider({
+    apiKey: 'test-key',
+    baseUrl: 'https://example.com',
+    maxTokens: 256,
+    model: 'claude-test-model',
+  });
+
+  (
+    provider as unknown as {
+      client: {
+        messages: {
+          stream(): {
+            [Symbol.asyncIterator](): AsyncIterator<
+              | {
+                  delta: { text: string; type: 'text_delta' };
+                  index: number;
+                  type: 'content_block_delta';
+                }
+              | {
+                  type: 'message_stop';
+                }
+            >;
+            finalMessage(): Promise<Anthropic.Message>;
+          };
+        };
+      };
+    }
+  ).client = {
+    messages: {
+      stream() {
+        return {
+          async finalMessage(): Promise<Anthropic.Message> {
+            return createAnthropicMessage([{ citations: null, text: 'hello', type: 'text' }]);
+          },
+          async *[Symbol.asyncIterator](): AsyncIterator<
+            | {
+                delta: { text: string; type: 'text_delta' };
+                index: number;
+                type: 'content_block_delta';
+              }
+            | {
+                type: 'message_stop';
+              }
+          > {
+            yield {
+              delta: { text: 'hel', type: 'text_delta' },
+              index: 0,
+              type: 'content_block_delta',
+            };
+            yield {
+              delta: { text: 'lo', type: 'text_delta' },
+              index: 0,
+              type: 'content_block_delta',
+            };
+            yield { type: 'message_stop' };
+          },
+        };
+      },
+    },
+  };
+
+  const events: ModelStreamEvent[] = [];
+
+  for await (const event of provider.stream({
+    messages: [{ content: 'hello', role: 'user' }],
+  })) {
+    events.push(event);
+  }
+
+  assert.deepEqual(events, [
+    { delta: 'hel', type: 'text_delta' },
+    { delta: 'lo', type: 'text_delta' },
+    { response: { text: 'hello', toolCalls: [] }, type: 'response_completed' },
+  ]);
 });

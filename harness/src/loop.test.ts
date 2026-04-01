@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { runLoop } from './loop.js';
+import type { HarnessEvent } from './events/index.js';
+import { runLoop, streamLoop } from './loop.js';
 import { FakeProvider } from './providers/fake.js';
 import { MemorySessionStore } from './sessions.js';
 import type { Session } from './sessions/index.js';
@@ -133,8 +134,14 @@ test('runLoop does not persist assistant tool calls when the tool iteration cap 
     /Tool loop exceeded 0 iterations/,
   );
 
-  assert.deepEqual(session.messages.map((message) => message.role), ['user']);
-  assert.deepEqual((await sessionStore.listMessages(session.id)).map((message) => message.role), ['user']);
+  assert.deepEqual(
+    session.messages.map((message) => message.role),
+    ['user'],
+  );
+  assert.deepEqual(
+    (await sessionStore.listMessages(session.id)).map((message) => message.role),
+    ['user'],
+  );
 });
 
 test('runLoop swallows event sink failures', async () => {
@@ -160,7 +167,10 @@ test('runLoop swallows event sink failures', async () => {
   });
 
   assert.equal(reply.content, 'reply:hello');
-  assert.deepEqual(session.messages.map((message) => message.role), ['user', 'assistant']);
+  assert.deepEqual(
+    session.messages.map((message) => message.role),
+    ['user', 'assistant'],
+  );
 });
 
 test('runLoop owns fallback text when provider returns an empty non-tool reply', async () => {
@@ -187,4 +197,200 @@ test('runLoop owns fallback text when provider returns an empty non-tool reply',
   });
 
   assert.equal(reply.content, 'I could not produce a response for that request.');
+});
+
+test('streamLoop yields assistant deltas and final message while events stay coarse', async () => {
+  const sessionStore = new MemorySessionStore();
+  const session: Session = {
+    createdAt: new Date().toISOString(),
+    id: 'streaming-session',
+    messages: [],
+  };
+
+  await sessionStore.createSession(session);
+
+  const chunks = [];
+  const events: HarnessEvent[] = [];
+
+  for await (const chunk of streamLoop({
+    content: 'hello',
+    emitEvent(event): void {
+      events.push(event);
+    },
+    provider: new FakeProvider({
+      streamReply: [
+        { delta: 'hel', type: 'text_delta' },
+        { delta: 'lo', type: 'text_delta' },
+        { response: { text: 'hello' }, type: 'response_completed' },
+      ],
+    }),
+    session,
+    sessionStore,
+    stream: true,
+    toolPolicy: { workspaceRoot: process.cwd() },
+    tools: [],
+  })) {
+    chunks.push(chunk);
+  }
+
+  assert.deepEqual(chunks, [
+    { delta: 'hel', type: 'assistant_delta' },
+    { delta: 'lo', type: 'assistant_delta' },
+    {
+      message: {
+        content: 'hello',
+        createdAt: chunks[2]?.type === 'final_message' ? chunks[2].message.createdAt : '',
+        role: 'assistant',
+        toolCalls: undefined,
+      },
+      type: 'final_message',
+    },
+  ]);
+  assert.deepEqual(
+    events.map((event) => event.type),
+    ['turn_started', 'provider_requested', 'provider_responded', 'turn_finished'],
+  );
+});
+
+test('runLoop falls back to batch generation when streaming is enabled but unsupported', async () => {
+  const sessionStore = new MemorySessionStore();
+  const session: Session = {
+    createdAt: new Date().toISOString(),
+    id: 'stream-fallback-session',
+    messages: [],
+  };
+
+  await sessionStore.createSession(session);
+
+  let callCount = 0;
+  const provider = {
+    model: 'no-stream-model',
+    name: 'no-stream',
+    async generate() {
+      callCount += 1;
+      return { text: 'batch reply' };
+    },
+  };
+  const reply = await runLoop({
+    content: 'hello',
+    provider,
+    session,
+    sessionStore,
+    stream: true,
+    toolPolicy: { workspaceRoot: process.cwd() },
+    tools: [],
+  });
+
+  assert.equal(callCount, 1);
+  assert.equal(reply.content, 'batch reply');
+});
+
+test('runLoop falls back to batch generation when streaming fails before any deltas', async () => {
+  const sessionStore = new MemorySessionStore();
+  const session: Session = {
+    createdAt: new Date().toISOString(),
+    id: 'stream-runtime-fallback-session',
+    messages: [],
+  };
+
+  await sessionStore.createSession(session);
+
+  let batchCallCount = 0;
+  const provider = {
+    model: 'flaky-stream-model',
+    name: 'flaky-stream',
+    async generate() {
+      batchCallCount += 1;
+      return { text: 'batch reply' };
+    },
+    stream() {
+      throw new Error('stream failed');
+    },
+  };
+  const reply = await runLoop({
+    content: 'hello',
+    provider,
+    session,
+    sessionStore,
+    stream: true,
+    toolPolicy: { workspaceRoot: process.cwd() },
+    tools: [],
+  });
+
+  assert.equal(batchCallCount, 1);
+  assert.equal(reply.content, 'batch reply');
+});
+
+test('runLoop falls back to batch generation when streaming emits only empty deltas before failing', async () => {
+  const sessionStore = new MemorySessionStore();
+  const session: Session = {
+    createdAt: new Date().toISOString(),
+    id: 'stream-empty-delta-fallback-session',
+    messages: [],
+  };
+
+  await sessionStore.createSession(session);
+
+  let batchCallCount = 0;
+  const provider = {
+    model: 'empty-delta-stream-model',
+    name: 'empty-delta-stream',
+    async generate() {
+      batchCallCount += 1;
+      return { text: 'batch reply' };
+    },
+    async *stream() {
+      yield { delta: '', type: 'text_delta' as const };
+      throw new Error('stream failed');
+    },
+  };
+  const reply = await runLoop({
+    content: 'hello',
+    provider,
+    session,
+    sessionStore,
+    stream: true,
+    toolPolicy: { workspaceRoot: process.cwd() },
+    tools: [],
+  });
+
+  assert.equal(batchCallCount, 1);
+  assert.equal(reply.content, 'batch reply');
+});
+
+test('runLoop keeps a completed streamed response when stream teardown fails', async () => {
+  const sessionStore = new MemorySessionStore();
+  const session: Session = {
+    createdAt: new Date().toISOString(),
+    id: 'stream-teardown-session',
+    messages: [],
+  };
+
+  await sessionStore.createSession(session);
+
+  let batchCallCount = 0;
+  const provider = {
+    model: 'teardown-stream-model',
+    name: 'teardown-stream',
+    async generate() {
+      batchCallCount += 1;
+      return { text: 'batch reply' };
+    },
+    async *stream() {
+      yield { response: { text: 'stream reply' }, type: 'response_completed' as const };
+      throw new Error('stream teardown failed');
+    },
+  };
+  const reply = await runLoop({
+    content: 'hello',
+    provider,
+    session,
+    sessionStore,
+    stream: true,
+    toolPolicy: { workspaceRoot: process.cwd() },
+    tools: [],
+  });
+
+  assert.equal(batchCallCount, 0);
+  assert.equal(reply.content, 'stream reply');
 });

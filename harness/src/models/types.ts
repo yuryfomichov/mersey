@@ -43,6 +43,7 @@ export type ModelMessage = ModelUserMessage | ModelAssistantMessage | ModelToolR
 
 export type ModelRequest = {
   messages: ModelMessage[];
+  signal?: AbortSignal;
   systemPrompt?: string;
   tools?: ModelToolDefinition[];
 };
@@ -51,3 +52,13 @@ export type ModelResponse = {
   text: string;
   toolCalls?: ModelToolCall[];
 };
+
+export type ModelStreamEvent =
+  | {
+      delta: string;
+      type: 'text_delta';
+    }
+  | {
+      response: ModelResponse;
+      type: 'response_completed';
+    };

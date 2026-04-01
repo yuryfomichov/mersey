@@ -4,8 +4,8 @@ import type { HarnessEvent, TurnFailedEvent } from './events/index.js';
 import { emitRuntimeTrace, type HarnessLogger, type HarnessRuntimeTraceType } from './logger/index.js';
 import type { ModelProvider, ModelResponse, ModelToolCall, ModelToolDefinition } from './models/index.js';
 import type { Message } from './sessions/index.js';
-import type { ToolExecutionResult } from './tools/index.js';
 import { getDebugToolArgs, getResultDataKeys, getSafeToolArgs, sanitizeErrorMessage } from './telemetry.js';
+import type { ToolExecutionResult } from './tools/index.js';
 
 type LoopObserverInput = {
   debug?: boolean;
@@ -22,6 +22,7 @@ export type LoopObserver = {
   iterationStarted(iteration: number, messageCount: number): void;
   providerRequested(iteration: number, messages: Message[]): void;
   providerResponded(iteration: number, response: ModelResponse, durationMs: number): void;
+  providerTextDelta(iteration: number, delta: string): void;
   toolFinished(iteration: number, toolCall: ModelToolCall, toolResult: ToolExecutionResult, durationMs: number): void;
   toolRequested(iteration: number, toolCall: ModelToolCall): void;
   toolStarted(iteration: number, toolCall: ModelToolCall): void;
@@ -48,7 +49,14 @@ function getToolCallNames(toolCalls: { name: string }[] | undefined): string[] {
   return toolCalls?.map((toolCall) => toolCall.name) ?? [];
 }
 
-export function createLoopObserver({ debug, emitEvent, logger, provider, sessionId, toolDefinitions }: LoopObserverInput): LoopObserver {
+export function createLoopObserver({
+  debug,
+  emitEvent,
+  logger,
+  provider,
+  sessionId,
+  toolDefinitions,
+}: LoopObserverInput): LoopObserver {
   const turnId = randomUUID();
   const turnStartTime = Date.now();
 
@@ -104,7 +112,6 @@ export function createLoopObserver({ debug, emitEvent, logger, provider, session
 
     providerRequested(iteration: number, messages: Message[]): void {
       publishEvent({
-        id: randomUUID(),
         iteration,
         messageCount: messages.length,
         messageCountsByRole: getMessageCountsByRole(messages),
@@ -133,7 +140,6 @@ export function createLoopObserver({ debug, emitEvent, logger, provider, session
 
       publishEvent({
         durationMs,
-        id: randomUUID(),
         iteration,
         model: provider.model,
         providerName: provider.name,
@@ -160,10 +166,18 @@ export function createLoopObserver({ debug, emitEvent, logger, provider, session
       });
     },
 
-    toolFinished(iteration: number, toolCall: ModelToolCall, toolResult: ToolExecutionResult, durationMs: number): void {
+    providerTextDelta(_iteration: number, _delta: string): void {
+      // Raw streamed text is exposed through streamUserMessage(), not the event bus.
+    },
+
+    toolFinished(
+      iteration: number,
+      toolCall: ModelToolCall,
+      toolResult: ToolExecutionResult,
+      durationMs: number,
+    ): void {
       publishEvent({
         durationMs,
-        id: randomUUID(),
         isError: Boolean(toolResult.isError),
         iteration,
         resultContentLength: toolResult.content.length,
@@ -189,7 +203,6 @@ export function createLoopObserver({ debug, emitEvent, logger, provider, session
 
       publishEvent({
         ...(debugArgs ? { debugArgs } : {}),
-        id: randomUUID(),
         iteration,
         safeArgs: getSafeToolArgs(toolCall.input),
         sessionId,
@@ -203,7 +216,6 @@ export function createLoopObserver({ debug, emitEvent, logger, provider, session
 
     toolStarted(iteration: number, toolCall: ModelToolCall): void {
       publishEvent({
-        id: randomUUID(),
         iteration,
         sessionId,
         timestamp: new Date().toISOString(),
@@ -221,7 +233,6 @@ export function createLoopObserver({ debug, emitEvent, logger, provider, session
         durationMs: getDurationMs(turnStartTime),
         errorMessage: sanitizeErrorMessage(errorType, error),
         errorType,
-        id: randomUUID(),
         iteration,
         sessionId,
         timestamp: new Date().toISOString(),
@@ -234,7 +245,6 @@ export function createLoopObserver({ debug, emitEvent, logger, provider, session
       publishEvent({
         durationMs: getDurationMs(turnStartTime),
         finalAssistantLength,
-        id: randomUUID(),
         sessionId,
         timestamp: new Date().toISOString(),
         totalIterations,
@@ -246,7 +256,6 @@ export function createLoopObserver({ debug, emitEvent, logger, provider, session
 
     turnStarted(userMessageLength: number): void {
       publishEvent({
-        id: randomUUID(),
         sessionId,
         timestamp: new Date().toISOString(),
         turnId,

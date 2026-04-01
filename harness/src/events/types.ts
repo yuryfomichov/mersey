@@ -1,5 +1,4 @@
 export type HarnessEventBase = {
-  id: string;
   sessionId: string;
   timestamp: string;
   turnId: string;

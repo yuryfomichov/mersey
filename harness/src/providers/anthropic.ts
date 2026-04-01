@@ -2,11 +2,12 @@ import Anthropic from '@anthropic-ai/sdk';
 import type {
   ContentBlockParam,
   MessageParam,
+  Message,
   Tool,
   ToolUseBlock,
 } from '@anthropic-ai/sdk/resources/messages/messages';
 
-import type { ModelProvider, ModelRequest, ModelResponse } from '../models/index.js';
+import type { ModelRequest, ModelResponse, ModelStreamEvent, StreamingModelProvider } from '../models/index.js';
 
 export type AnthropicLikeProviderConfig = {
   apiKey: string;
@@ -105,7 +106,17 @@ function getAnthropicTools(input: ModelRequest): Tool[] | undefined {
   );
 }
 
-export class AnthropicLikeProvider implements ModelProvider {
+function getAnthropicToolCalls(response: Message): ModelResponse['toolCalls'] {
+  return response.content
+    .filter((block): block is ToolUseBlock => block.type === 'tool_use')
+    .map((block) => ({
+      id: block.id,
+      input: block.input as Record<string, unknown>,
+      name: block.name,
+    }));
+}
+
+export class AnthropicLikeProvider implements StreamingModelProvider {
   protected readonly client: Anthropic;
   readonly maxTokens: number;
   readonly model: string;
@@ -120,28 +131,53 @@ export class AnthropicLikeProvider implements ModelProvider {
     this.model = config.model;
   }
 
-  async generate(input: ModelRequest): Promise<ModelResponse> {
-    const messages = getAnthropicMessages(input);
-
-    const response = await this.client.messages.create({
+  private getRequest(input: ModelRequest): {
+    max_tokens: number;
+    messages: MessageParam[];
+    model: string;
+    system: ModelRequest['systemPrompt'];
+    tools: Tool[] | undefined;
+  } {
+    return {
       max_tokens: this.maxTokens,
-      messages,
+      messages: getAnthropicMessages(input),
       model: this.model,
       system: input.systemPrompt,
       tools: getAnthropicTools(input),
-    });
-    const toolCalls = response.content
-      .filter((block): block is ToolUseBlock => block.type === 'tool_use')
-      .map((block) => ({
-        id: block.id,
-        input: block.input as Record<string, unknown>,
-        name: block.name,
-      }));
+    };
+  }
+
+  async generate(input: ModelRequest): Promise<ModelResponse> {
+    const response = await this.client.messages.create(this.getRequest(input), { signal: input.signal });
+    const toolCalls = getAnthropicToolCalls(response);
     const text = getResponseText(response);
 
     return {
       text,
       toolCalls,
+    };
+  }
+
+  async *stream(input: ModelRequest): AsyncIterable<ModelStreamEvent> {
+    const stream = this.client.messages.stream(this.getRequest(input), { signal: input.signal });
+
+    for await (const event of stream) {
+      if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+        yield {
+          delta: event.delta.text,
+          type: 'text_delta',
+        };
+      }
+    }
+
+    const response = await stream.finalMessage();
+
+    yield {
+      response: {
+        text: getResponseText(response),
+        toolCalls: getAnthropicToolCalls(response),
+      },
+      type: 'response_completed',
     };
   }
 }

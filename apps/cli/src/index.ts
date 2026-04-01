@@ -66,6 +66,20 @@ function getDebugMode(args: string[]): boolean {
   return false;
 }
 
+function getStreamMode(args: string[]): boolean {
+  for (const arg of args) {
+    if (arg === '--stream' || arg === '--stream=true') {
+      return true;
+    }
+
+    if (arg === '--stream=false') {
+      return false;
+    }
+  }
+
+  return false;
+}
+
 function getProviderModel(provider: ReturnType<typeof getProviderDefinition>): string | null {
   return 'config' in provider && provider.config?.model ? provider.config.model : null;
 }
@@ -73,6 +87,7 @@ function getProviderModel(provider: ReturnType<typeof getProviderDefinition>): s
 async function main(): Promise<void> {
   const args = argv.slice(2);
   const debug = getDebugMode(args);
+  const stream = getStreamMode(args);
   const providerName = getProviderName(args);
   const providerDefinition = getProviderDefinition(providerName);
   const sessionId = getSessionId(args) ?? 'local-session';
@@ -85,6 +100,7 @@ async function main(): Promise<void> {
     provider: providerDefinition,
     sessionId,
     sessionStore: createSessionStore(sessionStoreDefinition),
+    stream,
     toolPolicy: {
       commandAllowlist: ['git', 'ls', 'pwd'],
       defaultCommandTimeoutMs: 5_000,
@@ -105,6 +121,7 @@ async function main(): Promise<void> {
   output.write(`session: ${harness.session.id}\n`);
   output.write(`${formatSessionStore(sessionStoreDefinition)}\n`);
   output.write(`debug: ${String(debug)}\n`);
+  output.write(`stream: ${String(stream)}\n`);
   output.write(`logs: ${logPaths.jsonlPath}, ${logPaths.textPath}\n`);
   output.write("Type a message or 'exit' to quit.\n\n");
 
@@ -132,8 +149,37 @@ async function main(): Promise<void> {
         break;
       }
 
-      const reply = await harness.sendUserMessage(message);
-      output.write(`assistant: ${reply.content}\n`);
+      let streamedAssistant = false;
+
+      for await (const chunk of harness.streamUserMessage(message)) {
+        if (chunk.type === 'assistant_delta') {
+          if (!streamedAssistant) {
+            output.write('assistant: ');
+            streamedAssistant = true;
+          }
+
+          output.write(chunk.delta);
+          continue;
+        }
+
+        if (chunk.type === 'assistant_message_completed') {
+          if (streamedAssistant) {
+            output.write('\n');
+            streamedAssistant = false;
+          }
+
+          continue;
+        }
+
+        if (chunk.type === 'final_message') {
+          if (streamedAssistant) {
+            output.write('\n');
+            streamedAssistant = false;
+          } else {
+            output.write(`assistant: ${chunk.message.content}\n`);
+          }
+        }
+      }
     }
   } finally {
     cli.close();
