@@ -16,9 +16,9 @@ import {
   type SessionStatePatch,
   type SessionStore,
 } from './sessions/index.js';
-import { findToolCall, findToolMessage, getCurrentTurnProgress } from './turn-state.js';
 import { createToolContext, executeToolCall, getToolDefinitions, getToolMap } from './tools/index.js';
 import type { Tool, ToolPolicy } from './tools/index.js';
+import { findToolCall, findToolMessage, getCurrentTurnProgress } from './turn-state.js';
 
 type AsyncQueue<T> = {
   end(): void;
@@ -285,11 +285,15 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
   }
 
   function getDeniedApprovalError(toolCallId: string, toolName: string): Error {
-    return new Error(`Tool execution was already denied by user approval for ${getApprovalLabel(toolCallId, toolName)}.`);
+    return new Error(
+      `Tool execution was already denied by user approval for ${getApprovalLabel(toolCallId, toolName)}.`,
+    );
   }
 
   function getApprovedResolutionError(toolCallId: string, toolName: string): Error {
-    return new Error(`Tool execution was already approved for ${getApprovalLabel(toolCallId, toolName)} and cannot be denied.`);
+    return new Error(
+      `Tool execution was already approved for ${getApprovalLabel(toolCallId, toolName)} and cannot be denied.`,
+    );
   }
 
   function requirePendingApproval(): PendingApproval {
@@ -650,11 +654,11 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
       const approval = requirePendingApproval();
       const pendingApproval = getPendingApprovalState();
 
-        if (pendingApproval.stage === 'approved_executing') {
-          throw getInterruptedApprovalError(approval.toolCallId, approval.toolName);
-        }
+      if (pendingApproval.stage === 'approved_executing') {
+        throw getInterruptedApprovalError(approval.toolCallId, approval.toolName);
+      }
 
-        if (pendingApproval.stage === 'approved_executed' || pendingApproval.stage === 'denied_executed') {
+      if (pendingApproval.stage === 'approved_executed' || pendingApproval.stage === 'denied_executed') {
         return null;
       }
 
@@ -685,17 +689,17 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
       return enqueue(async () => {
         if (getTurnStatus(session) === 'awaiting_approval') {
           const approval = requirePendingApproval();
-        const pendingApproval = getPendingApprovalState();
+          const pendingApproval = getPendingApprovalState();
 
-        if (pendingApproval.stage === 'approved_executing') {
-          throw getInterruptedApprovalError(approval.toolCallId, approval.toolName);
-        }
+          if (pendingApproval.stage === 'approved_executing') {
+            throw getInterruptedApprovalError(approval.toolCallId, approval.toolName);
+          }
 
-        if (pendingApproval.stage === 'approved_executed' || pendingApproval.stage === 'denied_executed') {
-          throw new Error(
-            `Session has a resolved pending turn for tool call ${getApprovalLabel(approval.toolCallId, approval.toolName)}. Resume it with resumePendingTurn().`,
-          );
-        }
+          if (pendingApproval.stage === 'approved_executed' || pendingApproval.stage === 'denied_executed') {
+            throw new Error(
+              `Session has a resolved pending turn for tool call ${getApprovalLabel(approval.toolCallId, approval.toolName)}. Resume it with resumePendingTurn().`,
+            );
+          }
 
           throw new Error(
             `Session is awaiting approval for tool call ${getApprovalLabel(approval.toolCallId, approval.toolName)}. Resolve it with approvePendingTool() or denyPendingTool().`,

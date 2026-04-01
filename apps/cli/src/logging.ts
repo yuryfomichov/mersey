@@ -22,7 +22,10 @@ export function getCliLogPaths(sessionId: string, cwd: string = process.cwd()): 
   };
 }
 
-export async function createCliLoggers(sessionId: string, cwd: string = process.cwd()): Promise<{
+export async function createCliLoggers(
+  sessionId: string,
+  cwd: string = process.cwd(),
+): Promise<{
   logPaths: CliLogPaths;
   loggers: HarnessLogger[];
 }> {

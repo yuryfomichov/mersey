@@ -492,7 +492,10 @@ test('createHarness resumes remaining tool calls from the same assistant respons
         if (callCount === 1) {
           return {
             text: '',
-            toolCalls: [createWriteFileToolCall({ content: 'batched write' }), { id: 'call-read-1', input: { path: 'note.txt' }, name: 'read_file' }],
+            toolCalls: [
+              createWriteFileToolCall({ content: 'batched write' }),
+              { id: 'call-read-1', input: { path: 'note.txt' }, name: 'read_file' },
+            ],
           };
         }
 
@@ -671,7 +674,10 @@ test('createHarness blocks deny after approval has already been consumed', async
     tools: [new WriteFileTool()],
   });
 
-  await assert.rejects(() => harness.getPendingApproval(), /Automatic retry is blocked to avoid duplicate side effects/);
+  await assert.rejects(
+    () => harness.getPendingApproval(),
+    /Automatic retry is blocked to avoid duplicate side effects/,
+  );
   await assert.rejects(() => harness.denyPendingTool(), /Automatic retry is blocked to avoid duplicate side effects/);
 });
 
@@ -773,7 +779,10 @@ test('createHarness emits tool_started and tool_finished after an approval-gated
     assert.equal(toolStartedEvent?.type === 'tool_started' ? toolStartedEvent.iteration : undefined, 1);
     assert.equal(toolFinishedEvent?.type === 'tool_finished' ? toolFinishedEvent.iteration : undefined, 1);
     assert.equal(toolStartedEvent?.type === 'tool_started' ? toolStartedEvent.toolCallId : undefined, 'call-write-1');
-    assert.equal(toolFinishedEvent?.type === 'tool_finished' ? toolFinishedEvent.toolCallId : undefined, 'call-write-1');
+    assert.equal(
+      toolFinishedEvent?.type === 'tool_finished' ? toolFinishedEvent.toolCallId : undefined,
+      'call-write-1',
+    );
   });
 });
 

@@ -98,7 +98,11 @@ export function getResultDataKeys(data: Record<string, unknown> | undefined): st
 }
 
 export function sanitizeErrorMessage(errorType: 'provider' | 'tool' | 'runtime', error: unknown): string {
-  if (errorType === 'runtime' && error instanceof Error && /^Tool loop exceeded \d+ iterations\.$/.test(error.message)) {
+  if (
+    errorType === 'runtime' &&
+    error instanceof Error &&
+    /^Tool loop exceeded \d+ iterations\.$/.test(error.message)
+  ) {
     return error.message;
   }
 

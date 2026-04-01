@@ -35,7 +35,10 @@ test('createCliLoggers creates both log files under logs/', async () => {
       ),
     );
 
-    assert.equal(await readFile(logPaths.jsonlPath, 'utf8'), '{"detail":{"sessionId":"session-456"},"timestamp":"2026-03-31T12:00:00.000Z","type":"event_emitted"}\n');
+    assert.equal(
+      await readFile(logPaths.jsonlPath, 'utf8'),
+      '{"detail":{"sessionId":"session-456"},"timestamp":"2026-03-31T12:00:00.000Z","type":"event_emitted"}\n',
+    );
     assert.equal(
       await readFile(logPaths.textPath, 'utf8'),
       '2026-03-31T12:00:00.000Z event_emitted sessionId=session-456\n',

@@ -1,7 +1,13 @@
 import { argv, stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
 
-import { createHarness, type Harness, type PendingApproval, type TurnChunk, type TurnResult } from '../../../harness/index.js';
+import {
+  createHarness,
+  type Harness,
+  type PendingApproval,
+  type TurnChunk,
+  type TurnResult,
+} from '../../../harness/index.js';
 import { parseProviderName, type ProviderName } from '../../../harness/providers.js';
 import { EditFileTool, ReadFileTool, RunCommandTool, WriteFileTool } from '../../../harness/tools.js';
 import { createCliLoggers } from './logging.js';
@@ -200,7 +206,12 @@ async function main(): Promise<void> {
       maxToolResultBytes: 16 * 1024,
       workspaceRoot: process.cwd(),
     },
-    tools: [new ReadFileTool(), new WriteFileTool(), new EditFileTool(), new RunCommandTool({ trustedCommands: ['pwd'] })],
+    tools: [
+      new ReadFileTool(),
+      new WriteFileTool(),
+      new EditFileTool(),
+      new RunCommandTool({ trustedCommands: ['pwd'] }),
+    ],
   });
   const providerModel = getProviderModel(providerDefinition);
 

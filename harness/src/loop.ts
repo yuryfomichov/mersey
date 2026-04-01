@@ -8,9 +8,9 @@ import { supportsStreaming } from './models/index.js';
 import type { SessionStore } from './sessions/index.js';
 import { applySessionStatePatch } from './sessions/index.js';
 import type { Message, Session, SessionStatePatch } from './sessions/index.js';
-import { getCurrentTurnProgress } from './turn-state.js';
 import { createToolContext, executeToolCall, getToolDefinitions, getToolMap } from './tools/index.js';
 import type { Tool, ToolApprovalRequirement, ToolPolicy } from './tools/index.js';
+import { getCurrentTurnProgress } from './turn-state.js';
 
 export type RunLoopOptions = {
   maxToolIterations?: number;
@@ -119,7 +119,11 @@ async function appendMessage(session: Session, sessionStore: SessionStore, messa
   session.messages.push(message);
 }
 
-async function updateSessionState(session: Session, sessionStore: SessionStore, patch: SessionStatePatch): Promise<void> {
+async function updateSessionState(
+  session: Session,
+  sessionStore: SessionStore,
+  patch: SessionStatePatch,
+): Promise<void> {
   await sessionStore.updateSessionState(session.id, patch);
   applySessionStatePatch(session, patch);
 }
