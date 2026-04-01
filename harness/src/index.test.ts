@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 
-import type { HarnessEvent, HarnessRuntimeTrace } from './index.js';
 import { createHarness } from './harness.js';
+import type { HarnessEvent, HarnessRuntimeTrace } from './index.js';
 import type { ModelProvider, ModelRequest, ModelResponse } from './models/index.js';
 import { parseProviderName } from './providers/factory.js';
 import { FakeProvider } from './providers/fake.js';
@@ -153,7 +153,9 @@ test('createHarness executes read_file tool calls and continues the loop', async
           false,
         );
         assert.match(
-          String(lastMessage?.role === 'tool' && lastMessage.data && 'path' in lastMessage.data ? lastMessage.data.path : ''),
+          String(
+            lastMessage?.role === 'tool' && lastMessage.data && 'path' in lastMessage.data ? lastMessage.data.path : '',
+          ),
           /note\.txt$/,
         );
 
@@ -257,14 +259,11 @@ test('createHarness serializes concurrent sendUserMessage calls for one session'
   assert.equal(firstReply.content, 'reply:first');
   assert.equal(secondReply.content, 'reply:second');
   assert.equal(requests.length, 2);
-  assert.deepEqual(
-    requests[1]?.messages,
-    [
-      { content: 'first', role: 'user' },
-      { content: 'reply:first', role: 'assistant', toolCalls: undefined },
-      { content: 'second', role: 'user' },
-    ],
-  );
+  assert.deepEqual(requests[1]?.messages, [
+    { content: 'first', role: 'user' },
+    { content: 'reply:first', role: 'assistant', toolCalls: undefined },
+    { content: 'second', role: 'user' },
+  ]);
   assert.deepEqual(
     harness.session.messages.map((message) => ({ content: message.content, role: message.role })),
     [
@@ -408,10 +407,10 @@ test('createHarness emits live events in stable order without leaking raw conten
       turnId: toolRequestedEvent?.turnId,
       type: 'tool_requested',
     });
-    assert.deepEqual(
-      events[5] && events[5].type === 'tool_finished' ? events[5].resultDataKeys : undefined,
-      ['path', 'truncated'],
-    );
+    assert.deepEqual(events[5] && events[5].type === 'tool_finished' ? events[5].resultDataKeys : undefined, [
+      'path',
+      'truncated',
+    ]);
 
     const serializedEvents = JSON.stringify(events);
 
@@ -580,11 +579,11 @@ test('createHarness degrades malformed tool input into a normal tool error', asy
   const reply = await harness.sendUserMessage('trigger malformed tool call');
 
   assert.equal(reply.content, 'recovered');
-  assert.deepEqual(
-    events[3] && events[3].type === 'tool_requested' ? events[3].safeArgs : undefined,
-    {},
+  assert.deepEqual(events[3] && events[3].type === 'tool_requested' ? events[3].safeArgs : undefined, {});
+  assert.equal(
+    events.some((event) => event.type === 'turn_failed'),
+    false,
   );
-  assert.equal(events.some((event) => event.type === 'turn_failed'), false);
 });
 
 test('createHarness fans out traces to multiple loggers and isolates failures', async () => {
@@ -721,4 +720,44 @@ test('createHarness protects listeners from event mutation by other listeners', 
   } finally {
     await rm(rootDir, { force: true, recursive: true });
   }
+});
+
+test('createHarness emits provider_text_delta events when streaming is enabled', async () => {
+  const events: HarnessEvent[] = [];
+  const harness = createHarness({
+    providerInstance: new FakeProvider({
+      streamReply: [
+        { delta: 'hel', type: 'text_delta' },
+        { delta: 'lo', type: 'text_delta' },
+        { response: { text: 'hello' }, type: 'response_completed' },
+      ],
+    }),
+    sessionStore: new MemorySessionStore(),
+    stream: true,
+  });
+
+  harness.subscribe((event) => {
+    events.push(event);
+  });
+
+  const reply = await harness.sendUserMessage('hello');
+
+  assert.equal(reply.content, 'hello');
+  assert.deepEqual(
+    events.map((event) => event.type),
+    [
+      'turn_started',
+      'provider_requested',
+      'provider_text_delta',
+      'provider_text_delta',
+      'provider_responded',
+      'turn_finished',
+    ],
+  );
+  assert.deepEqual(
+    events
+      .filter((event) => event.type === 'provider_text_delta')
+      .map((event) => (event.type === 'provider_text_delta' ? event.delta : '')),
+    ['hel', 'lo'],
+  );
 });

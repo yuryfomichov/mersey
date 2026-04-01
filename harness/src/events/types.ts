@@ -6,6 +6,7 @@ export type HarnessEventBase = {
   type:
     | 'turn_started'
     | 'provider_requested'
+    | 'provider_text_delta'
     | 'provider_responded'
     | 'tool_requested'
     | 'tool_started'
@@ -44,6 +45,15 @@ export type ProviderRespondedEvent = HarnessEventBase & {
   toolCallCount: number;
   toolCallNames: string[];
   usedFallbackText: boolean;
+};
+
+export type ProviderTextDeltaEvent = HarnessEventBase & {
+  type: 'provider_text_delta';
+  delta: string;
+  deltaLength: number;
+  iteration: number;
+  model: string;
+  providerName: string;
 };
 
 export type SafeCommandArgSummary = {
@@ -119,6 +129,7 @@ export type TurnFailedEvent = HarnessEventBase & {
 export type HarnessEvent =
   | ProviderRequestedEvent
   | ProviderRespondedEvent
+  | ProviderTextDeltaEvent
   | ToolFinishedEvent
   | ToolRequestedEvent
   | ToolStartedEvent

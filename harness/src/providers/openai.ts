@@ -7,7 +7,7 @@ import type {
   ResponseInputItem,
 } from 'openai/resources/responses/responses';
 
-import type { ModelProvider, ModelRequest, ModelResponse } from '../models/index.js';
+import type { ModelRequest, ModelResponse, ModelStreamEvent, StreamingModelProvider } from '../models/index.js';
 
 function normalizeOpenAIObjectSchema(schema: unknown): unknown {
   if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
@@ -18,7 +18,12 @@ function normalizeOpenAIObjectSchema(schema: unknown): unknown {
     if (key === 'properties' && value && typeof value === 'object' && !Array.isArray(value)) {
       return [
         key,
-        Object.fromEntries(Object.entries(value).map(([propertyName, propertySchema]) => [propertyName, normalizeOpenAIObjectSchema(propertySchema)])),
+        Object.fromEntries(
+          Object.entries(value).map(([propertyName, propertySchema]) => [
+            propertyName,
+            normalizeOpenAIObjectSchema(propertySchema),
+          ]),
+        ),
       ];
     }
 
@@ -37,7 +42,9 @@ function normalizeOpenAIObjectSchema(schema: unknown): unknown {
 
   if (normalizedSchema.type === 'object') {
     const propertyNames =
-      normalizedSchema.properties && typeof normalizedSchema.properties === 'object' && !Array.isArray(normalizedSchema.properties)
+      normalizedSchema.properties &&
+      typeof normalizedSchema.properties === 'object' &&
+      !Array.isArray(normalizedSchema.properties)
         ? Object.keys(normalizedSchema.properties)
         : [];
 
@@ -83,7 +90,7 @@ function getOpenAIInputItems(input: ModelRequest): ResponseInputItem[] {
 
     const items: ResponseInputItem[] = [];
 
-    if (message.content) {
+    if (message.role === 'user' || message.role === 'assistant') {
       const openAIMessage: EasyInputMessage = {
         content: message.content,
         role: message.role,
@@ -143,6 +150,23 @@ function getOpenAIToolCalls(response: Response): ModelResponse['toolCalls'] {
   }));
 }
 
+function getOpenAIResponseText(response: Response): string {
+  const outputText =
+    typeof response.output_text === 'string'
+      ? response.output_text
+      : response.output
+          .flatMap((item) => {
+            if (item.type !== 'message') {
+              return [];
+            }
+
+            return item.content.flatMap((content) => (content.type === 'output_text' ? [content.text] : []));
+          })
+          .join('');
+
+  return outputText.trim();
+}
+
 export type OpenAILikeProviderConfig = {
   apiKey: string;
   baseUrl: string;
@@ -152,7 +176,7 @@ export type OpenAILikeProviderConfig = {
 
 export type OpenAIConfig = OpenAILikeProviderConfig;
 
-export class OpenAILikeProvider implements ModelProvider {
+export class OpenAILikeProvider implements StreamingModelProvider {
   protected readonly client: OpenAI;
   readonly maxTokens: number;
   readonly model: string;
@@ -167,22 +191,53 @@ export class OpenAILikeProvider implements ModelProvider {
     this.model = config.model;
   }
 
-  async generate(input: ModelRequest): Promise<ModelResponse> {
-    const inputItems = getOpenAIInputItems(input);
-
-    const response = await this.client.responses.create({
-      input: inputItems,
+  private getRequest(input: ModelRequest): {
+    input: ResponseInputItem[];
+    instructions: ModelRequest['systemPrompt'];
+    max_output_tokens: number;
+    model: string;
+    tools: FunctionTool[] | undefined;
+  } {
+    return {
+      input: getOpenAIInputItems(input),
       instructions: input.systemPrompt,
       max_output_tokens: this.maxTokens,
       model: this.model,
       tools: getOpenAITools(input),
-    });
+    };
+  }
+
+  async generate(input: ModelRequest): Promise<ModelResponse> {
+    const response = await this.client.responses.create(this.getRequest(input));
     const toolCalls = getOpenAIToolCalls(response);
-    const text = response.output_text.trim();
+    const text = getOpenAIResponseText(response);
 
     return {
       text,
       toolCalls,
+    };
+  }
+
+  async *stream(input: ModelRequest): AsyncIterable<ModelStreamEvent> {
+    const stream = this.client.responses.stream(this.getRequest(input));
+
+    for await (const event of stream) {
+      if (event.type === 'response.output_text.delta') {
+        yield {
+          delta: event.delta,
+          type: 'text_delta',
+        };
+      }
+    }
+
+    const response = await stream.finalResponse();
+
+    yield {
+      response: {
+        text: getOpenAIResponseText(response),
+        toolCalls: getOpenAIToolCalls(response),
+      },
+      type: 'response_completed',
     };
   }
 }

@@ -21,6 +21,7 @@ export type CreateHarnessOptions = {
   provider?: ProviderDefinition;
   sessionStore?: SessionStore;
   sessionId?: string;
+  stream?: boolean;
   systemPrompt?: string;
   toolPolicy?: ToolPolicy;
   tools?: Tool[];
@@ -86,6 +87,7 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
     provider: provider.name,
     runId: randomUUID(),
     sessionId: session.id,
+    stream: Boolean(options.stream),
   });
 
   let initializedSessionPromise: Promise<void> | null = null;
@@ -165,6 +167,7 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
         provider: resolvedProvider,
         session,
         sessionStore,
+        stream: options.stream,
         systemPrompt,
         toolPolicy,
         tools,

@@ -3,6 +3,8 @@ import type { HarnessLogger } from './logger/index.js';
 import { createLoopObserver } from './loop-observer.js';
 import type { ModelProvider } from './models/index.js';
 import type { ModelMessage } from './models/index.js';
+import { supportsStreaming } from './models/index.js';
+import type { ModelRequest, ModelResponse } from './models/index.js';
 import type { SessionStore } from './sessions/index.js';
 import type { Message, Session } from './sessions/index.js';
 import { createToolContext, executeToolCall, getToolDefinitions, getToolMap } from './tools/index.js';
@@ -21,6 +23,7 @@ export type RunLoopInput = {
   provider: ModelProvider;
   session: Session;
   sessionStore: SessionStore;
+  stream?: boolean;
   systemPrompt?: string;
   toolPolicy: ToolPolicy;
   tools: Tool[];
@@ -73,6 +76,63 @@ async function appendMessage(session: Session, sessionStore: SessionStore, messa
   session.messages.push(message);
 }
 
+async function getProviderResponse({
+  observer,
+  provider,
+  request,
+  iteration,
+  stream,
+}: {
+  observer: ReturnType<typeof createLoopObserver>;
+  provider: ModelProvider;
+  request: ModelRequest;
+  iteration: number;
+  stream: boolean | undefined;
+}): Promise<ModelResponse> {
+  const providerStartTime = Date.now();
+
+  if (!stream || !supportsStreaming(provider)) {
+    const response = await provider.generate(request);
+
+    observer.providerResponded(iteration, response, Date.now() - providerStartTime);
+    return response;
+  }
+
+  let response: ModelResponse | null = null;
+  let sawTextDelta = false;
+
+  try {
+    for await (const event of provider.stream(request)) {
+      if (event.type === 'text_delta') {
+        sawTextDelta ||= event.delta.length > 0;
+        observer.providerTextDelta(iteration, event.delta);
+        continue;
+      }
+
+      if (response) {
+        throw new Error('Provider stream returned more than one completed response.');
+      }
+
+      response = event.response;
+    }
+  } catch (error: unknown) {
+    if (response) {
+      // Preserve a completed streamed response if teardown fails afterward.
+    } else if (sawTextDelta) {
+      throw error;
+    } else {
+      response = await provider.generate(request);
+    }
+  }
+
+  if (!response) {
+    throw new Error('Provider stream ended without a completed response.');
+  }
+
+  observer.providerResponded(iteration, response, Date.now() - providerStartTime);
+  return response;
+}
+
 export async function runLoop({
   content,
   debug,
@@ -82,6 +142,7 @@ export async function runLoop({
   provider,
   session,
   sessionStore,
+  stream,
   systemPrompt,
   toolPolicy,
   tools,
@@ -120,14 +181,18 @@ export async function runLoop({
       observer.providerRequested(currentIteration, session.messages);
 
       currentErrorType = 'provider';
-      const providerStartTime = Date.now();
-      const response = await provider.generate({
-        messages: toModelMessages(session.messages),
-        systemPrompt: resolvedSystemPrompt,
-        tools: toolDefinitions,
+      const response = await getProviderResponse({
+        iteration: currentIteration,
+        observer,
+        provider,
+        request: {
+          messages: toModelMessages(session.messages),
+          systemPrompt: resolvedSystemPrompt,
+          tools: toolDefinitions,
+        },
+        stream,
       });
       currentErrorType = 'runtime';
-      observer.providerResponded(currentIteration, response, Date.now() - providerStartTime);
 
       if (response.toolCalls?.length) {
         toolIterations += 1;

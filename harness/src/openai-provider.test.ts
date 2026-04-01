@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import type OpenAI from 'openai';
 
+import type { ModelStreamEvent } from './models/index.js';
 import { OpenAILikeProvider } from './providers/openai.js';
 
 test('OpenAILikeProvider rejects incomplete function calls', async () => {
@@ -387,6 +388,212 @@ test('OpenAILikeProvider requires optional function properties for strict schema
       },
       strict: true,
       type: 'function',
+    },
+  ]);
+});
+
+test('OpenAILikeProvider streams text deltas and returns the final response', async () => {
+  const provider = new OpenAILikeProvider({
+    apiKey: 'test-key',
+    baseUrl: 'https://example.com',
+    maxTokens: 256,
+    model: 'gpt-test-model',
+  });
+
+  (
+    provider as unknown as {
+      client: {
+        responses: {
+          stream(): {
+            [Symbol.asyncIterator](): AsyncIterator<{
+              delta: string;
+              type: 'response.output_text.delta';
+            }>;
+            finalResponse(): Promise<OpenAI.Responses.Response>;
+          };
+        };
+      };
+    }
+  ).client = {
+    responses: {
+      stream() {
+        return {
+          async finalResponse(): Promise<OpenAI.Responses.Response> {
+            return {
+              created_at: 0,
+              error: null,
+              id: 'resp_stream_123',
+              incomplete_details: null,
+              instructions: null,
+              metadata: null,
+              model: 'gpt-test-model',
+              object: 'response',
+              output: [],
+              output_text: 'hello',
+              parallel_tool_calls: false,
+              temperature: null,
+              tool_choice: 'auto',
+            } as unknown as OpenAI.Responses.Response;
+          },
+          async *[Symbol.asyncIterator](): AsyncIterator<{
+            delta: string;
+            type: 'response.output_text.delta';
+          }> {
+            yield { delta: 'hel', type: 'response.output_text.delta' };
+            yield { delta: 'lo', type: 'response.output_text.delta' };
+          },
+        };
+      },
+    },
+  };
+
+  const events: ModelStreamEvent[] = [];
+
+  for await (const event of provider.stream({
+    messages: [{ content: 'hello', role: 'user' }],
+  })) {
+    events.push(event);
+  }
+
+  assert.deepEqual(events, [
+    { delta: 'hel', type: 'text_delta' },
+    { delta: 'lo', type: 'text_delta' },
+    { response: { text: 'hello', toolCalls: [] }, type: 'response_completed' },
+  ]);
+});
+
+test('OpenAILikeProvider derives streamed final text from output items when output_text is undefined', async () => {
+  const provider = new OpenAILikeProvider({
+    apiKey: 'test-key',
+    baseUrl: 'https://example.com',
+    maxTokens: 256,
+    model: 'gpt-test-model',
+  });
+
+  (
+    provider as unknown as {
+      client: {
+        responses: {
+          stream(): {
+            [Symbol.asyncIterator](): AsyncIterator<{
+              delta: string;
+              type: 'response.output_text.delta';
+            }>;
+            finalResponse(): Promise<OpenAI.Responses.Response>;
+          };
+        };
+      };
+    }
+  ).client = {
+    responses: {
+      stream() {
+        return {
+          async finalResponse(): Promise<OpenAI.Responses.Response> {
+            return {
+              created_at: 0,
+              error: null,
+              id: 'resp_stream_456',
+              incomplete_details: null,
+              instructions: null,
+              metadata: null,
+              model: 'gpt-test-model',
+              object: 'response',
+              output: [
+                {
+                  content: [
+                    {
+                      annotations: [],
+                      text: 'hello',
+                      type: 'output_text',
+                    },
+                  ],
+                  id: 'msg_123',
+                  role: 'assistant',
+                  status: 'completed',
+                  type: 'message',
+                },
+              ],
+              output_text: undefined,
+              parallel_tool_calls: false,
+              temperature: null,
+              tool_choice: 'auto',
+            } as unknown as OpenAI.Responses.Response;
+          },
+          async *[Symbol.asyncIterator](): AsyncIterator<{
+            delta: string;
+            type: 'response.output_text.delta';
+          }> {
+            yield { delta: 'hello', type: 'response.output_text.delta' };
+          },
+        };
+      },
+    },
+  };
+
+  const events: ModelStreamEvent[] = [];
+
+  for await (const event of provider.stream({
+    messages: [{ content: 'hello', role: 'user' }],
+  })) {
+    events.push(event);
+  }
+
+  assert.deepEqual(events, [
+    { delta: 'hello', type: 'text_delta' },
+    { response: { text: 'hello', toolCalls: [] }, type: 'response_completed' },
+  ]);
+});
+
+test('OpenAILikeProvider preserves empty-string messages in request input', async () => {
+  let capturedInput: unknown;
+  const provider = new OpenAILikeProvider({
+    apiKey: 'test-key',
+    baseUrl: 'https://example.com',
+    maxTokens: 256,
+    model: 'gpt-test-model',
+  });
+
+  (
+    provider as unknown as {
+      client: {
+        responses: {
+          create(request: { input?: unknown }): Promise<OpenAI.Responses.Response>;
+        };
+      };
+    }
+  ).client = {
+    responses: {
+      async create(request: { input?: unknown }): Promise<OpenAI.Responses.Response> {
+        capturedInput = request.input;
+
+        return {
+          created_at: 0,
+          error: null,
+          id: 'resp_empty_message_123',
+          incomplete_details: null,
+          instructions: null,
+          metadata: null,
+          model: 'gpt-test-model',
+          object: 'response',
+          output: [],
+          output_text: 'ok',
+          parallel_tool_calls: false,
+          temperature: null,
+          tool_choice: 'auto',
+        } as unknown as OpenAI.Responses.Response;
+      },
+    },
+  };
+
+  await provider.generate({
+    messages: [{ content: '', role: 'user' }],
+  });
+
+  assert.deepEqual(capturedInput, [
+    {
+      content: '',
+      role: 'user',
+      type: 'message',
     },
   ]);
 });

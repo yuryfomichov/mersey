@@ -4,8 +4,8 @@ import type { HarnessEvent, TurnFailedEvent } from './events/index.js';
 import { emitRuntimeTrace, type HarnessLogger, type HarnessRuntimeTraceType } from './logger/index.js';
 import type { ModelProvider, ModelResponse, ModelToolCall, ModelToolDefinition } from './models/index.js';
 import type { Message } from './sessions/index.js';
-import type { ToolExecutionResult } from './tools/index.js';
 import { getDebugToolArgs, getResultDataKeys, getSafeToolArgs, sanitizeErrorMessage } from './telemetry.js';
+import type { ToolExecutionResult } from './tools/index.js';
 
 type LoopObserverInput = {
   debug?: boolean;
@@ -22,6 +22,7 @@ export type LoopObserver = {
   iterationStarted(iteration: number, messageCount: number): void;
   providerRequested(iteration: number, messages: Message[]): void;
   providerResponded(iteration: number, response: ModelResponse, durationMs: number): void;
+  providerTextDelta(iteration: number, delta: string): void;
   toolFinished(iteration: number, toolCall: ModelToolCall, toolResult: ToolExecutionResult, durationMs: number): void;
   toolRequested(iteration: number, toolCall: ModelToolCall): void;
   toolStarted(iteration: number, toolCall: ModelToolCall): void;
@@ -48,7 +49,14 @@ function getToolCallNames(toolCalls: { name: string }[] | undefined): string[] {
   return toolCalls?.map((toolCall) => toolCall.name) ?? [];
 }
 
-export function createLoopObserver({ debug, emitEvent, logger, provider, sessionId, toolDefinitions }: LoopObserverInput): LoopObserver {
+export function createLoopObserver({
+  debug,
+  emitEvent,
+  logger,
+  provider,
+  sessionId,
+  toolDefinitions,
+}: LoopObserverInput): LoopObserver {
   const turnId = randomUUID();
   const turnStartTime = Date.now();
 
@@ -160,7 +168,27 @@ export function createLoopObserver({ debug, emitEvent, logger, provider, session
       });
     },
 
-    toolFinished(iteration: number, toolCall: ModelToolCall, toolResult: ToolExecutionResult, durationMs: number): void {
+    providerTextDelta(iteration: number, delta: string): void {
+      publishEvent({
+        delta,
+        deltaLength: delta.length,
+        id: randomUUID(),
+        iteration,
+        model: provider.model,
+        providerName: provider.name,
+        sessionId,
+        timestamp: new Date().toISOString(),
+        turnId,
+        type: 'provider_text_delta',
+      });
+    },
+
+    toolFinished(
+      iteration: number,
+      toolCall: ModelToolCall,
+      toolResult: ToolExecutionResult,
+      durationMs: number,
+    ): void {
       publishEvent({
         durationMs,
         id: randomUUID(),
