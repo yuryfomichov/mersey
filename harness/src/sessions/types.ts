@@ -1,4 +1,4 @@
-import type { ModelToolCall } from '../models/index.js';
+import type { ModelToolCall } from '../models/types.js';
 
 export type UserMessage = {
   role: 'user';

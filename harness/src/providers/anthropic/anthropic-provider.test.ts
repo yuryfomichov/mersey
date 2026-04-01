@@ -3,9 +3,8 @@ import test from 'node:test';
 
 import Anthropic from '@anthropic-ai/sdk';
 
-import type { ModelStreamEvent } from './models/index.js';
-import type { ModelRequest } from './models/index.js';
-import { AnthropicLikeProvider } from './providers/anthropic.js';
+import type { ModelRequest, ModelStreamEvent } from '../../models/types.js';
+import { AnthropicLikeProvider } from '../anthropic.js';
 
 function createAnthropicMessage(content: Anthropic.Message['content']): Anthropic.Message {
   return {

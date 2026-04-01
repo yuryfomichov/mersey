@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { createToolContext, WriteFileTool } from './index.js';
+import { createToolContext } from './context.js';
+import { WriteFileTool } from './write-file.js';
 
 test('WriteFileTool writes files relative to the workspace root', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));

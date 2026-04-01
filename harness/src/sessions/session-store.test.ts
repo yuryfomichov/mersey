@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { FilesystemSessionStore, MemorySessionStore, type Message, type Session } from './sessions.js';
+import { FilesystemSessionStore } from './filesystem-store.js';
+import { MemorySessionStore } from './memory-store.js';
+import type { Message, Session } from './types.js';
 
 async function verifyStoreRoundTrip(store: {
   appendMessage(sessionId: string, message: Message): Promise<void>;

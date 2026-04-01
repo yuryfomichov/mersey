@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { createJsonlFileLogger, createTextFileLogger } from './logger/index.js';
+import { createJsonlFileLogger } from './jsonl.js';
+import { createTextFileLogger } from './text.js';
 
 test('createJsonlFileLogger writes one trace per line', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-logger-'));

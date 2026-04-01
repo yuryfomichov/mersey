@@ -1,12 +1,5 @@
 import type { HarnessLogger, HarnessRuntimeTraceType } from './types.js';
 
-export { createJsonlFileLogger } from './jsonl.js';
-export type { FileLoggerOptions } from './file.js';
-export type { JsonlFileLoggerOptions } from './jsonl.js';
-export { createTextFileLogger } from './text.js';
-export type { TextFileLoggerOptions } from './text.js';
-export type { HarnessLogger, HarnessRuntimeTrace, HarnessRuntimeTraceType } from './types.js';
-
 export function emitRuntimeTrace(
   logger: HarnessLogger | undefined,
   type: HarnessRuntimeTraceType,

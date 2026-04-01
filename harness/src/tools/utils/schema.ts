@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import type { ModelToolDefinition, ModelToolInput } from '../../models/index.js';
+import type { ModelToolDefinition, ModelToolInput } from '../../models/types.js';
 
 export function parseToolInput<TSchema extends z.ZodType>(schema: TSchema, input: ModelToolInput): z.infer<TSchema> {
   const result = schema.safeParse(input);

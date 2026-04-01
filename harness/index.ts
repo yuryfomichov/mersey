@@ -1,7 +1,30 @@
 export { createHarness } from './src/harness.js';
-export { createJsonlFileLogger, createTextFileLogger } from './src/logger/index.js';
 export type { CreateHarnessOptions, Harness } from './src/harness.js';
-export type { HarnessEvent, HarnessEventListener } from './src/events/index.js';
-export type { HarnessLogger, HarnessRuntimeTrace } from './src/logger/index.js';
-export type { TurnChunk } from './src/loop.js';
-export type { ModelProvider, ModelStreamEvent, StreamingModelProvider } from './src/models/index.js';
+
+export type {
+  HarnessEvent,
+  HarnessEventListener,
+} from './src/events/types.js';
+
+export { createJsonlFileLogger } from './src/logger/jsonl.js';
+export { createTextFileLogger } from './src/logger/text.js';
+export type { HarnessLogger } from './src/logger/types.js';
+
+export type { TurnChunk } from './src/loop/loop.js';
+
+export type { ModelProvider, StreamingModelProvider } from './src/models/provider.js';
+
+export { parseProviderName } from './src/providers/factory.js';
+export type { ProviderDefinition, ProviderName } from './src/providers/factory.js';
+
+export { FilesystemSessionStore } from './src/sessions/filesystem-store.js';
+export { MemorySessionStore } from './src/sessions/memory-store.js';
+export type { Message, Session } from './src/sessions/types.js';
+export type { SessionStore } from './src/sessions/store.js';
+
+export { EditFileTool } from './src/tools/edit-file.js';
+export { ReadFileTool } from './src/tools/read-file.js';
+export { RunCommandTool } from './src/tools/run-command.js';
+export { WriteFileTool } from './src/tools/write-file.js';
+export type { ToolPolicy } from './src/tools/context.js';
+export type { Tool } from './src/tools/types.js';

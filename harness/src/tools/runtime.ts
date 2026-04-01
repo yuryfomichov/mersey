@@ -1,4 +1,4 @@
-import type { ModelToolCall, ModelToolDefinition } from '../models/index.js';
+import type { ModelToolCall, ModelToolDefinition } from '../models/types.js';
 import type { ToolContext } from './context.js';
 import type { Tool, ToolExecutionResult } from './types.js';
 
