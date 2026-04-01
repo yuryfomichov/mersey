@@ -26,7 +26,7 @@ export class WriteFileTool implements Tool {
   readonly name = 'write_file';
 
   getApprovalRequirement(): ToolApprovalRequirement {
-    return WriteFileTool.approvalRequirement;
+    return { ...WriteFileTool.approvalRequirement };
   }
 
   async execute(input: ModelToolInput, context: ToolContext): Promise<ToolExecuteResult> {

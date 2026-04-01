@@ -51,6 +51,9 @@ test('RunCommandTool only auto-allows trusted commands', () => {
   const tool = new RunCommandTool({ trustedCommands: ['pwd'] });
 
   assert.deepEqual(tool.getApprovalRequirement({ command: 'pwd' }), { mode: 'auto' });
+  assert.deepEqual(tool.getApprovalRequirement({ args: ['status'], command: 'pwd' }), { mode: 'require' });
+  assert.deepEqual(tool.getApprovalRequirement({ command: 'pwd', cwd: '.' }), { mode: 'require' });
+  assert.deepEqual(tool.getApprovalRequirement({ command: 'pwd', timeoutMs: 1 }), { mode: 'require' });
   assert.deepEqual(tool.getApprovalRequirement({ command: 'git' }), { mode: 'require' });
   assert.deepEqual(tool.getApprovalRequirement({}), { mode: 'require' });
 });

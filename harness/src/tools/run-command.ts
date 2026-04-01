@@ -84,7 +84,17 @@ export class RunCommandTool implements Tool {
       return { mode: 'require' };
     }
 
-    return this.trustedCommands.has(parsed.data.command) ? { mode: 'auto' } : { mode: 'require' };
+    const { args, command, cwd, timeoutMs } = parsed.data;
+
+    if (!this.trustedCommands.has(command)) {
+      return { mode: 'require' };
+    }
+
+    const hasArgs = Array.isArray(args) && args.length > 0;
+    const hasCwd = cwd !== undefined;
+    const hasTimeout = timeoutMs !== undefined;
+
+    return !hasArgs && !hasCwd && !hasTimeout ? { mode: 'auto' } : { mode: 'require' };
   }
 
   async execute(input: ModelToolInput, context: ToolContext): Promise<ToolExecuteResult> {

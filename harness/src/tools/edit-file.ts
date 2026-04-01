@@ -44,7 +44,7 @@ export class EditFileTool implements Tool {
   readonly name = 'edit_file';
 
   getApprovalRequirement(): ToolApprovalRequirement {
-    return EditFileTool.approvalRequirement;
+    return { ...EditFileTool.approvalRequirement };
   }
 
   async execute(input: ModelToolInput, context: ToolContext): Promise<ToolExecuteResult> {

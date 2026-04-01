@@ -21,7 +21,7 @@ export class ReadFileTool implements Tool {
   readonly name = 'read_file';
 
   getApprovalRequirement(): ToolApprovalRequirement {
-    return ReadFileTool.approvalRequirement;
+    return { ...ReadFileTool.approvalRequirement };
   }
 
   async execute(input: ModelToolInput, context: ToolContext): Promise<ToolExecuteResult> {

@@ -11,7 +11,7 @@ import type { ModelProvider, ModelRequest, ModelResponse } from './models/index.
 import { parseProviderName } from './providers/factory.js';
 import { FakeProvider, type FakeProviderOptions } from './providers/fake.js';
 import { MemorySessionStore } from './sessions.js';
-import type { Message, Session, SessionStore } from './sessions/index.js';
+import type { Message, Session, SessionStatePatch, SessionStore } from './sessions/index.js';
 import { ReadFileTool, RunCommandTool, WriteFileTool } from './tools.js';
 import type { Tool } from './tools.js';
 
@@ -414,6 +414,66 @@ test('createHarness does not rerun an approved tool after a persisted append fai
   assert.equal(await secondHarness.getPendingApproval(), null);
 });
 
+test('createHarness retries approved state persistence after tool execution', async () => {
+  class FailOnceApprovedStateStore extends MemorySessionStore {
+    private failed = false;
+
+    override async updateSessionState(sessionId: string, patch: SessionStatePatch): Promise<void> {
+      if (!this.failed && patch.pendingApproval?.stage === 'approved_executed') {
+        this.failed = true;
+        throw new Error('transient state failure');
+      }
+
+      await super.updateSessionState(sessionId, patch);
+    }
+  }
+
+  let executions = 0;
+  const tool: Tool = {
+    description: 'Performs a side effect.',
+    async execute() {
+      executions += 1;
+
+      return {
+        content: `side effect:${executions}`,
+      };
+    },
+    getApprovalRequirement() {
+      return { mode: 'require' } as const;
+    },
+    inputSchema: {
+      properties: {},
+      type: 'object',
+    },
+    name: 'side_effect',
+  };
+  const harness = createHarness({
+    providerInstance: new FakeProvider({
+      reply: (input) => {
+        const lastMessage = input.messages.at(-1);
+
+        if (lastMessage?.role === 'tool') {
+          return { text: 'done after retry' };
+        }
+
+        return {
+          text: '',
+          toolCalls: [{ id: 'call-side-effect-1', input: {}, name: 'side_effect' }],
+        };
+      },
+    }),
+    sessionStore: new FailOnceApprovedStateStore(),
+    toolPolicy: { workspaceRoot: process.cwd() },
+    tools: [tool],
+  });
+
+  expectAwaitingApproval(await harness.sendUserMessage('do the side effect'));
+  const reply = expectCompleted(await harness.approvePendingTool());
+
+  assert.equal(reply.content, 'done after retry');
+  assert.equal(executions, 1);
+});
+
 test('createHarness resumes remaining tool calls from the same assistant response after approval', async () => {
   await withWorkspaceRoot(async (rootDir) => {
     let callCount = 0;
@@ -805,7 +865,7 @@ test('createHarness falls back cleanly after a blank post-tool reply', async () 
           toolCalls: [
             {
               id: 'call-pwd-1',
-              input: { args: ['pwd'], command: 'pwd' },
+              input: { command: 'pwd' },
               name: 'run_command',
             },
           ],
@@ -959,15 +1019,16 @@ test('createHarness includes debugArgs when debug is enabled', async () => {
       },
     }),
     sessionStore: new MemorySessionStore(),
-    toolPolicy: { workspaceRoot: process.cwd() },
-    tools: [new RunCommandTool({ trustedCommands: ['git'] })],
+    toolPolicy: { commandAllowlist: ['git'], workspaceRoot: process.cwd() },
+    tools: [new RunCommandTool({ trustedCommands: ['pwd'] })],
   });
 
   harness.subscribe((event) => {
     events.push(event);
   });
 
-  const reply = expectCompleted(await harness.sendUserMessage('run git status'));
+  expectAwaitingApproval(await harness.sendUserMessage('run git status'));
+  const reply = expectCompleted(await harness.approvePendingTool());
   const toolRequestedEvent = events.find((event) => event.type === 'tool_requested');
   const toolTrace = traces.find((trace) => trace.type === 'tool_execution_started');
 
