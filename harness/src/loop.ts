@@ -1,3 +1,6 @@
+import type { HarnessEvent } from './events/index.js';
+import type { HarnessLogger } from './logger/index.js';
+import { createLoopObserver } from './loop-observer.js';
 import type { ModelProvider } from './models/index.js';
 import type { ModelMessage } from './models/index.js';
 import type { SessionStore } from './sessions/index.js';
@@ -11,6 +14,9 @@ export type RunLoopOptions = {
 
 export type RunLoopInput = {
   content: string;
+  debug?: boolean;
+  emitEvent?: (event: HarnessEvent) => void;
+  logger?: HarnessLogger;
   options?: RunLoopOptions;
   provider: ModelProvider;
   session: Session;
@@ -20,7 +26,7 @@ export type RunLoopInput = {
   tools: Tool[];
 };
 
-const DEFAULT_MAX_TOOL_ITERATIONS = 8;
+const DEFAULT_MAX_TOOL_ITERATIONS = 12;
 
 function getFallbackAssistantContent(response: { text: string; toolCalls?: { length: number } }): string {
   if (response.text.trim()) {
@@ -69,6 +75,9 @@ async function appendMessage(session: Session, sessionStore: SessionStore, messa
 
 export async function runLoop({
   content,
+  debug,
+  emitEvent,
+  logger,
   options,
   provider,
   session,
@@ -77,57 +86,92 @@ export async function runLoop({
   toolPolicy,
   tools,
 }: RunLoopInput): Promise<Message> {
+  let currentIteration = 0;
+  let currentErrorType: 'provider' | 'tool' | 'runtime' = 'runtime';
+  let totalToolCalls = 0;
+
   const userMessage: Message = {
     role: 'user',
     content,
     createdAt: new Date().toISOString(),
   };
-
-  await appendMessage(session, sessionStore, userMessage);
-
-  const resolvedSystemPrompt = systemPrompt?.trim() ? systemPrompt : undefined;
   const toolDefinitions = getToolDefinitions(tools);
   const toolsByName = getToolMap(tools);
   const toolContext = createToolContext(toolPolicy);
   const maxToolIterations = options?.maxToolIterations ?? DEFAULT_MAX_TOOL_ITERATIONS;
   let toolIterations = 0;
+  const observer = createLoopObserver({
+    debug,
+    emitEvent,
+    logger,
+    provider,
+    sessionId: session.id,
+    toolDefinitions,
+  });
+  observer.turnStarted(content.length);
+  const resolvedSystemPrompt = systemPrompt?.trim() ? systemPrompt : undefined;
 
-  while (true) {
-    const response = await provider.generate({
-      messages: toModelMessages(session.messages),
-      systemPrompt: resolvedSystemPrompt,
-      tools: toolDefinitions,
-    });
+  try {
+    await appendMessage(session, sessionStore, userMessage);
 
-    if (response.toolCalls?.length) {
-      toolIterations += 1;
+    while (true) {
+      currentIteration += 1;
+      observer.iterationStarted(currentIteration, session.messages.length);
+      observer.providerRequested(currentIteration, session.messages);
 
-      if (toolIterations > maxToolIterations) {
-        throw new Error(`Tool loop exceeded ${maxToolIterations} iterations.`);
+      currentErrorType = 'provider';
+      const providerStartTime = Date.now();
+      const response = await provider.generate({
+        messages: toModelMessages(session.messages),
+        systemPrompt: resolvedSystemPrompt,
+        tools: toolDefinitions,
+      });
+      currentErrorType = 'runtime';
+      observer.providerResponded(currentIteration, response, Date.now() - providerStartTime);
+
+      if (response.toolCalls?.length) {
+        toolIterations += 1;
+        totalToolCalls += response.toolCalls.length;
+
+        if (toolIterations > maxToolIterations) {
+          throw new Error(`Tool loop exceeded ${maxToolIterations} iterations.`);
+        }
+      }
+
+      const assistantMessage: Message = {
+        content: getFallbackAssistantContent(response),
+        createdAt: new Date().toISOString(),
+        role: 'assistant',
+        toolCalls: response.toolCalls,
+      };
+
+      await appendMessage(session, sessionStore, assistantMessage);
+
+      if (!response.toolCalls?.length) {
+        observer.turnFinished(currentIteration, totalToolCalls, assistantMessage.content.length);
+
+        return assistantMessage;
+      }
+
+      for (const toolCall of response.toolCalls) {
+        observer.toolRequested(currentIteration, toolCall);
+        observer.toolStarted(currentIteration, toolCall);
+
+        currentErrorType = 'tool';
+        const toolStartTime = Date.now();
+        const toolResult = await executeToolCall(toolCall, toolsByName, toolContext);
+        currentErrorType = 'runtime';
+        observer.toolFinished(currentIteration, toolCall, toolResult, Date.now() - toolStartTime);
+
+        await appendMessage(session, sessionStore, {
+          ...toolResult,
+          createdAt: new Date().toISOString(),
+          role: 'tool',
+        });
       }
     }
-
-    const assistantMessage: Message = {
-      content: getFallbackAssistantContent(response),
-      createdAt: new Date().toISOString(),
-      role: 'assistant',
-      toolCalls: response.toolCalls,
-    };
-
-    await appendMessage(session, sessionStore, assistantMessage);
-
-    if (!response.toolCalls?.length) {
-      return assistantMessage;
-    }
-
-    for (const toolCall of response.toolCalls) {
-      const toolResult = await executeToolCall(toolCall, toolsByName, toolContext);
-
-      await appendMessage(session, sessionStore, {
-        ...toolResult,
-        createdAt: new Date().toISOString(),
-        role: 'tool',
-      });
-    }
+  } catch (error: unknown) {
+    observer.turnFailed(currentIteration, currentErrorType, error);
+    throw error;
   }
 }

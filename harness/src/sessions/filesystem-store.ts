@@ -1,6 +1,7 @@
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { assertValidSessionId } from './utils.js';
 import type { SessionStore } from './store.js';
 import type { Message, Session } from './types.js';
 
@@ -12,16 +13,6 @@ type SessionMetadata = Omit<Session, 'messages'>;
 
 function isErrnoCode(error: unknown, code: string): boolean {
   return error instanceof Error && 'code' in error && error.code === code;
-}
-
-function assertValidSessionId(sessionId: string): void {
-  if (!sessionId || sessionId === '.' || sessionId === '..') {
-    throw new Error(`Invalid session id: ${sessionId}`);
-  }
-
-  if (!/^[A-Za-z0-9._-]+$/.test(sessionId)) {
-    throw new Error(`Invalid session id: ${sessionId}`);
-  }
 }
 
 export class FilesystemSessionStore implements SessionStore {
@@ -106,7 +97,13 @@ export class FilesystemSessionStore implements SessionStore {
       const contents = await readFile(this.getMessagesPath(sessionId), 'utf8');
       const lines = contents.split('\n').filter(Boolean);
 
-      return lines.map((line) => JSON.parse(line) as Message);
+      return lines.flatMap((line) => {
+        try {
+          return [JSON.parse(line) as Message];
+        } catch {
+          return [];
+        }
+      });
     } catch (error: unknown) {
       if (isErrnoCode(error, 'ENOENT')) {
         return [];

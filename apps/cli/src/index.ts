@@ -4,6 +4,7 @@ import { createInterface } from 'node:readline/promises';
 import { createHarness } from '../../../harness/index.js';
 import { parseProviderName, type ProviderName } from '../../../harness/providers.js';
 import { EditFileTool, ReadFileTool, RunCommandTool, WriteFileTool } from '../../../harness/tools.js';
+import { createCliLoggers } from './logging.js';
 import { getProviderDefinition } from './provider-config.js';
 import { createSessionStore, formatSessionStore, getSessionStoreDefinition } from './session-store.js';
 
@@ -51,18 +52,36 @@ function getSessionId(args: string[]): string | undefined {
   return undefined;
 }
 
+function getDebugMode(args: string[]): boolean {
+  for (const arg of args) {
+    if (arg === '--debug' || arg === '--debug=true') {
+      return true;
+    }
+
+    if (arg === '--debug=false') {
+      return false;
+    }
+  }
+
+  return false;
+}
+
 function getProviderModel(provider: ReturnType<typeof getProviderDefinition>): string | null {
   return 'config' in provider && provider.config?.model ? provider.config.model : null;
 }
 
 async function main(): Promise<void> {
   const args = argv.slice(2);
+  const debug = getDebugMode(args);
   const providerName = getProviderName(args);
   const providerDefinition = getProviderDefinition(providerName);
-  const sessionId = getSessionId(args);
+  const sessionId = getSessionId(args) ?? 'local-session';
   const sessionStoreDefinition = getSessionStoreDefinition(args);
   const cli = createInterface({ input, output });
+  const { logPaths, loggers } = await createCliLoggers(sessionId);
   const harness = createHarness({
+    debug,
+    loggers,
     provider: providerDefinition,
     sessionId,
     sessionStore: createSessionStore(sessionStoreDefinition),
@@ -85,6 +104,8 @@ async function main(): Promise<void> {
   }
   output.write(`session: ${harness.session.id}\n`);
   output.write(`${formatSessionStore(sessionStoreDefinition)}\n`);
+  output.write(`debug: ${String(debug)}\n`);
+  output.write(`logs: ${logPaths.jsonlPath}, ${logPaths.textPath}\n`);
   output.write("Type a message or 'exit' to quit.\n\n");
 
   try {
