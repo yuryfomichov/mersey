@@ -43,6 +43,7 @@ export type ModelMessage = ModelUserMessage | ModelAssistantMessage | ModelToolR
 
 export type ModelRequest = {
   messages: ModelMessage[];
+  signal?: AbortSignal;
   systemPrompt?: string;
   tools?: ModelToolDefinition[];
 };

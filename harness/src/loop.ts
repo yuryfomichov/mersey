@@ -21,6 +21,7 @@ export type RunLoopInput = {
   logger?: HarnessLogger;
   options?: RunLoopOptions;
   provider: ModelProvider;
+  signal?: AbortSignal;
   session: Session;
   sessionStore: SessionStore;
   stream?: boolean;
@@ -43,6 +44,10 @@ export type TurnChunk =
     };
 
 const DEFAULT_MAX_TOOL_ITERATIONS = 12;
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  signal?.throwIfAborted();
+}
 
 function getFallbackAssistantContent(response: { text: string; toolCalls?: { length: number } }): string {
   if (response.text.trim()) {
@@ -94,18 +99,21 @@ function getProviderResponse({
   provider,
   request,
   iteration,
+  signal,
   stream,
 }: {
   observer: ReturnType<typeof createLoopObserver>;
   provider: ModelProvider;
   request: ModelRequest;
   iteration: number;
+  signal: AbortSignal | undefined;
   stream: boolean | undefined;
 }): AsyncIterable<{ delta: string; type: 'text_delta' } | { response: ModelResponse; type: 'response_completed' }> {
   const providerStartTime = Date.now();
 
   if (!stream || !supportsStreaming(provider)) {
     return (async function* () {
+      throwIfAborted(signal);
       const response = await provider.generate(request);
 
       observer.providerResponded(iteration, response, Date.now() - providerStartTime);
@@ -122,7 +130,11 @@ function getProviderResponse({
     let sawTextDelta = false;
 
     try {
+      throwIfAborted(signal);
+
       for await (const event of provider.stream(request)) {
+        throwIfAborted(signal);
+
         if (event.type === 'text_delta') {
           sawTextDelta ||= event.delta.length > 0;
           observer.providerTextDelta(iteration, event.delta);
@@ -147,6 +159,7 @@ function getProviderResponse({
       } else if (sawTextDelta) {
         throw error;
       } else {
+        throwIfAborted(signal);
         response = await provider.generate(request);
       }
     }
@@ -171,6 +184,7 @@ export async function* streamLoop({
   logger,
   options,
   provider,
+  signal,
   session,
   sessionStore,
   stream,
@@ -189,7 +203,7 @@ export async function* streamLoop({
   };
   const toolDefinitions = getToolDefinitions(tools);
   const toolsByName = getToolMap(tools);
-  const toolContext = createToolContext(toolPolicy);
+  const toolContext = createToolContext(toolPolicy, { signal });
   const maxToolIterations = options?.maxToolIterations ?? DEFAULT_MAX_TOOL_ITERATIONS;
   let toolIterations = 0;
   const observer = createLoopObserver({
@@ -204,6 +218,7 @@ export async function* streamLoop({
   const resolvedSystemPrompt = systemPrompt?.trim() ? systemPrompt : undefined;
 
   try {
+    throwIfAborted(signal);
     await appendMessage(session, sessionStore, userMessage);
 
     while (true) {
@@ -212,6 +227,7 @@ export async function* streamLoop({
       observer.providerRequested(currentIteration, session.messages);
 
       currentErrorType = 'provider';
+      throwIfAborted(signal);
       let response: ModelResponse | null = null;
       let streamedAssistantDelta = false;
 
@@ -221,11 +237,15 @@ export async function* streamLoop({
         provider,
         request: {
           messages: toModelMessages(session.messages),
+          signal,
           systemPrompt: resolvedSystemPrompt,
           tools: toolDefinitions,
         },
+        signal,
         stream,
       })) {
+        throwIfAborted(signal);
+
         if (providerEvent.type === 'text_delta') {
           if (providerEvent.delta.length > 0) {
             streamedAssistantDelta = true;
@@ -247,6 +267,7 @@ export async function* streamLoop({
       }
 
       currentErrorType = 'runtime';
+      throwIfAborted(signal);
 
       if (response.toolCalls?.length) {
         toolIterations += 1;
@@ -284,6 +305,7 @@ export async function* streamLoop({
       }
 
       for (const toolCall of response.toolCalls) {
+        throwIfAborted(signal);
         observer.toolRequested(currentIteration, toolCall);
         observer.toolStarted(currentIteration, toolCall);
 
@@ -291,6 +313,7 @@ export async function* streamLoop({
         const toolStartTime = Date.now();
         const toolResult = await executeToolCall(toolCall, toolsByName, toolContext);
         currentErrorType = 'runtime';
+        throwIfAborted(signal);
         observer.toolFinished(currentIteration, toolCall, toolResult, Date.now() - toolStartTime);
 
         await appendMessage(session, sessionStore, {

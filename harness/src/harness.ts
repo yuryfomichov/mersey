@@ -226,6 +226,7 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
 
   function enqueueStream(content: string): AsyncIterable<TurnChunk> & AsyncIterator<TurnChunk> {
     const queue = createAsyncQueue<TurnChunk>();
+    const abortController = new AbortController();
     let started = false;
 
     const start = (): void => {
@@ -284,6 +285,7 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
             },
             logger: runtimeLogger,
             provider: resolvedProvider,
+            signal: abortController.signal,
             session,
             sessionStore,
             stream: options.stream,
@@ -316,6 +318,7 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
           return Promise.resolve({ done: true, value: undefined });
         }
 
+        abortController.abort();
         return queue.iterable.return?.() ?? Promise.resolve({ done: true, value: undefined });
       },
     };

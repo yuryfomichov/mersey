@@ -79,7 +79,7 @@ function assertWriteSizeWithinLimit(content: string, maxBytes: number, toolName:
   }
 }
 
-export function createToolContext(policy: ToolPolicy): ToolContext {
+export function createToolContext(policy: ToolPolicy, options: { signal?: AbortSignal } = {}): ToolContext {
   let canonicalWorkspaceRootPromise: Promise<string> | null = null;
 
   async function getCanonicalWorkspaceRoot(): Promise<string> {
@@ -110,6 +110,7 @@ export function createToolContext(policy: ToolPolicy): ToolContext {
           policy,
           getCanonicalWorkspaceRoot,
           (cwd, cwdToolName) => resolvePathInWorkspace(cwd, policy.workspaceRoot, { toolName: cwdToolName }),
+          options.signal,
         );
       },
     },
@@ -144,11 +145,15 @@ export function createToolContext(policy: ToolPolicy): ToolContext {
       limitResult(text: string): ToolOutputLimitResult {
         return limitText(text, policy.maxToolResultBytes ?? getDefaultToolResultBytes());
       },
-      limitText(text: string, maxBytes: number = policy.maxToolResultBytes ?? getDefaultToolResultBytes()): ToolOutputLimitResult {
+      limitText(
+        text: string,
+        maxBytes: number = policy.maxToolResultBytes ?? getDefaultToolResultBytes(),
+      ): ToolOutputLimitResult {
         return limitText(text, maxBytes);
       },
     },
     policy,
+    signal: options.signal,
   };
 }
 

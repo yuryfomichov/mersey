@@ -148,7 +148,7 @@ export class AnthropicLikeProvider implements StreamingModelProvider {
   }
 
   async generate(input: ModelRequest): Promise<ModelResponse> {
-    const response = await this.client.messages.create(this.getRequest(input));
+    const response = await this.client.messages.create(this.getRequest(input), { signal: input.signal });
     const toolCalls = getAnthropicToolCalls(response);
     const text = getResponseText(response);
 
@@ -159,7 +159,7 @@ export class AnthropicLikeProvider implements StreamingModelProvider {
   }
 
   async *stream(input: ModelRequest): AsyncIterable<ModelStreamEvent> {
-    const stream = this.client.messages.stream(this.getRequest(input));
+    const stream = this.client.messages.stream(this.getRequest(input), { signal: input.signal });
 
     for await (const event of stream) {
       if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {

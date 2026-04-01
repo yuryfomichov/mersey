@@ -208,7 +208,7 @@ export class OpenAILikeProvider implements StreamingModelProvider {
   }
 
   async generate(input: ModelRequest): Promise<ModelResponse> {
-    const response = await this.client.responses.create(this.getRequest(input));
+    const response = await this.client.responses.create(this.getRequest(input), { signal: input.signal });
     const toolCalls = getOpenAIToolCalls(response);
     const text = getOpenAIResponseText(response);
 
@@ -219,7 +219,7 @@ export class OpenAILikeProvider implements StreamingModelProvider {
   }
 
   async *stream(input: ModelRequest): AsyncIterable<ModelStreamEvent> {
-    const stream = this.client.responses.stream(this.getRequest(input));
+    const stream = this.client.responses.stream(this.getRequest(input), { signal: input.signal });
 
     for await (const event of stream) {
       if (event.type === 'response.output_text.delta') {

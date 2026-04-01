@@ -588,6 +588,50 @@ test('createHarness streamUserMessage starts on first pull and pre-consumption r
   });
 });
 
+test('createHarness streamUserMessage return aborts an active turn and frees the queue', async () => {
+  const harness = createHarness({
+    providerInstance: new FakeProvider({
+      streamReply: async function* (input: ModelRequest) {
+        if (input.messages.at(-1)?.role === 'user' && input.messages.at(-1)?.content === 'second') {
+          yield { response: { text: 'reply:second' }, type: 'response_completed' };
+          return;
+        }
+
+        yield { delta: 'partial', type: 'text_delta' };
+
+        await new Promise((_, reject) => {
+          input.signal?.addEventListener(
+            'abort',
+            () => {
+              reject(input.signal?.reason);
+            },
+            { once: true },
+          );
+        });
+      },
+    }),
+    sessionStore: new MemorySessionStore(),
+    stream: true,
+  });
+
+  const iterator = harness.streamUserMessage('first')[Symbol.asyncIterator]();
+  const firstChunk = await iterator.next();
+
+  assert.equal(firstChunk.done, false);
+  assert.equal(firstChunk.value.type, 'assistant_delta');
+
+  await iterator.return?.();
+
+  const reply = await Promise.race([
+    harness.sendUserMessage('second'),
+    delay(1_000).then(() => {
+      throw new Error('second turn stayed blocked after stream cancellation');
+    }),
+  ]);
+
+  assert.equal(reply.content, 'reply:second');
+});
+
 test('createHarness degrades malformed tool input into a normal tool error', async () => {
   let callCount = 0;
   const events: HarnessEvent[] = [];
