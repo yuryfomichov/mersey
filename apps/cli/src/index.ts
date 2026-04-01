@@ -4,7 +4,7 @@ import { createInterface } from 'node:readline/promises';
 import { createHarness } from '../../../harness/index.js';
 import { parseProviderName, type ProviderName } from '../../../harness/providers.js';
 import { EditFileTool, ReadFileTool, RunCommandTool, WriteFileTool } from '../../../harness/tools.js';
-import { createCliLoggers, writeCliRunMarker } from './logging.js';
+import { createCliLoggers } from './logging.js';
 import { getProviderDefinition } from './provider-config.js';
 import { createSessionStore, formatSessionStore, getSessionStoreDefinition } from './session-store.js';
 
@@ -79,11 +79,6 @@ async function main(): Promise<void> {
   const sessionStoreDefinition = getSessionStoreDefinition(args);
   const cli = createInterface({ input, output });
   const { logPaths, loggers } = await createCliLoggers(sessionId);
-  await writeCliRunMarker(loggers, {
-    debug,
-    provider: providerName,
-    sessionId,
-  });
   const harness = createHarness({
     debug,
     loggers,

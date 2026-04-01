@@ -1,7 +1,7 @@
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { assertValidSessionId } from './session-id.js';
+import { assertValidSessionId } from './utils.js';
 import type { SessionStore } from './store.js';
 import type { Message, Session } from './types.js';
 

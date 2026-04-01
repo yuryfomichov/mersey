@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { createCliLoggers, getCliLogPaths, writeCliRunMarker } from './logging.js';
+import { createCliLoggers, getCliLogPaths } from './logging.js';
 
 test('getCliLogPaths uses the session id under logs/', () => {
   const logPaths = getCliLogPaths('session-123', '/workspace/project');
@@ -54,55 +54,4 @@ test('getCliLogPaths does not echo the raw invalid session id in the error', () 
     () => getCliLogPaths('bad\nvalue', '/workspace/project'),
     (error: unknown) => error instanceof Error && error.message === 'Invalid session id.',
   );
-});
-
-test('writeCliRunMarker appends a session_started marker to both log files', async () => {
-  const cwd = await mkdtemp(join(tmpdir(), 'mersey-cli-'));
-
-  try {
-    const { logPaths, loggers } = await createCliLoggers('session-789', cwd);
-    const marker = await writeCliRunMarker(loggers, {
-      debug: true,
-      provider: 'openai',
-      sessionId: 'session-789',
-    });
-
-    const jsonlContents = await readFile(logPaths.jsonlPath, 'utf8');
-    const textContents = await readFile(logPaths.textPath, 'utf8');
-
-    assert.match(jsonlContents, new RegExp(`"type":"session_started"`));
-    assert.match(jsonlContents, new RegExp(`"runId":"${marker.runId}"`));
-    assert.match(textContents, /session_started/);
-    assert.match(textContents, new RegExp(`runId=${marker.runId}`));
-  } finally {
-    await rm(cwd, { force: true, recursive: true });
-  }
-});
-
-test('writeCliRunMarker swallows individual logger failures', async () => {
-  const events: Array<Record<string, unknown>> = [];
-
-  const marker = await writeCliRunMarker(
-    [
-      {
-        log(event): void {
-          events.push(event as Record<string, unknown>);
-        },
-      },
-      {
-        async log(): Promise<void> {
-          throw new Error('logger failed');
-        },
-      },
-    ],
-    {
-      debug: false,
-      provider: 'fake',
-      sessionId: 'session-999',
-    },
-  );
-
-  assert.equal(events.length, 1);
-  assert.equal(events[0]?.type, 'session_started');
-  assert.equal(marker.sessionId, 'session-999');
 });

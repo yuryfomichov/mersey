@@ -177,7 +177,7 @@ export class OpenAILikeProvider implements ModelProvider {
       model: this.model,
       tools: getOpenAITools(input),
     });
-    const toolCalls = getOpenAIToolCalls(response) ?? [];
+    const toolCalls = getOpenAIToolCalls(response);
     const text = response.output_text.trim();
 
     return {

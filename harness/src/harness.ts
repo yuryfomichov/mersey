@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import type { HarnessEvent, HarnessEventListener } from './events/index.js';
 import { emitRuntimeTrace, type HarnessLogger } from './logger/index.js';
 import { runLoop } from './loop.js';
@@ -78,6 +80,13 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
     createdAt: new Date().toISOString(),
     messages: [],
   };
+
+  emitRuntimeTrace(runtimeLogger, 'session_started', {
+    debug: Boolean(options.debug),
+    provider: provider.name,
+    runId: randomUUID(),
+    sessionId: session.id,
+  });
 
   let initializedSessionPromise: Promise<void> | null = null;
   // Queue sendUserMessage calls so one session cannot mutate its transcript concurrently.

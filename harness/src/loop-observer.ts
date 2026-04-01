@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import type { HarnessEvent, TurnFailedEvent } from './events/index.js';
-import { emitRuntimeTrace, type HarnessLogger } from './logger/index.js';
+import { emitRuntimeTrace, type HarnessLogger, type HarnessRuntimeTraceType } from './logger/index.js';
 import type { ModelProvider, ModelResponse, ModelToolCall, ModelToolDefinition } from './models/index.js';
 import type { Message } from './sessions/index.js';
 import type { ToolExecutionResult } from './tools/index.js';
@@ -72,7 +72,12 @@ export function createLoopObserver({ debug, emitEvent, logger, provider, session
 
   const getToolDefinitionNames = (): string[] => toolDefinitions?.map((tool) => tool.name) ?? [];
 
-  const emitToolTrace = (type: string, iteration: number, toolCall: ModelToolCall, detail: Record<string, unknown>): void => {
+  const emitToolTrace = (
+    type: HarnessRuntimeTraceType,
+    iteration: number,
+    toolCall: ModelToolCall,
+    detail: Record<string, unknown>,
+  ): void => {
     const debugArgs = getDebugToolArgs(toolCall.input, { debug });
 
     emitRuntimeTrace(logger, type, {

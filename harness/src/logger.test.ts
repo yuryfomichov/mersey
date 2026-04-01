@@ -16,14 +16,14 @@ test('createJsonlFileLogger writes one trace per line', async () => {
     await logger.log({
       detail: { model: 'fake-model', toolCallCount: 1 },
       timestamp: '2026-03-31T12:00:00.000Z',
-      type: 'provider_response_received',
+      type: 'provider_response_finished',
     });
 
     const contents = await readFile(path, 'utf8');
 
     assert.equal(
       contents,
-      '{"detail":{"model":"fake-model","toolCallCount":1},"timestamp":"2026-03-31T12:00:00.000Z","type":"provider_response_received"}\n',
+      '{"detail":{"model":"fake-model","toolCallCount":1},"timestamp":"2026-03-31T12:00:00.000Z","type":"provider_response_finished"}\n',
     );
   } finally {
     await rm(rootDir, { force: true, recursive: true });
@@ -40,14 +40,14 @@ test('createTextFileLogger writes human-readable summary lines', async () => {
     await logger.log({
       detail: { durationMs: 42, model: 'fake-model', toolCallCount: 1 },
       timestamp: '2026-03-31T12:00:00.000Z',
-      type: 'provider_response_received',
+      type: 'provider_response_finished',
     });
 
     const contents = await readFile(path, 'utf8');
 
     assert.equal(
       contents,
-      '2026-03-31T12:00:00.000Z provider_response_received durationMs=42 model=fake-model toolCallCount=1\n',
+      '2026-03-31T12:00:00.000Z provider_response_finished durationMs=42 model=fake-model toolCallCount=1\n',
     );
   } finally {
     await rm(rootDir, { force: true, recursive: true });
@@ -87,7 +87,7 @@ test('file loggers preserve write order under concurrent calls', async () => {
     const events = Array.from({ length: 200 }, (_, index) => ({
       detail: { index },
       timestamp: `2026-03-31T12:00:${String(index).padStart(2, '0')}.000Z`,
-      type: 'event_emitted',
+      type: 'event_emitted' as const,
     }));
 
     await Promise.all(events.map((event) => jsonlLogger.log(event)));

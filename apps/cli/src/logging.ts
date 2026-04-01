@@ -1,5 +1,4 @@
 import { mkdir, writeFile } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 
 import { createJsonlFileLogger, createTextFileLogger, type HarnessLogger } from '../../../harness/index.js';
@@ -9,13 +8,6 @@ export type CliLogPaths = {
   jsonlPath: string;
   logsDir: string;
   textPath: string;
-};
-
-export type CliRunMarker = {
-  debug: boolean;
-  provider: string;
-  runId: string;
-  sessionId: string;
 };
 
 export function getCliLogPaths(sessionId: string, cwd: string = process.cwd()): CliLogPaths {
@@ -45,34 +37,5 @@ export async function createCliLoggers(sessionId: string, cwd: string = process.
   return {
     logPaths,
     loggers: [createJsonlFileLogger({ path: logPaths.jsonlPath }), createTextFileLogger({ path: logPaths.textPath })],
-  };
-}
-
-export async function writeCliRunMarker(loggers: HarnessLogger[], marker: Omit<CliRunMarker, 'runId'>): Promise<CliRunMarker> {
-  const runId = randomUUID();
-  const event = {
-    detail: {
-      debug: marker.debug,
-      provider: marker.provider,
-      runId,
-      sessionId: marker.sessionId,
-    },
-    timestamp: new Date().toISOString(),
-    type: 'session_started',
-  } as const;
-
-  await Promise.allSettled(
-    loggers.map(async (logger) => {
-      try {
-        await logger.log(event);
-      } catch {
-        // CLI logging is best-effort and must not block startup.
-      }
-    }),
-  );
-
-  return {
-    ...marker,
-    runId,
   };
 }

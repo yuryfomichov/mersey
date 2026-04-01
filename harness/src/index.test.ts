@@ -609,9 +609,9 @@ test('createHarness fans out traces to multiple loggers and isolates failures', 
   const reply = await harness.sendUserMessage('hello');
 
   assert.equal(reply.content, 'reply:hello');
+  assert.ok(recordedTraces.some((trace) => trace.type === 'session_started'));
   assert.ok(recordedTraces.some((trace) => trace.type === 'event_emitted'));
   assert.ok(recordedTraces.some((trace) => trace.type === 'loop_iteration_started'));
-  assert.equal(recordedTraces.some((trace) => trace.type === 'provider_request_mapped'), false);
 });
 
 test('createHarness does not wait for async loggers', async () => {
