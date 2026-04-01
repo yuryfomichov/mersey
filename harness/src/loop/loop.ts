@@ -1,25 +1,26 @@
-import type { HarnessEvent } from './events/index.js';
-import type { HarnessLogger } from './logger/index.js';
-import { createLoopObserver } from './loop-observer.js';
-import type { ModelProvider } from './models/index.js';
-import type { ModelMessage } from './models/index.js';
-import { supportsStreaming } from './models/index.js';
-import type { ModelRequest, ModelResponse } from './models/index.js';
-import type { SessionStore } from './sessions/index.js';
-import type { Message, Session } from './sessions/index.js';
-import { createToolContext, executeToolCall, getToolDefinitions, getToolMap } from './tools/index.js';
-import type { Tool, ToolPolicy } from './tools/index.js';
+import type { HarnessEvent } from '../events/types.js';
+import type { HarnessLogger } from '../logger/types.js';
+import type { ModelProvider } from '../models/provider.js';
+import { supportsStreaming } from '../models/provider.js';
+import type { ModelMessage, ModelRequest, ModelResponse } from '../models/types.js';
+import type { SessionStore } from '../sessions/store.js';
+import type { Message, Session } from '../sessions/types.js';
+import { createToolContext } from '../tools/context.js';
+import type { ToolPolicy } from '../tools/context.js';
+import { executeToolCall, getToolDefinitions, getToolMap } from '../tools/runtime.js';
+import type { Tool } from '../tools/types.js';
+import { createLoopObserver } from './observer.js';
 
-export type RunLoopOptions = {
+export type LoopOptions = {
   maxToolIterations?: number;
 };
 
-export type RunLoopInput = {
+export type LoopInput = {
   content: string;
   debug?: boolean;
   emitEvent?: (event: HarnessEvent) => void;
   logger?: HarnessLogger;
-  options?: RunLoopOptions;
+  options?: LoopOptions;
   provider: ModelProvider;
   signal?: AbortSignal;
   session: Session;
@@ -191,7 +192,7 @@ export async function* streamLoop({
   systemPrompt,
   toolPolicy,
   tools,
-}: RunLoopInput): AsyncIterable<TurnChunk> {
+}: LoopInput): AsyncIterable<TurnChunk> {
   let currentIteration = 0;
   let currentErrorType: 'provider' | 'tool' | 'runtime' = 'runtime';
   let totalToolCalls = 0;
@@ -327,20 +328,4 @@ export async function* streamLoop({
     observer.turnFailed(currentIteration, currentErrorType, error);
     throw error;
   }
-}
-
-export async function runLoop(input: RunLoopInput): Promise<Message> {
-  let finalMessage: Message | null = null;
-
-  for await (const chunk of streamLoop(input)) {
-    if (chunk.type === 'final_message') {
-      finalMessage = chunk.message;
-    }
-  }
-
-  if (!finalMessage) {
-    throw new Error('Loop ended without a final assistant message.');
-  }
-
-  return finalMessage;
 }

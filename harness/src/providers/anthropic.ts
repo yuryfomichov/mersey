@@ -7,7 +7,8 @@ import type {
   ToolUseBlock,
 } from '@anthropic-ai/sdk/resources/messages/messages';
 
-import type { ModelRequest, ModelResponse, ModelStreamEvent, StreamingModelProvider } from '../models/index.js';
+import type { StreamingModelProvider } from '../models/provider.js';
+import type { ModelRequest, ModelResponse, ModelStreamEvent } from '../models/types.js';
 
 export type AnthropicLikeProviderConfig = {
   apiKey: string;

@@ -1,4 +1,4 @@
-import type { ProviderDefinition, ProviderName } from '../../../harness/providers.js';
+import type { ProviderDefinition, ProviderName } from '../../../harness/index.js';
 
 const MINIMAX_PROVIDER_CONFIG = {
   baseUrl: 'https://api.minimax.io/anthropic',

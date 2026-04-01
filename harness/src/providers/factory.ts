@@ -1,4 +1,4 @@
-import type { ModelProvider } from '../models/index.js';
+import type { ModelProvider } from '../models/provider.js';
 import { FakeProvider } from './fake.js';
 import type { FakeProviderOptions } from './fake.js';
 import { MinimaxProvider } from './minimax.js';

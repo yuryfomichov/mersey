@@ -7,7 +7,8 @@ import type {
   ResponseInputItem,
 } from 'openai/resources/responses/responses';
 
-import type { ModelRequest, ModelResponse, ModelStreamEvent, StreamingModelProvider } from '../models/index.js';
+import type { StreamingModelProvider } from '../models/provider.js';
+import type { ModelRequest, ModelResponse, ModelStreamEvent } from '../models/types.js';
 
 function normalizeOpenAIObjectSchema(schema: unknown): unknown {
   if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {

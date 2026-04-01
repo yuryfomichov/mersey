@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { createToolContext, RunCommandTool } from './index.js';
+import { createToolContext } from './context.js';
+import { RunCommandTool } from './run-command.js';
 
 test('RunCommandTool executes allowlisted commands with structured result data', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));

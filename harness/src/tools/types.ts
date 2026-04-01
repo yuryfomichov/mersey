@@ -1,4 +1,4 @@
-import type { ModelToolDefinition, ModelToolInput } from '../models/index.js';
+import type { ModelToolDefinition, ModelToolInput } from '../models/types.js';
 import type { ToolContext } from './context.js';
 
 export type ToolResultData = Record<string, unknown>;

@@ -3,8 +3,8 @@ import test from 'node:test';
 
 import type OpenAI from 'openai';
 
-import type { ModelStreamEvent } from './models/index.js';
-import { OpenAILikeProvider } from './providers/openai.js';
+import type { ModelStreamEvent } from '../../models/types.js';
+import { OpenAILikeProvider } from '../openai.js';
 
 test('OpenAILikeProvider rejects incomplete function calls', async () => {
   const provider = new OpenAILikeProvider({

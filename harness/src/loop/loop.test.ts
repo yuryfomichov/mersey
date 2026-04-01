@@ -1,13 +1,29 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import type { HarnessEvent } from './events/index.js';
-import { runLoop, streamLoop } from './loop.js';
-import { FakeProvider } from './providers/fake.js';
-import { MemorySessionStore } from './sessions.js';
-import type { Session } from './sessions/index.js';
+import type { HarnessEvent } from '../events/types.js';
+import { streamLoop } from './loop.js';
+import { FakeProvider } from '../providers/fake.js';
+import { MemorySessionStore } from '../sessions/memory-store.js';
+import type { Message, Session } from '../sessions/types.js';
 
-test('runLoop forwards systemPrompt to provider on every generate call including tool-loop iterations', async () => {
+async function collectFinalMessage(input: Parameters<typeof streamLoop>[0]): Promise<Message> {
+  let finalMessage: Message | null = null;
+
+  for await (const chunk of streamLoop(input)) {
+    if (chunk.type === 'final_message') {
+      finalMessage = chunk.message;
+    }
+  }
+
+  if (!finalMessage) {
+    throw new Error('Loop ended without a final assistant message.');
+  }
+
+  return finalMessage;
+}
+
+test('streamLoop forwards systemPrompt to provider on every generate call including tool-loop iterations', async () => {
   const sessionStore = new MemorySessionStore();
   const session: Session = {
     createdAt: new Date().toISOString(),
@@ -33,7 +49,7 @@ test('runLoop forwards systemPrompt to provider on every generate call including
     },
   });
 
-  await runLoop({
+  await collectFinalMessage({
     content: 'hello',
     provider,
     session,
@@ -48,7 +64,7 @@ test('runLoop forwards systemPrompt to provider on every generate call including
   assert.equal(provider.requests[1].systemPrompt, 'You are a helpful assistant.');
 });
 
-test('runLoop omits systemPrompt from provider request when not provided', async () => {
+test('streamLoop omits systemPrompt from provider request when not provided', async () => {
   const sessionStore = new MemorySessionStore();
   const session: Session = {
     createdAt: new Date().toISOString(),
@@ -60,7 +76,7 @@ test('runLoop omits systemPrompt from provider request when not provided', async
 
   const provider = new FakeProvider();
 
-  await runLoop({
+  await collectFinalMessage({
     content: 'hello',
     provider,
     session,
@@ -73,7 +89,7 @@ test('runLoop omits systemPrompt from provider request when not provided', async
   assert.equal(provider.requests[0].systemPrompt, undefined);
 });
 
-test('runLoop normalizes empty-string systemPrompt to undefined', async () => {
+test('streamLoop normalizes empty-string systemPrompt to undefined', async () => {
   const sessionStore = new MemorySessionStore();
   const session: Session = {
     createdAt: new Date().toISOString(),
@@ -85,7 +101,7 @@ test('runLoop normalizes empty-string systemPrompt to undefined', async () => {
 
   const provider = new FakeProvider();
 
-  await runLoop({
+  await collectFinalMessage({
     content: 'hello',
     provider,
     session,
@@ -99,7 +115,7 @@ test('runLoop normalizes empty-string systemPrompt to undefined', async () => {
   assert.equal(provider.requests[0].systemPrompt, undefined);
 });
 
-test('runLoop does not persist assistant tool calls when the tool iteration cap is exceeded', async () => {
+test('streamLoop does not persist assistant tool calls when the tool iteration cap is exceeded', async () => {
   const sessionStore = new MemorySessionStore();
   const session: Session = {
     createdAt: new Date().toISOString(),
@@ -111,7 +127,7 @@ test('runLoop does not persist assistant tool calls when the tool iteration cap 
 
   await assert.rejects(
     () =>
-      runLoop({
+      collectFinalMessage({
         content: 'trigger tool loop',
         options: { maxToolIterations: 0 },
         provider: new FakeProvider({
@@ -144,7 +160,7 @@ test('runLoop does not persist assistant tool calls when the tool iteration cap 
   );
 });
 
-test('runLoop swallows event sink failures', async () => {
+test('streamLoop swallows event sink failures', async () => {
   const sessionStore = new MemorySessionStore();
   const session: Session = {
     createdAt: new Date().toISOString(),
@@ -154,7 +170,7 @@ test('runLoop swallows event sink failures', async () => {
 
   await sessionStore.createSession(session);
 
-  const reply = await runLoop({
+  const reply = await collectFinalMessage({
     content: 'hello',
     emitEvent(): void {
       throw new Error('sink failed');
@@ -173,7 +189,7 @@ test('runLoop swallows event sink failures', async () => {
   );
 });
 
-test('runLoop owns fallback text when provider returns an empty non-tool reply', async () => {
+test('streamLoop owns fallback text when provider returns an empty non-tool reply', async () => {
   const sessionStore = new MemorySessionStore();
   const session: Session = {
     createdAt: new Date().toISOString(),
@@ -183,7 +199,7 @@ test('runLoop owns fallback text when provider returns an empty non-tool reply',
 
   await sessionStore.createSession(session);
 
-  const reply = await runLoop({
+  const reply = await collectFinalMessage({
     content: 'hello',
     provider: new FakeProvider({
       reply: {
@@ -252,7 +268,7 @@ test('streamLoop yields assistant deltas and final message while events stay coa
   );
 });
 
-test('runLoop falls back to batch generation when streaming is enabled but unsupported', async () => {
+test('streamLoop falls back to batch generation when streaming is enabled but unsupported', async () => {
   const sessionStore = new MemorySessionStore();
   const session: Session = {
     createdAt: new Date().toISOString(),
@@ -271,7 +287,7 @@ test('runLoop falls back to batch generation when streaming is enabled but unsup
       return { text: 'batch reply' };
     },
   };
-  const reply = await runLoop({
+  const reply = await collectFinalMessage({
     content: 'hello',
     provider,
     session,
@@ -285,7 +301,7 @@ test('runLoop falls back to batch generation when streaming is enabled but unsup
   assert.equal(reply.content, 'batch reply');
 });
 
-test('runLoop falls back to batch generation when streaming fails before any deltas', async () => {
+test('streamLoop falls back to batch generation when streaming fails before any deltas', async () => {
   const sessionStore = new MemorySessionStore();
   const session: Session = {
     createdAt: new Date().toISOString(),
@@ -307,7 +323,7 @@ test('runLoop falls back to batch generation when streaming fails before any del
       throw new Error('stream failed');
     },
   };
-  const reply = await runLoop({
+  const reply = await collectFinalMessage({
     content: 'hello',
     provider,
     session,
@@ -321,7 +337,7 @@ test('runLoop falls back to batch generation when streaming fails before any del
   assert.equal(reply.content, 'batch reply');
 });
 
-test('runLoop falls back to batch generation when streaming emits only empty deltas before failing', async () => {
+test('streamLoop falls back to batch generation when streaming emits only empty deltas before failing', async () => {
   const sessionStore = new MemorySessionStore();
   const session: Session = {
     createdAt: new Date().toISOString(),
@@ -344,7 +360,7 @@ test('runLoop falls back to batch generation when streaming emits only empty del
       throw new Error('stream failed');
     },
   };
-  const reply = await runLoop({
+  const reply = await collectFinalMessage({
     content: 'hello',
     provider,
     session,
@@ -358,7 +374,7 @@ test('runLoop falls back to batch generation when streaming emits only empty del
   assert.equal(reply.content, 'batch reply');
 });
 
-test('runLoop keeps a completed streamed response when stream teardown fails', async () => {
+test('streamLoop keeps a completed streamed response when stream teardown fails', async () => {
   const sessionStore = new MemorySessionStore();
   const session: Session = {
     createdAt: new Date().toISOString(),
@@ -381,7 +397,7 @@ test('runLoop keeps a completed streamed response when stream teardown fails', a
       throw new Error('stream teardown failed');
     },
   };
-  const reply = await runLoop({
+  const reply = await collectFinalMessage({
     content: 'hello',
     provider,
     session,

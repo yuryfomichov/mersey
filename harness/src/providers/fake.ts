@@ -1,4 +1,5 @@
-import type { ModelRequest, ModelResponse, ModelStreamEvent, StreamingModelProvider } from '../models/index.js';
+import type { StreamingModelProvider } from '../models/provider.js';
+import type { ModelRequest, ModelResponse, ModelStreamEvent } from '../models/types.js';
 
 type FakeProviderReply = string | ModelResponse | ((input: ModelRequest) => string | ModelResponse);
 type FakeProviderStreamReply =

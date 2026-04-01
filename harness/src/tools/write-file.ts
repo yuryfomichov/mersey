@@ -3,7 +3,7 @@ import { dirname } from 'node:path';
 
 import { z } from 'zod';
 
-import type { ModelToolInput } from '../models/index.js';
+import type { ModelToolInput } from '../models/types.js';
 import type { ToolContext } from './context.js';
 import type { Tool, ToolExecuteResult } from './types.js';
 import { parseToolInput, toToolInputSchema } from './utils/schema.js';

@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { createToolContext, executeToolCall, getToolMap, ReadFileTool } from './index.js';
+import { createToolContext } from './context.js';
+import { ReadFileTool } from './read-file.js';
+import { executeToolCall } from './runtime.js';
+import { getToolMap } from './runtime.js';
 
 test('ReadFileTool reads files relative to the workspace root', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));

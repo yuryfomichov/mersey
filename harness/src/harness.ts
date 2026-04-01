@@ -1,113 +1,19 @@
 import { randomUUID } from 'node:crypto';
 
-import type { HarnessEvent, HarnessEventListener } from './events/index.js';
-import { emitRuntimeTrace, type HarnessLogger } from './logger/index.js';
-import { streamLoop, type TurnChunk } from './loop.js';
-import type { ModelProvider } from './models/index.js';
-import { createProvider, type ProviderDefinition } from './providers/index.js';
-import { MemorySessionStore, type Message, type Session, type SessionStore } from './sessions/index.js';
-import type { Tool, ToolPolicy } from './tools/index.js';
-
-type AsyncQueue<T> = {
-  end(): void;
-  fail(error: unknown): void;
-  iterable: AsyncIterable<T> & AsyncIterator<T>;
-  push(value: T): void;
-};
-
-function createAsyncQueue<T>(): AsyncQueue<T> {
-  const values: IteratorResult<T>[] = [];
-  const waiters: Array<{
-    reject(error: unknown): void;
-    resolve(result: IteratorResult<T>): void;
-  }> = [];
-  let done = false;
-  let failure: unknown;
-  let hasFailure = false;
-
-  const close = (result: IteratorResult<T>): void => {
-    const pendingWaiters = waiters.splice(0, waiters.length);
-
-    for (const waiter of pendingWaiters) {
-      waiter.resolve(result);
-    }
-  };
-
-  return {
-    end(): void {
-      if (done || hasFailure) {
-        return;
-      }
-
-      done = true;
-      close({ done: true, value: undefined });
-    },
-
-    fail(error: unknown): void {
-      if (done || hasFailure) {
-        return;
-      }
-
-      hasFailure = true;
-      failure = error;
-
-      const pendingWaiters = waiters.splice(0, waiters.length);
-
-      for (const waiter of pendingWaiters) {
-        waiter.reject(error);
-      }
-    },
-
-    iterable: {
-      [Symbol.asyncIterator](): AsyncIterator<T> {
-        return this;
-      },
-
-      next(): Promise<IteratorResult<T>> {
-        const nextValue = values.shift();
-
-        if (nextValue) {
-          return Promise.resolve(nextValue);
-        }
-
-        if (hasFailure) {
-          return Promise.reject(failure);
-        }
-
-        if (done) {
-          return Promise.resolve({ done: true, value: undefined });
-        }
-
-        return new Promise((resolve, reject) => {
-          waiters.push({ reject, resolve });
-        });
-      },
-
-      return(): Promise<IteratorResult<T>> {
-        done = true;
-        values.length = 0;
-        close({ done: true, value: undefined });
-
-        return Promise.resolve({ done: true, value: undefined });
-      },
-    },
-
-    push(value: T): void {
-      if (done || hasFailure) {
-        return;
-      }
-
-      const waiter = waiters.shift();
-
-      if (waiter) {
-        waiter.resolve({ done: false, value });
-        return;
-      }
-
-      values.push({ done: false, value });
-    },
-  };
-}
+import type { HarnessEvent, HarnessEventListener } from './events/types.js';
+import { createFanoutLogger } from './logger/fanout.js';
+import { emitRuntimeTrace } from './logger/runtime-trace.js';
+import type { HarnessLogger } from './logger/types.js';
+import { streamLoop, type TurnChunk } from './loop/loop.js';
+import { createAsyncQueue } from './loop/queue.js';
+import type { ModelProvider } from './models/provider.js';
+import { createProvider, type ProviderDefinition } from './providers/factory.js';
+import { MemorySessionStore } from './sessions/memory-store.js';
+import { ensureSession } from './sessions/session-init.js';
+import type { Message, Session } from './sessions/types.js';
+import type { SessionStore } from './sessions/store.js';
+import type { Tool } from './tools/types.js';
+import type { ToolPolicy } from './tools/context.js';
 
 export type Harness = {
   session: Session;
@@ -128,28 +34,6 @@ export type CreateHarnessOptions = {
   toolPolicy?: ToolPolicy;
   tools?: Tool[];
 };
-
-function createFanoutLogger(loggers: HarnessLogger[] | undefined): HarnessLogger | undefined {
-  if (!loggers?.length) {
-    return undefined;
-  }
-
-  return {
-    log(event): void {
-      for (const logger of loggers) {
-        try {
-          const result = logger.log(event);
-
-          if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
-            void Promise.resolve(result).catch(() => {});
-          }
-        } catch {
-          // Logger failures are best-effort and isolated.
-        }
-      }
-    },
-  };
-}
 
 function deepFreeze<T>(value: T): T {
   if (!value || typeof value !== 'object') {
@@ -192,37 +76,7 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
     stream: Boolean(options.stream),
   });
 
-  let initializedSessionPromise: Promise<void> | null = null;
-  // Queue sendUserMessage calls so one session cannot mutate its transcript concurrently.
   let sendQueue: Promise<void> = Promise.resolve();
-
-  async function ensureSession(): Promise<void> {
-    if (initializedSessionPromise) {
-      return initializedSessionPromise;
-    }
-
-    initializedSessionPromise = (async () => {
-      try {
-        const existingSession = await sessionStore.getSession(session.id);
-
-        if (existingSession) {
-          session.createdAt = existingSession.createdAt;
-          session.messages = existingSession.messages;
-          return;
-        }
-
-        const createdSession = await sessionStore.createSession(session);
-
-        session.createdAt = createdSession.createdAt;
-        session.messages = createdSession.messages;
-      } catch (error: unknown) {
-        initializedSessionPromise = null;
-        throw error;
-      }
-    })();
-
-    return initializedSessionPromise;
-  }
 
   function enqueueStream(content: string): AsyncIterable<TurnChunk> & AsyncIterator<TurnChunk> {
     const queue = createAsyncQueue<TurnChunk>();
@@ -236,7 +90,7 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
 
       started = true;
 
-      const sessionReady = ensureSession();
+      const sessionReady = ensureSession({ session, sessionStore });
       const waitForTurn = sendQueue;
       let releaseTurn!: () => void;
 

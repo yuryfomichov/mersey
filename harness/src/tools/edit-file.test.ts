@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { createToolContext, EditFileTool } from './index.js';
+import { createToolContext } from './context.js';
+import { EditFileTool } from './edit-file.js';
 
 test('EditFileTool replaces exactly one matching string', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));

@@ -1,9 +1,15 @@
 import { argv, stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
 
-import { createHarness } from '../../../harness/index.js';
-import { parseProviderName, type ProviderName } from '../../../harness/providers.js';
-import { EditFileTool, ReadFileTool, RunCommandTool, WriteFileTool } from '../../../harness/tools.js';
+import {
+  createHarness,
+  EditFileTool,
+  parseProviderName,
+  ReadFileTool,
+  RunCommandTool,
+  type ProviderName,
+  WriteFileTool,
+} from '../../../harness/index.js';
 import { createCliLoggers } from './logging.js';
 import { getProviderDefinition } from './provider-config.js';
 import { createSessionStore, formatSessionStore, getSessionStoreDefinition } from './session-store.js';

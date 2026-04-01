@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 
-import type { HarnessEvent, TurnFailedEvent } from './events/index.js';
-import { emitRuntimeTrace, type HarnessLogger, type HarnessRuntimeTraceType } from './logger/index.js';
-import type { ModelProvider, ModelResponse, ModelToolCall, ModelToolDefinition } from './models/index.js';
-import type { Message } from './sessions/index.js';
+import type { HarnessEvent, TurnFailedEvent } from '../events/types.js';
+import { emitRuntimeTrace } from '../logger/runtime-trace.js';
+import type { HarnessLogger, HarnessRuntimeTraceType } from '../logger/types.js';
+import type { ModelProvider } from '../models/provider.js';
+import type { ModelResponse, ModelToolCall, ModelToolDefinition } from '../models/types.js';
+import type { Message } from '../sessions/types.js';
 import { getDebugToolArgs, getResultDataKeys, getSafeToolArgs, sanitizeErrorMessage } from './telemetry.js';
-import type { ToolExecutionResult } from './tools/index.js';
+import type { ToolExecutionResult } from '../tools/types.js';
 
 type LoopObserverInput = {
   debug?: boolean;

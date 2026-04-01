@@ -2,7 +2,16 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { createJsonlFileLogger, createTextFileLogger, type HarnessLogger } from '../../../harness/index.js';
-import { assertValidSessionId } from '../../../harness/sessions.js';
+
+function assertValidSessionId(sessionId: string): void {
+  if (!sessionId || sessionId === '.' || sessionId === '..') {
+    throw new Error('Invalid session id.');
+  }
+
+  if (!/^[A-Za-z0-9._-]+$/.test(sessionId)) {
+    throw new Error('Invalid session id.');
+  }
+}
 
 export type CliLogPaths = {
   jsonlPath: string;

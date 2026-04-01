@@ -6,13 +6,17 @@ import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { createHarness } from './harness.js';
-import type { HarnessEvent, HarnessRuntimeTrace } from './index.js';
-import type { ModelProvider, ModelRequest, ModelResponse } from './models/index.js';
+import type { HarnessEvent } from './events/types.js';
+import type { HarnessRuntimeTrace } from './logger/types.js';
+import type { ModelProvider } from './models/provider.js';
+import type { ModelRequest, ModelResponse } from './models/types.js';
 import { parseProviderName } from './providers/factory.js';
 import { FakeProvider } from './providers/fake.js';
-import { MemorySessionStore } from './sessions.js';
-import type { Message, Session, SessionStore } from './sessions/index.js';
-import { ReadFileTool, RunCommandTool } from './tools.js';
+import { MemorySessionStore } from './sessions/memory-store.js';
+import type { Message, Session } from './sessions/types.js';
+import type { SessionStore } from './sessions/store.js';
+import { ReadFileTool } from './tools/read-file.js';
+import { RunCommandTool } from './tools/run-command.js';
 
 test('createHarness uses the injected provider and appends session history', async () => {
   const provider = new FakeProvider();
