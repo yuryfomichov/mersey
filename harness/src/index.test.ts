@@ -25,6 +25,14 @@ function expectAwaitingApproval(result: TurnResult): Extract<TurnResult, { statu
   return result.approval;
 }
 
+function expectResumable(result: TurnResult | null): TurnResult {
+  if (result === null) {
+    throw new Error('Expected pending turn to be resumable.');
+  }
+
+  return result;
+}
+
 async function withWorkspaceRoot(run: (rootDir: string) => Promise<void>): Promise<void> {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
 
@@ -405,9 +413,9 @@ test('createHarness does not rerun an approved tool after a persisted append fai
   });
   const pendingApproval = await secondHarness.getPendingApproval();
 
-  assert.equal(pendingApproval?.toolCallId, 'call-side-effect-1');
+  assert.equal(pendingApproval, null);
 
-  const reply = expectCompleted(await secondHarness.approvePendingTool());
+  const reply = expectCompleted(expectResumable(await secondHarness.resumePendingTurn()));
 
   assert.equal(reply.content, 'completed after restart');
   assert.equal(executions, 1);
@@ -597,7 +605,9 @@ test('createHarness does not reopen approval after a denial append failure and r
   });
 
   await assert.rejects(() => secondHarness.approvePendingTool(), /already denied by user approval/);
-  const reply = expectCompleted(await secondHarness.denyPendingTool());
+  assert.equal(await secondHarness.getPendingApproval(), null);
+
+  const reply = expectCompleted(expectResumable(await secondHarness.resumePendingTurn()));
 
   assert.equal(reply.content, 'denial handled after restart');
   assert.equal(callCount, 2);

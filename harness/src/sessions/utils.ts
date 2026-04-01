@@ -1,5 +1,7 @@
 import type { Session, SessionStatePatch, TurnStatus } from './types.js';
 
+type SessionStateCarrier = Pick<Session, 'currentTurnId' | 'pendingApproval' | 'turnStatus'>;
+
 export function assertValidSessionId(sessionId: string): void {
   if (!sessionId || sessionId === '.' || sessionId === '..') {
     throw new Error('Invalid session id.');
@@ -10,7 +12,7 @@ export function assertValidSessionId(sessionId: string): void {
   }
 }
 
-export function applySessionStatePatch(session: Session, patch: SessionStatePatch): Session {
+export function applySessionStatePatch<T extends SessionStateCarrier>(session: T, patch: SessionStatePatch): T {
   if (patch.turnStatus !== undefined) {
     session.turnStatus = patch.turnStatus;
   }

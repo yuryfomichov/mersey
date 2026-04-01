@@ -75,21 +75,16 @@ export class FilesystemSessionStore implements SessionStore {
   }
 
   async getSession(sessionId: string): Promise<Session | null> {
-    try {
-      const contents = await readFile(this.getSessionPath(sessionId), 'utf8');
-      const session = JSON.parse(contents) as SessionMetadata;
+    const session = await this.readSessionMetadata(sessionId);
 
-      return {
-        ...session,
-        messages: await this.listMessages(sessionId),
-      };
-    } catch (error: unknown) {
-      if (isErrnoCode(error, 'ENOENT')) {
-        return null;
-      }
-
-      throw error;
+    if (!session) {
+      return null;
     }
+
+    return {
+      ...session,
+      messages: await this.listMessages(sessionId),
+    };
   }
 
   async listMessages(sessionId: string): Promise<Message[]> {
@@ -114,7 +109,7 @@ export class FilesystemSessionStore implements SessionStore {
   }
 
   async updateSessionState(sessionId: string, patch: SessionStatePatch): Promise<void> {
-    const session = await this.getSession(sessionId);
+    const session = await this.readSessionMetadata(sessionId);
 
     if (!session) {
       throw new Error(`Session not found: ${sessionId}`);
@@ -132,6 +127,19 @@ export class FilesystemSessionStore implements SessionStore {
     return join(this.getSessionDir(sessionId), 'messages.jsonl');
   }
 
+  private async readSessionMetadata(sessionId: string): Promise<SessionMetadata | null> {
+    try {
+      const contents = await readFile(this.getSessionPath(sessionId), 'utf8');
+      return JSON.parse(contents) as SessionMetadata;
+    } catch (error: unknown) {
+      if (isErrnoCode(error, 'ENOENT')) {
+        return null;
+      }
+
+      throw error;
+    }
+  }
+
   private getSessionDir(sessionId: string): string {
     assertValidSessionId(sessionId);
     return join(this.rootDir, sessionId);
@@ -141,7 +149,7 @@ export class FilesystemSessionStore implements SessionStore {
     return join(this.getSessionDir(sessionId), 'session.json');
   }
 
-  private toSessionMetadata(session: Session): SessionMetadata {
+  private toSessionMetadata(session: SessionMetadata | Session): SessionMetadata {
     return {
       createdAt: session.createdAt,
       currentTurnId: session.currentTurnId,

@@ -292,6 +292,10 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
     return new Error(`Tool execution was already approved for ${getApprovalLabel(toolCallId, toolName)} and cannot be denied.`);
   }
 
+  function getApprovedResolutionError(toolName: string): Error {
+    return new Error(`Tool execution was already approved for ${toolName} and cannot be denied.`);
+  }
+
   function requirePendingApproval(): PendingApproval {
     const turnId = session.currentTurnId;
     const toolCallId = session.pendingApproval?.toolCallId;
@@ -650,11 +654,11 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
       const approval = requirePendingApproval();
       const pendingApproval = getPendingApprovalState();
 
-      if (pendingApproval.stage === 'approved_executing') {
-        throw getInterruptedApprovalError(approval.toolCallId, approval.toolName);
-      }
+        if (pendingApproval.stage === 'approved_executing') {
+          throw getInterruptedApprovalError(approval.toolCallId, approval.toolName);
+        }
 
-      if (pendingApproval.stage === 'approved_executed' || pendingApproval.stage === 'denied_executed') {
+        if (pendingApproval.stage === 'approved_executed' || pendingApproval.stage === 'denied_executed') {
         return null;
       }
 
@@ -672,7 +676,11 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
         const pendingApproval = getPendingApprovalState();
 
         if (pendingApproval.stage === 'approved_executing') {
+<<<<<<< HEAD
           throw getInterruptedApprovalError(approval.toolCallId, approval.toolName);
+=======
+          throw getInterruptedApprovalError(approval.toolName);
+>>>>>>> bc555b0 (Improve approval resume handling)
         }
 
         return resumeResolvedPendingTurn(approval, pendingApproval);
@@ -685,16 +693,20 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
       return enqueue(async () => {
         if (getTurnStatus(session) === 'awaiting_approval') {
           const approval = requirePendingApproval();
-          const pendingApproval = getPendingApprovalState();
+        const pendingApproval = getPendingApprovalState();
 
-          if (pendingApproval.stage === 'approved_executing') {
-            throw getInterruptedApprovalError(approval.toolCallId, approval.toolName);
-          }
+        if (pendingApproval.stage === 'approved_executing') {
+          throw getInterruptedApprovalError(approval.toolCallId, approval.toolName);
+        }
+
+        if (pendingApproval.stage === 'approved_executed' || pendingApproval.stage === 'denied_executed') {
+          throw new Error(
+            `Session has a resolved pending turn for tool call ${getApprovalLabel(approval.toolCallId, approval.toolName)}. Resume it with resumePendingTurn().`,
+          );
+        }
 
           if (pendingApproval.stage === 'approved_executed' || pendingApproval.stage === 'denied_executed') {
-            throw new Error(
-              `Session has a resolved pending turn for tool call ${getApprovalLabel(approval.toolCallId, approval.toolName)}. Resume it with resumePendingTurn().`,
-            );
+            throw new Error(`Session has a resolved pending turn for tool call ${approval.toolName}. Resume it with resumePendingTurn().`);
           }
 
           throw new Error(
