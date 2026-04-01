@@ -203,7 +203,7 @@ function deepFreeze<T>(value: T): T {
 export function createHarness(options: CreateHarnessOptions = {}): Harness {
   const provider = options.providerInstance ?? (options.provider ? createProvider(options.provider) : null);
   const runtimeLogger = createFanoutLogger(options.loggers);
-  const sessionStore = options.sessionStore ?? new MemorySessionStore();
+  const sessionStore: SessionStore = options.sessionStore ?? new MemorySessionStore();
   const systemPrompt = options.systemPrompt;
   const toolPolicy = options.toolPolicy ?? { workspaceRoot: process.cwd() };
   const tools = options.tools ?? [];
