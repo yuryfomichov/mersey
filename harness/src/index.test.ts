@@ -1264,7 +1264,7 @@ test('createHarness streamUserMessage return aborts an active turn and frees the
     }),
   ]);
 
-  assert.equal(reply.content, 'reply:second');
+  assert.equal(expectCompleted(reply).content, 'reply:second');
 });
 
 test('createHarness degrades malformed tool input into a normal tool error', async () => {

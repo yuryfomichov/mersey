@@ -84,13 +84,19 @@ export class RunCommandTool implements Tool {
       return { mode: 'require' };
     }
 
-    const { args, command, cwd, timeoutMs } = parsed.data;
+    const normalizedArgs =
+      parsed.data.args?.length === 1 &&
+      parsed.data.args[0] === parsed.data.command &&
+      ZERO_ARG_COMMANDS.has(parsed.data.command)
+        ? []
+        : parsed.data.args;
+    const { command, cwd, timeoutMs } = parsed.data;
 
     if (!this.trustedCommands.has(command)) {
       return { mode: 'require' };
     }
 
-    const hasArgs = Array.isArray(args) && args.length > 0;
+    const hasArgs = Array.isArray(normalizedArgs) && normalizedArgs.length > 0;
     const hasCwd = cwd !== undefined;
     const hasTimeout = timeoutMs !== undefined;
 

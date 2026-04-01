@@ -291,7 +291,7 @@ test('runLoop falls back to batch generation when streaming is enabled but unsup
   });
 
   assert.equal(callCount, 1);
-  assert.equal(reply.content, 'batch reply');
+  assert.equal(expectCompleted(reply).content, 'batch reply');
 });
 
 test('runLoop falls back to batch generation when streaming fails before any deltas', async () => {
@@ -327,7 +327,7 @@ test('runLoop falls back to batch generation when streaming fails before any del
   });
 
   assert.equal(batchCallCount, 1);
-  assert.equal(reply.content, 'batch reply');
+  assert.equal(expectCompleted(reply).content, 'batch reply');
 });
 
 test('runLoop falls back to batch generation when streaming emits only empty deltas before failing', async () => {
@@ -364,7 +364,7 @@ test('runLoop falls back to batch generation when streaming emits only empty del
   });
 
   assert.equal(batchCallCount, 1);
-  assert.equal(reply.content, 'batch reply');
+  assert.equal(expectCompleted(reply).content, 'batch reply');
 });
 
 test('runLoop keeps a completed streamed response when stream teardown fails', async () => {
@@ -401,7 +401,7 @@ test('runLoop keeps a completed streamed response when stream teardown fails', a
   });
 
   assert.equal(batchCallCount, 0);
-  assert.equal(reply.content, 'stream reply');
+  assert.equal(expectCompleted(reply).content, 'stream reply');
 });
 
 test('runLoop preserves the original failure when session cleanup state reset also fails', async () => {
