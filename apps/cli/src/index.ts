@@ -125,16 +125,10 @@ async function main(): Promise<void> {
   output.write(`logs: ${logPaths.jsonlPath}, ${logPaths.textPath}\n`);
   output.write("Type a message or 'exit' to quit.\n\n");
 
-  let activeTurn: {
-    currentAssistantIteration: number | null;
-    renderedTextLengthByIteration: Map<number, number>;
-    streamedIterations: Set<number>;
-    totalIterations: number | null;
-    usedFallbackTextByIteration: Map<number, boolean>;
-  } | null = null;
+  let streamingAssistantOpen = false;
 
   harness.subscribe((event) => {
-    if (!stream || !activeTurn) {
+    if (!stream) {
       return;
     }
 
@@ -143,42 +137,20 @@ async function main(): Promise<void> {
         return;
       }
 
-      if (!activeTurn.streamedIterations.has(event.iteration)) {
+      if (!streamingAssistantOpen) {
         output.write('assistant: ');
-        activeTurn.streamedIterations.add(event.iteration);
-        activeTurn.currentAssistantIteration = event.iteration;
+        streamingAssistantOpen = true;
       }
 
-      activeTurn.renderedTextLengthByIteration.set(
-        event.iteration,
-        (activeTurn.renderedTextLengthByIteration.get(event.iteration) ?? 0) + event.delta.length,
-      );
       output.write(event.delta);
       return;
     }
 
-    if (event.type === 'provider_responded') {
-      activeTurn.usedFallbackTextByIteration.set(event.iteration, event.usedFallbackText);
-
-      if (
-        activeTurn.currentAssistantIteration === event.iteration &&
-        activeTurn.streamedIterations.has(event.iteration)
-      ) {
+    if (event.type === 'provider_responded' || event.type === 'turn_failed') {
+      if (streamingAssistantOpen) {
         output.write('\n');
-        activeTurn.currentAssistantIteration = null;
+        streamingAssistantOpen = false;
       }
-
-      return;
-    }
-
-    if (event.type === 'turn_finished') {
-      activeTurn.totalIterations = event.totalIterations;
-      return;
-    }
-
-    if (event.type === 'turn_failed' && activeTurn.currentAssistantIteration !== null) {
-      output.write('\n');
-      activeTurn.currentAssistantIteration = null;
     }
   });
 
@@ -206,26 +178,10 @@ async function main(): Promise<void> {
         break;
       }
 
-      activeTurn = {
-        currentAssistantIteration: null,
-        renderedTextLengthByIteration: new Map<number, number>(),
-        streamedIterations: new Set<number>(),
-        totalIterations: null,
-        usedFallbackTextByIteration: new Map<number, boolean>(),
-      };
-
       const reply = await harness.sendUserMessage(message);
-      const finalIteration = activeTurn.totalIterations;
-      const renderedFinalReply =
-        finalIteration !== null &&
-        activeTurn.streamedIterations.has(finalIteration) &&
-        (activeTurn.renderedTextLengthByIteration.get(finalIteration) ?? 0) > 0 &&
-        activeTurn.usedFallbackTextByIteration.get(finalIteration) === false;
 
-      activeTurn = null;
-
-      if (!renderedFinalReply) {
-        output.write(`assistant: ${reply.content}\n`);
+      if (!reply.finalReplyStreamed) {
+        output.write(`assistant: ${reply.message.content}\n`);
       }
     }
   } finally {

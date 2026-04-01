@@ -8,9 +8,14 @@ import { createProvider, type ProviderDefinition } from './providers/index.js';
 import { MemorySessionStore, type Message, type Session, type SessionStore } from './sessions/index.js';
 import type { Tool, ToolPolicy } from './tools/index.js';
 
+export type SendUserMessageResult = {
+  finalReplyStreamed: boolean;
+  message: Message;
+};
+
 export type Harness = {
   session: Session;
-  sendUserMessage(content: string): Promise<Message>;
+  sendUserMessage(content: string): Promise<SendUserMessageResult>;
   subscribe(listener: HarnessEventListener): () => void;
 };
 
@@ -122,7 +127,7 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
     return initializedSessionPromise;
   }
 
-  async function enqueueSend(content: string): Promise<Message> {
+  async function enqueueSend(content: string): Promise<SendUserMessageResult> {
     const waitForTurn = sendQueue;
     let releaseTurn!: () => void;
 
@@ -179,7 +184,7 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
 
   return {
     session,
-    async sendUserMessage(content: string): Promise<Message> {
+    async sendUserMessage(content: string): Promise<SendUserMessageResult> {
       await ensureSession();
       return enqueueSend(content);
     },

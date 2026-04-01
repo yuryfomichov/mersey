@@ -29,6 +29,11 @@ export type RunLoopInput = {
   tools: Tool[];
 };
 
+export type RunLoopResult = {
+  finalReplyStreamed: boolean;
+  message: Message;
+};
+
 const DEFAULT_MAX_TOOL_ITERATIONS = 12;
 
 function getFallbackAssistantContent(response: { text: string; toolCalls?: { length: number } }): string {
@@ -88,23 +93,29 @@ async function getProviderResponse({
   request: ModelRequest;
   iteration: number;
   stream: boolean | undefined;
-}): Promise<ModelResponse> {
+}): Promise<{ response: ModelResponse; streamedTextLength: number }> {
   const providerStartTime = Date.now();
 
   if (!stream || !supportsStreaming(provider)) {
     const response = await provider.generate(request);
 
     observer.providerResponded(iteration, response, Date.now() - providerStartTime);
-    return response;
+
+    return {
+      response,
+      streamedTextLength: 0,
+    };
   }
 
   let response: ModelResponse | null = null;
   let sawTextDelta = false;
+  let streamedTextLength = 0;
 
   try {
     for await (const event of provider.stream(request)) {
       if (event.type === 'text_delta') {
         sawTextDelta ||= event.delta.length > 0;
+        streamedTextLength += event.delta.length;
         observer.providerTextDelta(iteration, event.delta);
         continue;
       }
@@ -130,7 +141,11 @@ async function getProviderResponse({
   }
 
   observer.providerResponded(iteration, response, Date.now() - providerStartTime);
-  return response;
+
+  return {
+    response,
+    streamedTextLength,
+  };
 }
 
 export async function runLoop({
@@ -146,7 +161,7 @@ export async function runLoop({
   systemPrompt,
   toolPolicy,
   tools,
-}: RunLoopInput): Promise<Message> {
+}: RunLoopInput): Promise<RunLoopResult> {
   let currentIteration = 0;
   let currentErrorType: 'provider' | 'tool' | 'runtime' = 'runtime';
   let totalToolCalls = 0;
@@ -181,7 +196,7 @@ export async function runLoop({
       observer.providerRequested(currentIteration, session.messages);
 
       currentErrorType = 'provider';
-      const response = await getProviderResponse({
+      const { response, streamedTextLength } = await getProviderResponse({
         iteration: currentIteration,
         observer,
         provider,
@@ -215,7 +230,10 @@ export async function runLoop({
       if (!response.toolCalls?.length) {
         observer.turnFinished(currentIteration, totalToolCalls, assistantMessage.content.length);
 
-        return assistantMessage;
+        return {
+          finalReplyStreamed: streamedTextLength > 0,
+          message: assistantMessage,
+        };
       }
 
       for (const toolCall of response.toolCalls) {

@@ -166,7 +166,8 @@ test('runLoop swallows event sink failures', async () => {
     tools: [],
   });
 
-  assert.equal(reply.content, 'reply:hello');
+  assert.equal(reply.message.content, 'reply:hello');
+  assert.equal(reply.finalReplyStreamed, false);
   assert.deepEqual(
     session.messages.map((message) => message.role),
     ['user', 'assistant'],
@@ -196,7 +197,8 @@ test('runLoop owns fallback text when provider returns an empty non-tool reply',
     tools: [],
   });
 
-  assert.equal(reply.content, 'I could not produce a response for that request.');
+  assert.equal(reply.message.content, 'I could not produce a response for that request.');
+  assert.equal(reply.finalReplyStreamed, false);
 });
 
 test('runLoop emits provider_text_delta events before provider_responded when streaming is enabled', async () => {
@@ -229,7 +231,8 @@ test('runLoop emits provider_text_delta events before provider_responded when st
     tools: [],
   });
 
-  assert.equal(reply.content, 'hello');
+  assert.equal(reply.message.content, 'hello');
+  assert.equal(reply.finalReplyStreamed, true);
   assert.deepEqual(
     events.map((event) => event.type),
     [
@@ -279,7 +282,8 @@ test('runLoop falls back to batch generation when streaming is enabled but unsup
   });
 
   assert.equal(callCount, 1);
-  assert.equal(reply.content, 'batch reply');
+  assert.equal(reply.message.content, 'batch reply');
+  assert.equal(reply.finalReplyStreamed, false);
 });
 
 test('runLoop falls back to batch generation when streaming fails before any deltas', async () => {
@@ -315,7 +319,8 @@ test('runLoop falls back to batch generation when streaming fails before any del
   });
 
   assert.equal(batchCallCount, 1);
-  assert.equal(reply.content, 'batch reply');
+  assert.equal(reply.message.content, 'batch reply');
+  assert.equal(reply.finalReplyStreamed, false);
 });
 
 test('runLoop falls back to batch generation when streaming emits only empty deltas before failing', async () => {
@@ -352,7 +357,8 @@ test('runLoop falls back to batch generation when streaming emits only empty del
   });
 
   assert.equal(batchCallCount, 1);
-  assert.equal(reply.content, 'batch reply');
+  assert.equal(reply.message.content, 'batch reply');
+  assert.equal(reply.finalReplyStreamed, false);
 });
 
 test('runLoop keeps a completed streamed response when stream teardown fails', async () => {
@@ -389,5 +395,6 @@ test('runLoop keeps a completed streamed response when stream teardown fails', a
   });
 
   assert.equal(batchCallCount, 0);
-  assert.equal(reply.content, 'stream reply');
+  assert.equal(reply.message.content, 'stream reply');
+  assert.equal(reply.finalReplyStreamed, false);
 });

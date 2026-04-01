@@ -112,7 +112,6 @@ export function createLoopObserver({
 
     providerRequested(iteration: number, messages: Message[]): void {
       publishEvent({
-        id: randomUUID(),
         iteration,
         messageCount: messages.length,
         messageCountsByRole: getMessageCountsByRole(messages),
@@ -141,7 +140,6 @@ export function createLoopObserver({
 
       publishEvent({
         durationMs,
-        id: randomUUID(),
         iteration,
         model: provider.model,
         providerName: provider.name,
@@ -172,7 +170,6 @@ export function createLoopObserver({
       publishEvent({
         delta,
         deltaLength: delta.length,
-        id: randomUUID(),
         iteration,
         model: provider.model,
         providerName: provider.name,
@@ -191,7 +188,6 @@ export function createLoopObserver({
     ): void {
       publishEvent({
         durationMs,
-        id: randomUUID(),
         isError: Boolean(toolResult.isError),
         iteration,
         resultContentLength: toolResult.content.length,
@@ -217,7 +213,6 @@ export function createLoopObserver({
 
       publishEvent({
         ...(debugArgs ? { debugArgs } : {}),
-        id: randomUUID(),
         iteration,
         safeArgs: getSafeToolArgs(toolCall.input),
         sessionId,
@@ -231,7 +226,6 @@ export function createLoopObserver({
 
     toolStarted(iteration: number, toolCall: ModelToolCall): void {
       publishEvent({
-        id: randomUUID(),
         iteration,
         sessionId,
         timestamp: new Date().toISOString(),
@@ -249,7 +243,6 @@ export function createLoopObserver({
         durationMs: getDurationMs(turnStartTime),
         errorMessage: sanitizeErrorMessage(errorType, error),
         errorType,
-        id: randomUUID(),
         iteration,
         sessionId,
         timestamp: new Date().toISOString(),
@@ -262,7 +255,6 @@ export function createLoopObserver({
       publishEvent({
         durationMs: getDurationMs(turnStartTime),
         finalAssistantLength,
-        id: randomUUID(),
         sessionId,
         timestamp: new Date().toISOString(),
         totalIterations,
@@ -274,7 +266,6 @@ export function createLoopObserver({
 
     turnStarted(userMessageLength: number): void {
       publishEvent({
-        id: randomUUID(),
         sessionId,
         timestamp: new Date().toISOString(),
         turnId,
