@@ -1,7 +1,7 @@
 import { argv, stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
 
-import { createHarness } from '../../../harness/index.js';
+import { createHarness, type Harness, type PendingApproval, type TurnChunk, type TurnResult } from '../../../harness/index.js';
 import { parseProviderName, type ProviderName } from '../../../harness/providers.js';
 import { EditFileTool, ReadFileTool, RunCommandTool, WriteFileTool } from '../../../harness/tools.js';
 import { createCliLoggers } from './logging.js';
@@ -84,6 +84,97 @@ function getProviderModel(provider: ReturnType<typeof getProviderDefinition>): s
   return 'config' in provider && provider.config?.model ? provider.config.model : null;
 }
 
+function getApprovalLines(approval: PendingApproval): string[] {
+  const lines = [`approval required: ${approval.toolName}`];
+
+  if (typeof approval.input.command === 'string') {
+    const args = Array.isArray(approval.input.args)
+      ? approval.input.args.filter((arg): arg is string => typeof arg === 'string')
+      : [];
+
+    lines.push(`command: ${[approval.input.command, ...args].join(' ')}`);
+  }
+
+  if (typeof approval.input.cwd === 'string') {
+    lines.push(`cwd: ${approval.input.cwd}`);
+  }
+
+  if (typeof approval.input.path === 'string') {
+    lines.push(`path: ${approval.input.path}`);
+  }
+
+  return lines;
+}
+
+async function resolveTurnResult(
+  cli: ReturnType<typeof createInterface>,
+  harness: Harness,
+  result: TurnResult,
+): Promise<string> {
+  let currentResult = result;
+
+  while (currentResult.status === 'awaiting_approval') {
+    for (const line of getApprovalLines(currentResult.approval)) {
+      output.write(`${line}\n`);
+    }
+
+    const answer = (await cli.question('Approve? [y/N] ')).trim().toLowerCase();
+
+    currentResult =
+      answer === 'y' || answer === 'yes' ? await harness.approvePendingTool() : await harness.denyPendingTool();
+  }
+
+  return currentResult.message.content;
+}
+
+async function renderStreamedTurn(
+  cli: ReturnType<typeof createInterface>,
+  harness: Harness,
+  turn: AsyncIterable<TurnChunk>,
+): Promise<void> {
+  let streamedAssistant = false;
+
+  for await (const chunk of turn) {
+    if (chunk.type === 'assistant_delta') {
+      if (!streamedAssistant) {
+        output.write('assistant: ');
+        streamedAssistant = true;
+      }
+
+      output.write(chunk.delta);
+      continue;
+    }
+
+    if (chunk.type === 'assistant_message_completed') {
+      if (streamedAssistant) {
+        output.write('\n');
+        streamedAssistant = false;
+      }
+
+      continue;
+    }
+
+    if (chunk.type === 'awaiting_approval') {
+      if (streamedAssistant) {
+        output.write('\n');
+        streamedAssistant = false;
+      }
+
+      output.write(
+        `assistant: ${await resolveTurnResult(cli, harness, { approval: chunk.approval, status: 'awaiting_approval' })}\n`,
+      );
+      continue;
+    }
+
+    if (streamedAssistant) {
+      output.write('\n');
+      streamedAssistant = false;
+    } else {
+      output.write(`assistant: ${chunk.message.content}\n`);
+    }
+  }
+}
+
 async function main(): Promise<void> {
   const args = argv.slice(2);
   const debug = getDebugMode(args);
@@ -109,7 +200,7 @@ async function main(): Promise<void> {
       maxToolResultBytes: 16 * 1024,
       workspaceRoot: process.cwd(),
     },
-    tools: [new ReadFileTool(), new WriteFileTool(), new EditFileTool(), new RunCommandTool()],
+    tools: [new ReadFileTool(), new WriteFileTool(), new EditFileTool(), new RunCommandTool({ trustedCommands: ['pwd'] })],
   });
   const providerModel = getProviderModel(providerDefinition);
 
@@ -126,6 +217,20 @@ async function main(): Promise<void> {
   output.write("Type a message or 'exit' to quit.\n\n");
 
   try {
+    const resumedTurn = await harness.resumePendingTurn();
+
+    if (resumedTurn) {
+      output.write(`assistant: ${await resolveTurnResult(cli, harness, resumedTurn)}\n`);
+    }
+
+    const pendingApproval = await harness.getPendingApproval();
+
+    if (pendingApproval) {
+      output.write(
+        `assistant: ${await resolveTurnResult(cli, harness, { approval: pendingApproval, status: 'awaiting_approval' })}\n`,
+      );
+    }
+
     while (true) {
       let value: string;
 
@@ -149,37 +254,13 @@ async function main(): Promise<void> {
         break;
       }
 
-      let streamedAssistant = false;
-
-      for await (const chunk of harness.streamUserMessage(message)) {
-        if (chunk.type === 'assistant_delta') {
-          if (!streamedAssistant) {
-            output.write('assistant: ');
-            streamedAssistant = true;
-          }
-
-          output.write(chunk.delta);
-          continue;
-        }
-
-        if (chunk.type === 'assistant_message_completed') {
-          if (streamedAssistant) {
-            output.write('\n');
-            streamedAssistant = false;
-          }
-
-          continue;
-        }
-
-        if (chunk.type === 'final_message') {
-          if (streamedAssistant) {
-            output.write('\n');
-            streamedAssistant = false;
-          } else {
-            output.write(`assistant: ${chunk.message.content}\n`);
-          }
-        }
+      if (stream) {
+        await renderStreamedTurn(cli, harness, harness.streamUserMessage(message));
+        continue;
       }
+
+      const reply = await harness.sendUserMessage(message);
+      output.write(`assistant: ${await resolveTurnResult(cli, harness, reply)}\n`);
     }
   } finally {
     cli.close();

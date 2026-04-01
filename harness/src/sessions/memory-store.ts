@@ -1,5 +1,6 @@
 import type { SessionStore } from './store.js';
-import type { Message, Session } from './types.js';
+import type { Message, Session, SessionStatePatch } from './types.js';
+import { applySessionStatePatch } from './utils.js';
 
 function cloneMessage<T extends Message>(message: T): T {
   return structuredClone(message);
@@ -53,5 +54,15 @@ export class MemorySessionStore implements SessionStore {
 
   async listMessages(sessionId: string): Promise<Message[]> {
     return (this.messages.get(sessionId) ?? []).map((message) => cloneMessage(message));
+  }
+
+  async updateSessionState(sessionId: string, patch: SessionStatePatch): Promise<void> {
+    const session = this.sessions.get(sessionId);
+
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    applySessionStatePatch(session, patch);
   }
 }

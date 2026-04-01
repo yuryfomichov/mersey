@@ -13,4 +13,4 @@ export type {
   ToolPathDenyRule,
   ToolPolicy,
 } from './context.js';
-export type { Tool, ToolExecuteResult, ToolExecutionResult } from './types.js';
+export type { Tool, ToolApprovalRequirement, ToolExecuteResult, ToolExecutionResult } from './types.js';

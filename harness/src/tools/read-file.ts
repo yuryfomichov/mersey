@@ -1,12 +1,14 @@
 import { readFile } from 'node:fs/promises';
+
 import { z } from 'zod';
 
 import type { ModelToolInput } from '../models/index.js';
 import type { ToolContext } from './context.js';
-import type { Tool, ToolExecuteResult } from './types.js';
+import type { Tool, ToolApprovalRequirement, ToolExecuteResult } from './types.js';
 import { parseToolInput, toToolInputSchema } from './utils/schema.js';
 
 export class ReadFileTool implements Tool {
+  private static readonly approvalRequirement: ToolApprovalRequirement = { mode: 'auto' };
   private static readonly input = z.object({
     path: z
       .string({ error: 'read_file requires a string path.' })
@@ -17,6 +19,10 @@ export class ReadFileTool implements Tool {
   readonly description = 'Read a UTF-8 text file from disk.';
   readonly inputSchema = toToolInputSchema(ReadFileTool.input);
   readonly name = 'read_file';
+
+  getApprovalRequirement(): ToolApprovalRequirement {
+    return ReadFileTool.approvalRequirement;
+  }
 
   async execute(input: ModelToolInput, context: ToolContext): Promise<ToolExecuteResult> {
     const { path } = parseToolInput(ReadFileTool.input, input);

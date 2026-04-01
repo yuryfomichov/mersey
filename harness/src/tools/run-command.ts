@@ -2,10 +2,14 @@ import { z } from 'zod';
 
 import type { ModelToolInput } from '../models/index.js';
 import type { ToolCommandResult, ToolContext } from './context.js';
-import type { Tool, ToolExecuteResult } from './types.js';
+import type { Tool, ToolApprovalRequirement, ToolExecuteResult } from './types.js';
 import { parseToolInput, toToolInputSchema } from './utils/schema.js';
 
 const ZERO_ARG_COMMANDS = new Set(['pwd']);
+
+export type RunCommandToolOptions = {
+  trustedCommands?: string[];
+};
 
 function toResultContent(result: ToolCommandResult): string {
   const lines = [
@@ -66,6 +70,22 @@ export class RunCommandTool implements Tool {
     'Run one allowed executable directly inside the workspace without a shell. Put the executable in `command` and only trailing arguments in `args`. Example: `{ "command": "pwd" }` or `{ "command": "git", "args": ["status"] }`.';
   readonly inputSchema = toToolInputSchema(RunCommandTool.input);
   readonly name = 'run_command';
+
+  private readonly trustedCommands: Set<string>;
+
+  constructor(options: RunCommandToolOptions = {}) {
+    this.trustedCommands = new Set(options.trustedCommands ?? []);
+  }
+
+  getApprovalRequirement(input: ModelToolInput): ToolApprovalRequirement {
+    const parsed = RunCommandTool.input.safeParse(input);
+
+    if (!parsed.success) {
+      return { mode: 'require' };
+    }
+
+    return this.trustedCommands.has(parsed.data.command) ? { mode: 'auto' } : { mode: 'require' };
+  }
 
   async execute(input: ModelToolInput, context: ToolContext): Promise<ToolExecuteResult> {
     const parsedSpec = parseToolInput(RunCommandTool.input, input);

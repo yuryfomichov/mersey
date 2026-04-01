@@ -14,6 +14,7 @@ type LoopObserverInput = {
   provider: ModelProvider;
   sessionId: string;
   toolDefinitions: ModelToolDefinition[] | undefined;
+  turnId?: string;
 };
 
 type ErrorType = TurnFailedEvent['errorType'];
@@ -56,8 +57,9 @@ export function createLoopObserver({
   provider,
   sessionId,
   toolDefinitions,
+  turnId,
 }: LoopObserverInput): LoopObserver {
-  const turnId = randomUUID();
+  const resolvedTurnId = turnId ?? randomUUID();
   const turnStartTime = Date.now();
 
   const publishEvent = (event: HarnessEvent): void => {
@@ -71,7 +73,7 @@ export function createLoopObserver({
       emitRuntimeTrace(logger, 'event_delivery_failed', {
         eventType: event.type,
         sessionId,
-        turnId,
+        turnId: resolvedTurnId,
       });
     }
   };
@@ -95,7 +97,7 @@ export function createLoopObserver({
       sessionId,
       toolCallId: toolCall.id,
       toolName: toolCall.name,
-      turnId,
+      turnId: resolvedTurnId,
       ...detail,
     });
   };
@@ -106,7 +108,7 @@ export function createLoopObserver({
         iteration,
         messageCount,
         sessionId,
-        turnId,
+        turnId: resolvedTurnId,
       });
     },
 
@@ -121,7 +123,7 @@ export function createLoopObserver({
         timestamp: new Date().toISOString(),
         toolDefinitionCount: toolDefinitions?.length ?? 0,
         toolDefinitionNames: getToolDefinitionNames(),
-        turnId,
+        turnId: resolvedTurnId,
         type: 'provider_requested',
       });
 
@@ -130,7 +132,7 @@ export function createLoopObserver({
         model: provider.model,
         providerName: provider.name,
         sessionId,
-        turnId,
+        turnId: resolvedTurnId,
       });
     },
 
@@ -148,7 +150,7 @@ export function createLoopObserver({
         timestamp: new Date().toISOString(),
         toolCallCount: response.toolCalls?.length ?? 0,
         toolCallNames,
-        turnId,
+        turnId: resolvedTurnId,
         type: 'provider_responded',
         usedFallbackText,
       });
@@ -161,7 +163,7 @@ export function createLoopObserver({
         sessionId,
         textLength: response.text.length,
         toolCallCount: response.toolCalls?.length ?? 0,
-        turnId,
+        turnId: resolvedTurnId,
         usedFallbackText,
       });
     },
@@ -169,7 +171,6 @@ export function createLoopObserver({
     providerTextDelta(_iteration: number, _delta: string): void {
       // Raw streamed text is exposed through streamUserMessage(), not the event bus.
     },
-
     toolFinished(
       iteration: number,
       toolCall: ModelToolCall,
@@ -186,7 +187,7 @@ export function createLoopObserver({
         timestamp: new Date().toISOString(),
         toolCallId: toolCall.id,
         toolName: toolCall.name,
-        turnId,
+        turnId: resolvedTurnId,
         type: 'tool_finished',
       });
 
@@ -209,7 +210,7 @@ export function createLoopObserver({
         timestamp: new Date().toISOString(),
         toolCallId: toolCall.id,
         toolName: toolCall.name,
-        turnId,
+        turnId: resolvedTurnId,
         type: 'tool_requested',
       });
     },
@@ -221,7 +222,7 @@ export function createLoopObserver({
         timestamp: new Date().toISOString(),
         toolCallId: toolCall.id,
         toolName: toolCall.name,
-        turnId,
+        turnId: resolvedTurnId,
         type: 'tool_started',
       });
 
@@ -236,7 +237,7 @@ export function createLoopObserver({
         iteration,
         sessionId,
         timestamp: new Date().toISOString(),
-        turnId,
+        turnId: resolvedTurnId,
         type: 'turn_failed',
       });
     },
@@ -249,7 +250,7 @@ export function createLoopObserver({
         timestamp: new Date().toISOString(),
         totalIterations,
         totalToolCalls,
-        turnId,
+        turnId: resolvedTurnId,
         type: 'turn_finished',
       });
     },
@@ -258,7 +259,7 @@ export function createLoopObserver({
       publishEvent({
         sessionId,
         timestamp: new Date().toISOString(),
-        turnId,
+        turnId: resolvedTurnId,
         type: 'turn_started',
         userMessageLength,
       });

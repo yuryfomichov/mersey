@@ -47,15 +47,20 @@ test('RunCommandTool normalizes duplicated zero-arg invocations like pwd + [pwd]
   }
 });
 
+test('RunCommandTool only auto-allows trusted commands', () => {
+  const tool = new RunCommandTool({ trustedCommands: ['pwd'] });
+
+  assert.deepEqual(tool.getApprovalRequirement({ command: 'pwd' }), { mode: 'auto' });
+  assert.deepEqual(tool.getApprovalRequirement({ command: 'git' }), { mode: 'require' });
+  assert.deepEqual(tool.getApprovalRequirement({}), { mode: 'require' });
+});
+
 test('RunCommandTool rejects commands outside the allowlist', async () => {
   const tool = new RunCommandTool();
 
   await assert.rejects(
     () =>
-      tool.execute(
-        { command: 'cat' },
-        createToolContext({ commandAllowlist: ['pwd'], workspaceRoot: process.cwd() }),
-      ),
+      tool.execute({ command: 'cat' }, createToolContext({ commandAllowlist: ['pwd'], workspaceRoot: process.cwd() })),
     /run_command command is not in the allowlist: cat/,
   );
 });

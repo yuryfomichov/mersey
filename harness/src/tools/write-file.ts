@@ -5,10 +5,11 @@ import { z } from 'zod';
 
 import type { ModelToolInput } from '../models/index.js';
 import type { ToolContext } from './context.js';
-import type { Tool, ToolExecuteResult } from './types.js';
+import type { Tool, ToolApprovalRequirement, ToolExecuteResult } from './types.js';
 import { parseToolInput, toToolInputSchema } from './utils/schema.js';
 
 export class WriteFileTool implements Tool {
+  private static readonly approvalRequirement: ToolApprovalRequirement = { mode: 'require' };
   private static readonly input = z.object({
     content: z
       .string({ error: 'write_file requires string content.' })
@@ -23,6 +24,10 @@ export class WriteFileTool implements Tool {
   readonly description = 'Write a UTF-8 text file to disk.';
   readonly inputSchema = toToolInputSchema(WriteFileTool.input);
   readonly name = 'write_file';
+
+  getApprovalRequirement(): ToolApprovalRequirement {
+    return WriteFileTool.approvalRequirement;
+  }
 
   async execute(input: ModelToolInput, context: ToolContext): Promise<ToolExecuteResult> {
     const { content, overwrite, path } = parseToolInput(WriteFileTool.input, input);

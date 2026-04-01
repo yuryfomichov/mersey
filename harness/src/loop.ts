@@ -1,31 +1,36 @@
+import { randomUUID } from 'node:crypto';
+
 import type { HarnessEvent } from './events/index.js';
 import type { HarnessLogger } from './logger/index.js';
 import { createLoopObserver } from './loop-observer.js';
-import type { ModelProvider } from './models/index.js';
-import type { ModelMessage } from './models/index.js';
+import type { ModelMessage, ModelProvider, ModelRequest, ModelResponse, ModelToolCall } from './models/index.js';
 import { supportsStreaming } from './models/index.js';
-import type { ModelRequest, ModelResponse } from './models/index.js';
 import type { SessionStore } from './sessions/index.js';
-import type { Message, Session } from './sessions/index.js';
+import { applySessionStatePatch } from './sessions/index.js';
+import type { Message, Session, SessionStatePatch } from './sessions/index.js';
+import { getCurrentTurnProgress } from './turn-state.js';
 import { createToolContext, executeToolCall, getToolDefinitions, getToolMap } from './tools/index.js';
-import type { Tool, ToolPolicy } from './tools/index.js';
+import type { Tool, ToolApprovalRequirement, ToolPolicy } from './tools/index.js';
 
 export type RunLoopOptions = {
   maxToolIterations?: number;
 };
 
 export type RunLoopInput = {
-  content: string;
+  content?: string;
   debug?: boolean;
   emitEvent?: (event: HarnessEvent) => void;
   logger?: HarnessLogger;
   options?: RunLoopOptions;
   provider: ModelProvider;
+  resumeAfterToolCallId?: string;
   signal?: AbortSignal;
   session: Session;
   sessionStore: SessionStore;
+  startContent?: string;
   stream?: boolean;
   systemPrompt?: string;
+  turnId?: string;
   toolPolicy: ToolPolicy;
   tools: Tool[];
 };
@@ -39,8 +44,28 @@ export type TurnChunk =
       type: 'assistant_message_completed';
     }
   | {
+      approval: {
+        input: Record<string, unknown>;
+        toolCallId: string;
+        toolName: string;
+        turnId: string;
+      };
+      type: 'awaiting_approval';
+    }
+  | {
       message: Message;
       type: 'final_message';
+    };
+
+export type RunLoopResult =
+  | {
+      message: Message;
+      status: 'completed';
+    }
+  | {
+      status: 'awaiting_approval';
+      toolCallId: string;
+      turnId: string;
     };
 
 const DEFAULT_MAX_TOOL_ITERATIONS = 12;
@@ -92,6 +117,11 @@ function toModelMessages(messages: Message[]): ModelMessage[] {
 async function appendMessage(session: Session, sessionStore: SessionStore, message: Message): Promise<void> {
   await sessionStore.appendMessage(session.id, message);
   session.messages.push(message);
+}
+
+async function updateSessionState(session: Session, sessionStore: SessionStore, patch: SessionStatePatch): Promise<void> {
+  await sessionStore.updateSessionState(session.id, patch);
+  applySessionStatePatch(session, patch);
 }
 
 function getProviderResponse({
@@ -177,6 +207,43 @@ function getProviderResponse({
   })();
 }
 
+function getApprovalRequirement(toolCall: ModelToolCall, tools: Map<string, Tool>): ToolApprovalRequirement {
+  const tool = tools.get(toolCall.name);
+
+  if (!tool) {
+    return { mode: 'auto' };
+  }
+
+  return tool.getApprovalRequirement?.(toolCall.input) ?? { mode: 'require' };
+}
+
+function findResumableToolBatch(
+  messages: Message[],
+  toolCallId: string,
+): {
+  nextToolCallIndex: number;
+  toolCalls: ModelToolCall[];
+} | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+
+    if (message?.role !== 'assistant' || !message.toolCalls?.length) {
+      continue;
+    }
+
+    const toolCallIndex = message.toolCalls.findIndex((toolCall) => toolCall.id === toolCallId);
+
+    if (toolCallIndex !== -1) {
+      return {
+        nextToolCallIndex: toolCallIndex + 1,
+        toolCalls: message.toolCalls,
+      };
+    }
+  }
+
+  return null;
+}
+
 export async function* streamLoop({
   content,
   debug,
@@ -184,28 +251,28 @@ export async function* streamLoop({
   logger,
   options,
   provider,
+  resumeAfterToolCallId,
   signal,
   session,
   sessionStore,
+  startContent,
   stream,
   systemPrompt,
+  turnId,
   toolPolicy,
   tools,
 }: RunLoopInput): AsyncIterable<TurnChunk> {
-  let currentIteration = 0;
+  const resolvedStartContent = startContent ?? content;
+  const resolvedTurnId = turnId ?? randomUUID();
+  const initialProgress = resolvedStartContent === undefined ? getCurrentTurnProgress(session.messages) : undefined;
+  let currentIteration = initialProgress?.iteration ?? 0;
   let currentErrorType: 'provider' | 'tool' | 'runtime' = 'runtime';
-  let totalToolCalls = 0;
-
-  const userMessage: Message = {
-    role: 'user',
-    content,
-    createdAt: new Date().toISOString(),
-  };
+  let totalToolCalls = initialProgress?.totalToolCalls ?? 0;
   const toolDefinitions = getToolDefinitions(tools);
   const toolsByName = getToolMap(tools);
   const toolContext = createToolContext(toolPolicy, { signal });
   const maxToolIterations = options?.maxToolIterations ?? DEFAULT_MAX_TOOL_ITERATIONS;
-  let toolIterations = 0;
+  let toolIterations = initialProgress?.toolIterations ?? 0;
   const observer = createLoopObserver({
     debug,
     emitEvent,
@@ -213,13 +280,93 @@ export async function* streamLoop({
     provider,
     sessionId: session.id,
     toolDefinitions,
+    turnId: resolvedTurnId,
   });
-  observer.turnStarted(content.length);
   const resolvedSystemPrompt = systemPrompt?.trim() ? systemPrompt : undefined;
 
+  async function processToolCalls(
+    toolCalls: ModelToolCall[],
+    startIndex: number,
+    iteration: number,
+  ): Promise<Extract<TurnChunk, { type: 'awaiting_approval' }> | null> {
+    for (let index = startIndex; index < toolCalls.length; index += 1) {
+      const toolCall = toolCalls[index];
+
+      throwIfAborted(signal);
+      observer.toolRequested(iteration, toolCall);
+
+      if (getApprovalRequirement(toolCall, toolsByName).mode === 'require') {
+        await updateSessionState(session, sessionStore, {
+          currentTurnId: resolvedTurnId,
+          pendingApproval: { stage: 'awaiting_user', toolCallId: toolCall.id },
+          turnStatus: 'awaiting_approval',
+        });
+
+        return {
+          approval: {
+            input: toolCall.input,
+            toolCallId: toolCall.id,
+            toolName: toolCall.name,
+            turnId: resolvedTurnId,
+          },
+          type: 'awaiting_approval',
+        };
+      }
+
+      observer.toolStarted(iteration, toolCall);
+
+      currentErrorType = 'tool';
+      const toolStartTime = Date.now();
+      const toolResult = await executeToolCall(toolCall, toolsByName, toolContext);
+      currentErrorType = 'runtime';
+      throwIfAborted(signal);
+      observer.toolFinished(iteration, toolCall, toolResult, Date.now() - toolStartTime);
+
+      await appendMessage(session, sessionStore, {
+        ...toolResult,
+        createdAt: new Date().toISOString(),
+        role: 'tool',
+      });
+    }
+
+    return null;
+  }
+
   try {
-    throwIfAborted(signal);
-    await appendMessage(session, sessionStore, userMessage);
+    if (resolvedStartContent !== undefined) {
+      observer.turnStarted(resolvedStartContent.length);
+      throwIfAborted(signal);
+      await appendMessage(session, sessionStore, {
+        role: 'user',
+        content: resolvedStartContent,
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    if (resumeAfterToolCallId !== undefined) {
+      const resumableToolBatch = findResumableToolBatch(session.messages, resumeAfterToolCallId);
+
+      if (!resumableToolBatch) {
+        throw new Error(`Could not resume tool execution for tool call: ${resumeAfterToolCallId}`);
+      }
+
+      await updateSessionState(session, sessionStore, {
+        currentTurnId: resolvedTurnId,
+        pendingApproval: null,
+        turnStatus: 'running',
+      });
+
+      const resumedResult = await processToolCalls(
+        resumableToolBatch.toolCalls,
+        resumableToolBatch.nextToolCallIndex,
+        currentIteration,
+      );
+
+      if (resumedResult) {
+        yield resumedResult;
+        return;
+      }
+    }
 
     while (true) {
       currentIteration += 1;
@@ -288,6 +435,11 @@ export async function* streamLoop({
       await appendMessage(session, sessionStore, assistantMessage);
 
       if (!response.toolCalls?.length) {
+        await updateSessionState(session, sessionStore, {
+          currentTurnId: null,
+          pendingApproval: null,
+          turnStatus: 'idle',
+        });
         observer.turnFinished(currentIteration, totalToolCalls, assistantMessage.content.length);
 
         yield {
@@ -304,43 +456,47 @@ export async function* streamLoop({
         };
       }
 
-      for (const toolCall of response.toolCalls) {
-        throwIfAborted(signal);
-        observer.toolRequested(currentIteration, toolCall);
-        observer.toolStarted(currentIteration, toolCall);
+      const toolProcessingResult = await processToolCalls(response.toolCalls, 0, currentIteration);
 
-        currentErrorType = 'tool';
-        const toolStartTime = Date.now();
-        const toolResult = await executeToolCall(toolCall, toolsByName, toolContext);
-        currentErrorType = 'runtime';
-        throwIfAborted(signal);
-        observer.toolFinished(currentIteration, toolCall, toolResult, Date.now() - toolStartTime);
-
-        await appendMessage(session, sessionStore, {
-          ...toolResult,
-          createdAt: new Date().toISOString(),
-          role: 'tool',
-        });
+      if (toolProcessingResult) {
+        yield toolProcessingResult;
+        return;
       }
     }
   } catch (error: unknown) {
+    try {
+      await updateSessionState(session, sessionStore, {
+        currentTurnId: null,
+        pendingApproval: null,
+        turnStatus: 'idle',
+      });
+    } catch {
+      // Preserve the original loop failure even if cleanup persistence also fails.
+    }
     observer.turnFailed(currentIteration, currentErrorType, error);
     throw error;
   }
 }
 
-export async function runLoop(input: RunLoopInput): Promise<Message> {
-  let finalMessage: Message | null = null;
-
+export async function runLoop(input: RunLoopInput): Promise<RunLoopResult> {
   for await (const chunk of streamLoop(input)) {
-    if (chunk.type === 'final_message') {
-      finalMessage = chunk.message;
+    if (chunk.type === 'assistant_delta' || chunk.type === 'assistant_message_completed') {
+      continue;
     }
+
+    if (chunk.type === 'awaiting_approval') {
+      return {
+        status: 'awaiting_approval',
+        toolCallId: chunk.approval.toolCallId,
+        turnId: chunk.approval.turnId,
+      };
+    }
+
+    return {
+      message: chunk.message,
+      status: 'completed',
+    };
   }
 
-  if (!finalMessage) {
-    throw new Error('Loop ended without a final assistant message.');
-  }
-
-  return finalMessage;
+  throw new Error('Loop ended without a final assistant message or approval request.');
 }

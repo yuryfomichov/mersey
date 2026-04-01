@@ -3,6 +3,14 @@ import type { ToolContext } from './context.js';
 
 export type ToolResultData = Record<string, unknown>;
 
+export type ToolApprovalRequirement =
+  | {
+      mode: 'auto';
+    }
+  | {
+      mode: 'require';
+    };
+
 export type ToolExecuteResult = {
   content: string;
   data?: ToolResultData;
@@ -19,4 +27,5 @@ export type ToolExecutionResult = {
 
 export interface Tool extends ModelToolDefinition {
   execute(input: ModelToolInput, context: ToolContext): Promise<ToolExecuteResult>;
+  getApprovalRequirement?(input: ModelToolInput): ToolApprovalRequirement;
 }

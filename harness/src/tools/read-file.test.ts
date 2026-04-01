@@ -24,6 +24,10 @@ test('ReadFileTool reads files relative to the workspace root', async () => {
   }
 });
 
+test('ReadFileTool auto-allows execution without approval', () => {
+  assert.deepEqual(new ReadFileTool().getApprovalRequirement?.(), { mode: 'auto' });
+});
+
 test('ReadFileTool allows in-workspace paths that start with two dots', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
 

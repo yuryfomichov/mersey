@@ -1,5 +1,5 @@
 export { createHarness } from './harness.js';
-export type { CreateHarnessOptions, Harness } from './harness.js';
+export type { CreateHarnessOptions, Harness, PendingApproval, TurnResult } from './harness.js';
 export { createJsonlFileLogger, createTextFileLogger } from './logger/index.js';
 export type { HarnessLogger, HarnessRuntimeTrace } from './logger/index.js';
 export type { HarnessEvent, HarnessEventListener } from './events/index.js';

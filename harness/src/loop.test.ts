@@ -7,6 +7,11 @@ import { FakeProvider } from './providers/fake.js';
 import { MemorySessionStore } from './sessions.js';
 import type { Session } from './sessions/index.js';
 
+function expectCompleted(result: Awaited<ReturnType<typeof runLoop>>) {
+  assert.equal(result.status, 'completed');
+  return result.message;
+}
+
 test('runLoop forwards systemPrompt to provider on every generate call including tool-loop iterations', async () => {
   const sessionStore = new MemorySessionStore();
   const session: Session = {
@@ -154,17 +159,19 @@ test('runLoop swallows event sink failures', async () => {
 
   await sessionStore.createSession(session);
 
-  const reply = await runLoop({
-    content: 'hello',
-    emitEvent(): void {
-      throw new Error('sink failed');
-    },
-    provider: new FakeProvider(),
-    session,
-    sessionStore,
-    toolPolicy: { workspaceRoot: process.cwd() },
-    tools: [],
-  });
+  const reply = expectCompleted(
+    await runLoop({
+      content: 'hello',
+      emitEvent(): void {
+        throw new Error('sink failed');
+      },
+      provider: new FakeProvider(),
+      session,
+      sessionStore,
+      toolPolicy: { workspaceRoot: process.cwd() },
+      tools: [],
+    }),
+  );
 
   assert.equal(reply.content, 'reply:hello');
   assert.deepEqual(
@@ -183,18 +190,20 @@ test('runLoop owns fallback text when provider returns an empty non-tool reply',
 
   await sessionStore.createSession(session);
 
-  const reply = await runLoop({
-    content: 'hello',
-    provider: new FakeProvider({
-      reply: {
-        text: '',
-      },
+  const reply = expectCompleted(
+    await runLoop({
+      content: 'hello',
+      provider: new FakeProvider({
+        reply: {
+          text: '',
+        },
+      }),
+      session,
+      sessionStore,
+      toolPolicy: { workspaceRoot: process.cwd() },
+      tools: [],
     }),
-    session,
-    sessionStore,
-    toolPolicy: { workspaceRoot: process.cwd() },
-    tools: [],
-  });
+  );
 
   assert.equal(reply.content, 'I could not produce a response for that request.');
 });

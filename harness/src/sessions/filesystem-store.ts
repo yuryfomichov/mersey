@@ -1,9 +1,9 @@
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { assertValidSessionId } from './utils.js';
 import type { SessionStore } from './store.js';
-import type { Message, Session } from './types.js';
+import type { Message, Session, SessionStatePatch } from './types.js';
+import { applySessionStatePatch, assertValidSessionId } from './utils.js';
 
 export type FilesystemSessionStoreOptions = {
   rootDir?: string;
@@ -113,6 +113,21 @@ export class FilesystemSessionStore implements SessionStore {
     }
   }
 
+  async updateSessionState(sessionId: string, patch: SessionStatePatch): Promise<void> {
+    const session = await this.getSession(sessionId);
+
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    applySessionStatePatch(session, patch);
+    await writeFile(
+      this.getSessionPath(sessionId),
+      `${JSON.stringify(this.toSessionMetadata(session), null, 2)}\n`,
+      'utf8',
+    );
+  }
+
   private getMessagesPath(sessionId: string): string {
     return join(this.getSessionDir(sessionId), 'messages.jsonl');
   }
@@ -129,7 +144,10 @@ export class FilesystemSessionStore implements SessionStore {
   private toSessionMetadata(session: Session): SessionMetadata {
     return {
       createdAt: session.createdAt,
+      currentTurnId: session.currentTurnId,
       id: session.id,
+      pendingApproval: session.pendingApproval,
+      turnStatus: session.turnStatus,
     };
   }
 }

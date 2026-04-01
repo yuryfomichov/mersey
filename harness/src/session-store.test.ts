@@ -4,13 +4,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { FilesystemSessionStore, MemorySessionStore, type Message, type Session } from './sessions.js';
+import {
+  FilesystemSessionStore,
+  MemorySessionStore,
+  type Message,
+  type Session,
+  type SessionStatePatch,
+} from './sessions.js';
 
 async function verifyStoreRoundTrip(store: {
   appendMessage(sessionId: string, message: Message): Promise<void>;
   createSession(session: Session): Promise<Session>;
   getSession(sessionId: string): Promise<Session | null>;
   listMessages(sessionId: string): Promise<Message[]>;
+  updateSessionState(sessionId: string, patch: SessionStatePatch): Promise<void>;
 }): Promise<void> {
   const session: Session = {
     id: 'session-1',
@@ -66,6 +73,46 @@ async function verifyStoreRoundTrip(store: {
     storedMessages[2] && 'toolCallId' in storedMessages[2] ? storedMessages[2].toolCallId : undefined,
     'call-1',
   );
+
+  await store.updateSessionState(session.id, {
+    currentTurnId: 'turn-1',
+    pendingApproval: { stage: 'awaiting_user', toolCallId: 'call-1' },
+    turnStatus: 'awaiting_approval',
+  });
+
+  assert.deepEqual(await store.getSession(session.id), {
+    createdAt: '2026-03-29T00:00:00.000Z',
+    currentTurnId: 'turn-1',
+    id: 'session-1',
+    messages: [
+      {
+        content: 'hello',
+        createdAt: '2026-03-29T00:00:01.000Z',
+        role: 'user',
+      },
+      {
+        content: 'hi',
+        createdAt: '2026-03-29T00:00:02.000Z',
+        role: 'assistant',
+        toolCalls: [
+          {
+            id: 'call-1',
+            input: { path: 'note.txt' },
+            name: 'read_file',
+          },
+        ],
+      },
+      {
+        content: 'file contents',
+        createdAt: '2026-03-29T00:00:03.000Z',
+        name: 'read_file',
+        role: 'tool',
+        toolCallId: 'call-1',
+      },
+    ],
+    pendingApproval: { stage: 'awaiting_user', toolCallId: 'call-1' },
+    turnStatus: 'awaiting_approval',
+  });
 }
 
 test('MemorySessionStore persists session messages', async () => {

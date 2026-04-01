@@ -27,6 +27,10 @@ test('WriteFileTool writes files relative to the workspace root', async () => {
   }
 });
 
+test('WriteFileTool always requires approval', () => {
+  assert.deepEqual(new WriteFileTool().getApprovalRequirement?.(), { mode: 'require' });
+});
+
 test('WriteFileTool refuses to overwrite existing files by default', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
 
@@ -37,7 +41,8 @@ test('WriteFileTool refuses to overwrite existing files by default', async () =>
     const tool = new WriteFileTool();
 
     await assert.rejects(
-      () => tool.execute({ content: 'replacement', path: 'notes/note.txt' }, createToolContext({ workspaceRoot: rootDir })),
+      () =>
+        tool.execute({ content: 'replacement', path: 'notes/note.txt' }, createToolContext({ workspaceRoot: rootDir })),
       /write_file refuses to overwrite existing files/,
     );
     assert.equal(await readFile(join(rootDir, 'notes/note.txt'), 'utf8'), 'existing');
@@ -81,7 +86,10 @@ test('WriteFileTool rejects paths outside the workspace root', async () => {
     );
     await assert.rejects(
       () =>
-        tool.execute({ content: 'top secret', path: join(rootDir, 'secret.txt') }, createToolContext({ workspaceRoot })),
+        tool.execute(
+          { content: 'top secret', path: join(rootDir, 'secret.txt') },
+          createToolContext({ workspaceRoot }),
+        ),
       /write_file path must stay inside workspace root/,
     );
   } finally {
@@ -137,7 +145,11 @@ test('WriteFileTool rejects content larger than the shared policy limit', async 
     const tool = new WriteFileTool();
 
     await assert.rejects(
-      () => tool.execute({ content: '12345', path: 'note.txt' }, createToolContext({ maxWriteBytes: 4, workspaceRoot: rootDir })),
+      () =>
+        tool.execute(
+          { content: '12345', path: 'note.txt' },
+          createToolContext({ maxWriteBytes: 4, workspaceRoot: rootDir }),
+        ),
       /write_file refuses content larger than 4 bytes/,
     );
   } finally {
