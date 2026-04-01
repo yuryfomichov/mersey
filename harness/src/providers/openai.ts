@@ -90,7 +90,7 @@ function getOpenAIInputItems(input: ModelRequest): ResponseInputItem[] {
 
     const items: ResponseInputItem[] = [];
 
-    if (message.role === 'user' || message.role === 'assistant') {
+    if (message.role === 'user' || (message.role === 'assistant' && message.content)) {
       const openAIMessage: EasyInputMessage = {
         content: message.content,
         role: message.role,

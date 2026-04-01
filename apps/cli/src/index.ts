@@ -125,35 +125,6 @@ async function main(): Promise<void> {
   output.write(`logs: ${logPaths.jsonlPath}, ${logPaths.textPath}\n`);
   output.write("Type a message or 'exit' to quit.\n\n");
 
-  let streamingAssistantOpen = false;
-
-  harness.subscribe((event) => {
-    if (!stream) {
-      return;
-    }
-
-    if (event.type === 'provider_text_delta') {
-      if (event.delta.length === 0) {
-        return;
-      }
-
-      if (!streamingAssistantOpen) {
-        output.write('assistant: ');
-        streamingAssistantOpen = true;
-      }
-
-      output.write(event.delta);
-      return;
-    }
-
-    if (event.type === 'provider_responded' || event.type === 'turn_failed') {
-      if (streamingAssistantOpen) {
-        output.write('\n');
-        streamingAssistantOpen = false;
-      }
-    }
-  });
-
   try {
     while (true) {
       let value: string;
@@ -178,10 +149,36 @@ async function main(): Promise<void> {
         break;
       }
 
-      const reply = await harness.sendUserMessage(message);
+      let streamedAssistant = false;
 
-      if (!reply.finalReplyStreamed) {
-        output.write(`assistant: ${reply.message.content}\n`);
+      for await (const chunk of harness.streamUserMessage(message)) {
+        if (chunk.type === 'assistant_delta') {
+          if (!streamedAssistant) {
+            output.write('assistant: ');
+            streamedAssistant = true;
+          }
+
+          output.write(chunk.delta);
+          continue;
+        }
+
+        if (chunk.type === 'assistant_message_completed') {
+          if (streamedAssistant) {
+            output.write('\n');
+            streamedAssistant = false;
+          }
+
+          continue;
+        }
+
+        if (chunk.type === 'final_message') {
+          if (streamedAssistant) {
+            output.write('\n');
+            streamedAssistant = false;
+          } else {
+            output.write(`assistant: ${chunk.message.content}\n`);
+          }
+        }
       }
     }
   } finally {

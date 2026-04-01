@@ -32,6 +32,7 @@ Main goals:
 - Prefer improving the shape of the system first if that avoids piling messy code on top.
 - CLI owns the user interaction loop.
 - `harness` owns the model turn loop.
+- The `harness` client contract is the most important interface in the repo and should stay as simple as possible for apps to connect to.
 - `harness/src/loop.ts` should depend on `ModelProvider`, not SDK-specific request or response types.
 - Provider-specific request/response mapping belongs in `harness/src/providers/`.
 

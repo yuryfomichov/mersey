@@ -29,10 +29,18 @@ export type RunLoopInput = {
   tools: Tool[];
 };
 
-export type RunLoopResult = {
-  finalReplyStreamed: boolean;
-  message: Message;
-};
+export type TurnChunk =
+  | {
+      delta: string;
+      type: 'assistant_delta';
+    }
+  | {
+      type: 'assistant_message_completed';
+    }
+  | {
+      message: Message;
+      type: 'final_message';
+    };
 
 const DEFAULT_MAX_TOOL_ITERATIONS = 12;
 
@@ -81,7 +89,7 @@ async function appendMessage(session: Session, sessionStore: SessionStore, messa
   session.messages.push(message);
 }
 
-async function getProviderResponse({
+function getProviderResponse({
   observer,
   provider,
   request,
@@ -93,62 +101,70 @@ async function getProviderResponse({
   request: ModelRequest;
   iteration: number;
   stream: boolean | undefined;
-}): Promise<{ response: ModelResponse; streamedTextLength: number }> {
+}): AsyncIterable<{ delta: string; type: 'text_delta' } | { response: ModelResponse; type: 'response_completed' }> {
   const providerStartTime = Date.now();
 
   if (!stream || !supportsStreaming(provider)) {
-    const response = await provider.generate(request);
+    return (async function* () {
+      const response = await provider.generate(request);
+
+      observer.providerResponded(iteration, response, Date.now() - providerStartTime);
+
+      yield {
+        response,
+        type: 'response_completed' as const,
+      };
+    })();
+  }
+
+  return (async function* () {
+    let response: ModelResponse | null = null;
+    let sawTextDelta = false;
+
+    try {
+      for await (const event of provider.stream(request)) {
+        if (event.type === 'text_delta') {
+          sawTextDelta ||= event.delta.length > 0;
+          observer.providerTextDelta(iteration, event.delta);
+
+          yield {
+            delta: event.delta,
+            type: 'text_delta',
+          };
+
+          continue;
+        }
+
+        if (response) {
+          throw new Error('Provider stream returned more than one completed response.');
+        }
+
+        response = event.response;
+      }
+    } catch (error: unknown) {
+      if (response) {
+        // Preserve a completed streamed response if teardown fails afterward.
+      } else if (sawTextDelta) {
+        throw error;
+      } else {
+        response = await provider.generate(request);
+      }
+    }
+
+    if (!response) {
+      throw new Error('Provider stream ended without a completed response.');
+    }
 
     observer.providerResponded(iteration, response, Date.now() - providerStartTime);
 
-    return {
+    yield {
       response,
-      streamedTextLength: 0,
+      type: 'response_completed',
     };
-  }
-
-  let response: ModelResponse | null = null;
-  let sawTextDelta = false;
-  let streamedTextLength = 0;
-
-  try {
-    for await (const event of provider.stream(request)) {
-      if (event.type === 'text_delta') {
-        sawTextDelta ||= event.delta.length > 0;
-        streamedTextLength += event.delta.length;
-        observer.providerTextDelta(iteration, event.delta);
-        continue;
-      }
-
-      if (response) {
-        throw new Error('Provider stream returned more than one completed response.');
-      }
-
-      response = event.response;
-    }
-  } catch (error: unknown) {
-    if (response) {
-      // Preserve a completed streamed response if teardown fails afterward.
-    } else if (sawTextDelta) {
-      throw error;
-    } else {
-      response = await provider.generate(request);
-    }
-  }
-
-  if (!response) {
-    throw new Error('Provider stream ended without a completed response.');
-  }
-
-  observer.providerResponded(iteration, response, Date.now() - providerStartTime);
-
-  return {
-    response,
-    streamedTextLength,
-  };
+  })();
 }
 
-export async function runLoop({
+export async function* streamLoop({
   content,
   debug,
   emitEvent,
@@ -161,7 +177,7 @@ export async function runLoop({
   systemPrompt,
   toolPolicy,
   tools,
-}: RunLoopInput): Promise<RunLoopResult> {
+}: RunLoopInput): AsyncIterable<TurnChunk> {
   let currentIteration = 0;
   let currentErrorType: 'provider' | 'tool' | 'runtime' = 'runtime';
   let totalToolCalls = 0;
@@ -196,7 +212,10 @@ export async function runLoop({
       observer.providerRequested(currentIteration, session.messages);
 
       currentErrorType = 'provider';
-      const { response, streamedTextLength } = await getProviderResponse({
+      let response: ModelResponse | null = null;
+      let streamedAssistantDelta = false;
+
+      for await (const providerEvent of getProviderResponse({
         iteration: currentIteration,
         observer,
         provider,
@@ -206,7 +225,27 @@ export async function runLoop({
           tools: toolDefinitions,
         },
         stream,
-      });
+      })) {
+        if (providerEvent.type === 'text_delta') {
+          if (providerEvent.delta.length > 0) {
+            streamedAssistantDelta = true;
+
+            yield {
+              delta: providerEvent.delta,
+              type: 'assistant_delta',
+            };
+          }
+
+          continue;
+        }
+
+        response = providerEvent.response;
+      }
+
+      if (!response) {
+        throw new Error('Provider response stream ended without a completed response.');
+      }
+
       currentErrorType = 'runtime';
 
       if (response.toolCalls?.length) {
@@ -230,9 +269,17 @@ export async function runLoop({
       if (!response.toolCalls?.length) {
         observer.turnFinished(currentIteration, totalToolCalls, assistantMessage.content.length);
 
-        return {
-          finalReplyStreamed: streamedTextLength > 0,
+        yield {
           message: assistantMessage,
+          type: 'final_message',
+        };
+
+        return;
+      }
+
+      if (streamedAssistantDelta) {
+        yield {
+          type: 'assistant_message_completed',
         };
       }
 
@@ -257,4 +304,20 @@ export async function runLoop({
     observer.turnFailed(currentIteration, currentErrorType, error);
     throw error;
   }
+}
+
+export async function runLoop(input: RunLoopInput): Promise<Message> {
+  let finalMessage: Message | null = null;
+
+  for await (const chunk of streamLoop(input)) {
+    if (chunk.type === 'final_message') {
+      finalMessage = chunk.message;
+    }
+  }
+
+  if (!finalMessage) {
+    throw new Error('Loop ended without a final assistant message.');
+  }
+
+  return finalMessage;
 }

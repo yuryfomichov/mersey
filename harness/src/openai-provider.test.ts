@@ -544,7 +544,7 @@ test('OpenAILikeProvider derives streamed final text from output items when outp
   ]);
 });
 
-test('OpenAILikeProvider preserves empty-string messages in request input', async () => {
+test('OpenAILikeProvider preserves empty-string user messages in request input', async () => {
   let capturedInput: unknown;
   const provider = new OpenAILikeProvider({
     apiKey: 'test-key',
@@ -594,6 +594,67 @@ test('OpenAILikeProvider preserves empty-string messages in request input', asyn
       content: '',
       role: 'user',
       type: 'message',
+    },
+  ]);
+});
+
+test('OpenAILikeProvider skips empty assistant placeholder text while keeping tool calls', async () => {
+  let capturedInput: unknown;
+  const provider = new OpenAILikeProvider({
+    apiKey: 'test-key',
+    baseUrl: 'https://example.com',
+    maxTokens: 256,
+    model: 'gpt-test-model',
+  });
+
+  (
+    provider as unknown as {
+      client: {
+        responses: {
+          create(request: { input?: unknown }): Promise<OpenAI.Responses.Response>;
+        };
+      };
+    }
+  ).client = {
+    responses: {
+      async create(request: { input?: unknown }): Promise<OpenAI.Responses.Response> {
+        capturedInput = request.input;
+
+        return {
+          created_at: 0,
+          error: null,
+          id: 'resp_empty_assistant_123',
+          incomplete_details: null,
+          instructions: null,
+          metadata: null,
+          model: 'gpt-test-model',
+          object: 'response',
+          output: [],
+          output_text: 'ok',
+          parallel_tool_calls: false,
+          temperature: null,
+          tool_choice: 'auto',
+        } as unknown as OpenAI.Responses.Response;
+      },
+    },
+  };
+
+  await provider.generate({
+    messages: [
+      {
+        content: '',
+        role: 'assistant',
+        toolCalls: [{ id: 'call_1', input: { path: 'note.txt' }, name: 'read_file' }],
+      },
+    ],
+  });
+
+  assert.deepEqual(capturedInput, [
+    {
+      arguments: '{"path":"note.txt"}',
+      call_id: 'call_1',
+      name: 'read_file',
+      type: 'function_call',
     },
   ]);
 });

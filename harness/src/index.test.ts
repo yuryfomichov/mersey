@@ -21,8 +21,8 @@ test('createHarness uses the injected provider and appends session history', asy
   const harness = createHarness({ providerInstance: provider, sessionId: 'test-session', sessionStore });
   const reply = await harness.sendUserMessage('hello');
 
-  assert.equal(reply.message.role, 'assistant');
-  assert.equal(reply.message.content, 'reply:hello');
+  assert.equal(reply.role, 'assistant');
+  assert.equal(reply.content, 'reply:hello');
   assert.equal(harness.session.id, 'test-session');
   assert.equal(provider.requests.length, 1);
   assert.deepEqual(provider.requests[0]?.messages, [{ role: 'user', content: 'hello' }]);
@@ -83,7 +83,7 @@ test('createHarness retries session initialization after a transient store failu
 
   const reply = await harness.sendUserMessage('hello again');
 
-  assert.equal(reply.message.content, 'reply:hello again');
+  assert.equal(reply.content, 'reply:hello again');
 });
 
 test('createHarness uses the canonical session returned by the store', async () => {
@@ -174,8 +174,8 @@ test('createHarness executes read_file tool calls and continues the loop', async
 
     const reply = await harness.sendUserMessage('read the note');
 
-    assert.equal(reply.message.role, 'assistant');
-    assert.equal(reply.message.content, 'done:hello from file');
+    assert.equal(reply.role, 'assistant');
+    assert.equal(reply.content, 'done:hello from file');
     assert.equal(provider.requests.length, 2);
     assert.deepEqual(
       provider.requests[0]?.tools?.map((tool) => tool.name),
@@ -256,8 +256,8 @@ test('createHarness serializes concurrent sendUserMessage calls for one session'
 
   const [firstReply, secondReply] = await Promise.all([firstReplyPromise, secondReplyPromise]);
 
-  assert.equal(firstReply.message.content, 'reply:first');
-  assert.equal(secondReply.message.content, 'reply:second');
+  assert.equal(firstReply.content, 'reply:first');
+  assert.equal(secondReply.content, 'reply:second');
   assert.equal(requests.length, 2);
   assert.deepEqual(requests[1]?.messages, [
     { content: 'first', role: 'user' },
@@ -324,8 +324,8 @@ test('createHarness falls back cleanly after a blank post-tool reply', async () 
 
   const reply = await harness.sendUserMessage('what is your current directory?');
 
-  assert.equal(reply.message.role, 'assistant');
-  assert.equal(reply.message.content, 'I could not produce a response for that request.');
+  assert.equal(reply.role, 'assistant');
+  assert.equal(reply.content, 'I could not produce a response for that request.');
 });
 
 test('createHarness emits live events in stable order without leaking raw content', async () => {
@@ -468,7 +468,7 @@ test('createHarness includes debugArgs when debug is enabled', async () => {
   const toolRequestedEvent = events.find((event) => event.type === 'tool_requested');
   const toolTrace = traces.find((trace) => trace.type === 'tool_execution_started');
 
-  assert.equal(reply.message.content, 'done');
+  assert.equal(reply.content, 'done');
   assert.equal(toolRequestedEvent?.type, 'tool_requested');
   assert.deepEqual(toolRequestedEvent?.type === 'tool_requested' ? toolRequestedEvent.debugArgs : undefined, {
     args: ['status'],
@@ -533,6 +533,61 @@ test('createHarness emits sanitized turn_failed events for provider errors', asy
   assert.doesNotMatch(JSON.stringify(events), /leaked prompt contents/);
 });
 
+test('createHarness streamUserMessage rejects even when a provider throws undefined', async () => {
+  const harness = createHarness({
+    providerInstance: {
+      model: 'broken-model',
+      name: 'broken-provider',
+      async generate(): Promise<ModelResponse> {
+        throw undefined;
+      },
+    },
+    sessionStore: new MemorySessionStore(),
+  });
+
+  await assert.rejects(
+    async () => {
+      for await (const _chunk of harness.streamUserMessage('hello')) {
+        // No-op.
+      }
+    },
+    (error) => error === undefined,
+  );
+});
+
+test('createHarness streamUserMessage starts on first pull and pre-consumption return is a no-op', async () => {
+  const provider = new FakeProvider();
+  const harness = createHarness({
+    providerInstance: provider,
+    sessionStore: new MemorySessionStore(),
+  });
+
+  const abandonedIterator = harness.streamUserMessage('abandoned')[Symbol.asyncIterator]();
+
+  assert.equal(provider.requests.length, 0);
+  await abandonedIterator.return?.();
+  assert.equal(provider.requests.length, 0);
+
+  const iterator = harness.streamUserMessage('hello')[Symbol.asyncIterator]();
+
+  assert.equal(provider.requests.length, 0);
+
+  const firstChunk = await iterator.next();
+
+  assert.equal(provider.requests.length, 1);
+  assert.equal(firstChunk.done, false);
+  assert.equal(firstChunk.value.type, 'final_message');
+  assert.deepEqual(firstChunk.value, {
+    message: {
+      content: 'reply:hello',
+      createdAt: firstChunk.value.message.createdAt,
+      role: 'assistant',
+      toolCalls: undefined,
+    },
+    type: 'final_message',
+  });
+});
+
 test('createHarness degrades malformed tool input into a normal tool error', async () => {
   let callCount = 0;
   const events: HarnessEvent[] = [];
@@ -577,7 +632,7 @@ test('createHarness degrades malformed tool input into a normal tool error', asy
 
   const reply = await harness.sendUserMessage('trigger malformed tool call');
 
-  assert.equal(reply.message.content, 'recovered');
+  assert.equal(reply.content, 'recovered');
   assert.deepEqual(events[3] && events[3].type === 'tool_requested' ? events[3].safeArgs : undefined, {});
   assert.equal(
     events.some((event) => event.type === 'turn_failed'),
@@ -606,7 +661,7 @@ test('createHarness fans out traces to multiple loggers and isolates failures', 
 
   const reply = await harness.sendUserMessage('hello');
 
-  assert.equal(reply.message.content, 'reply:hello');
+  assert.equal(reply.content, 'reply:hello');
   assert.ok(recordedTraces.some((trace) => trace.type === 'session_started'));
   assert.ok(recordedTraces.some((trace) => trace.type === 'event_emitted'));
   assert.ok(recordedTraces.some((trace) => trace.type === 'loop_iteration_started'));
@@ -653,7 +708,7 @@ test('createHarness swallows listener failures and logs them', async () => {
 
   const reply = await harness.sendUserMessage('hello');
 
-  assert.equal(reply.message.content, 'reply:hello');
+  assert.equal(reply.content, 'reply:hello');
   assert.ok(traces.some((trace) => trace.type === 'listener_failed'));
 });
 
@@ -721,8 +776,9 @@ test('createHarness protects listeners from event mutation by other listeners', 
   }
 });
 
-test('createHarness emits provider_text_delta events when streaming is enabled', async () => {
+test('createHarness streamUserMessage yields final assistant deltas and still emits events', async () => {
   const events: HarnessEvent[] = [];
+  const chunks = [];
   const harness = createHarness({
     providerInstance: new FakeProvider({
       streamReply: [
@@ -739,10 +795,23 @@ test('createHarness emits provider_text_delta events when streaming is enabled',
     events.push(event);
   });
 
-  const reply = await harness.sendUserMessage('hello');
+  for await (const chunk of harness.streamUserMessage('hello')) {
+    chunks.push(chunk);
+  }
 
-  assert.equal(reply.message.content, 'hello');
-  assert.equal(reply.finalReplyStreamed, true);
+  assert.deepEqual(chunks, [
+    { delta: 'hel', type: 'assistant_delta' },
+    { delta: 'lo', type: 'assistant_delta' },
+    {
+      message: {
+        content: 'hello',
+        createdAt: chunks[2]?.type === 'final_message' ? chunks[2].message.createdAt : '',
+        role: 'assistant',
+        toolCalls: undefined,
+      },
+      type: 'final_message',
+    },
+  ]);
   assert.deepEqual(
     events.map((event) => event.type),
     [
@@ -760,4 +829,36 @@ test('createHarness emits provider_text_delta events when streaming is enabled',
       .map((event) => (event.type === 'provider_text_delta' ? event.delta : '')),
     ['hel', 'lo'],
   );
+});
+
+test('createHarness streamUserMessage yields only final_message when harness streaming is disabled', async () => {
+  const harness = createHarness({
+    providerInstance: new FakeProvider({
+      reply: 'hello',
+      streamReply: [
+        { delta: 'hel', type: 'text_delta' },
+        { delta: 'lo', type: 'text_delta' },
+        { response: { text: 'hello' }, type: 'response_completed' },
+      ],
+    }),
+    sessionStore: new MemorySessionStore(),
+    stream: false,
+  });
+  const chunks = [];
+
+  for await (const chunk of harness.streamUserMessage('hello')) {
+    chunks.push(chunk);
+  }
+
+  assert.deepEqual(chunks, [
+    {
+      message: {
+        content: 'hello',
+        createdAt: chunks[0]?.type === 'final_message' ? chunks[0].message.createdAt : '',
+        role: 'assistant',
+        toolCalls: undefined,
+      },
+      type: 'final_message',
+    },
+  ]);
 });
