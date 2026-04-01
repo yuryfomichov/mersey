@@ -252,13 +252,17 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
             content,
             debug: options.debug,
             emitEvent(event: HarnessEvent): void {
-              const frozenEvent = deepFreeze(structuredClone(event));
-
               emitRuntimeTrace(runtimeLogger, 'event_emitted', {
-                eventType: frozenEvent.type,
-                sessionId: frozenEvent.sessionId,
-                turnId: frozenEvent.turnId,
+                eventType: event.type,
+                sessionId: event.sessionId,
+                turnId: event.turnId,
               });
+
+              if (listeners.size === 0) {
+                return;
+              }
+
+              const frozenEvent = deepFreeze(structuredClone(event));
 
               for (const listener of listeners) {
                 try {

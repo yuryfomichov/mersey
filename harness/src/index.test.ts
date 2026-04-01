@@ -776,7 +776,7 @@ test('createHarness protects listeners from event mutation by other listeners', 
   }
 });
 
-test('createHarness streamUserMessage yields final assistant deltas and still emits events', async () => {
+test('createHarness streamUserMessage yields final assistant deltas and keeps events coarse', async () => {
   const events: HarnessEvent[] = [];
   const chunks = [];
   const harness = createHarness({
@@ -814,20 +814,7 @@ test('createHarness streamUserMessage yields final assistant deltas and still em
   ]);
   assert.deepEqual(
     events.map((event) => event.type),
-    [
-      'turn_started',
-      'provider_requested',
-      'provider_text_delta',
-      'provider_text_delta',
-      'provider_responded',
-      'turn_finished',
-    ],
-  );
-  assert.deepEqual(
-    events
-      .filter((event) => event.type === 'provider_text_delta')
-      .map((event) => (event.type === 'provider_text_delta' ? event.delta : '')),
-    ['hel', 'lo'],
+    ['turn_started', 'provider_requested', 'provider_responded', 'turn_finished'],
   );
 });
 

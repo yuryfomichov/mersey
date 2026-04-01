@@ -5,7 +5,6 @@ export type {
   HarnessEventListener,
   ProviderRequestedEvent,
   ProviderRespondedEvent,
-  ProviderTextDeltaEvent,
   SafeCommandArgSummary,
   SafePathArgSummary,
   SafeToolArgs,

@@ -166,18 +166,8 @@ export function createLoopObserver({
       });
     },
 
-    providerTextDelta(iteration: number, delta: string): void {
-      publishEvent({
-        delta,
-        deltaLength: delta.length,
-        iteration,
-        model: provider.model,
-        providerName: provider.name,
-        sessionId,
-        timestamp: new Date().toISOString(),
-        turnId,
-        type: 'provider_text_delta',
-      });
+    providerTextDelta(_iteration: number, _delta: string): void {
+      // Raw streamed text is exposed through streamUserMessage(), not the event bus.
     },
 
     toolFinished(

@@ -199,7 +199,7 @@ test('runLoop owns fallback text when provider returns an empty non-tool reply',
   assert.equal(reply.content, 'I could not produce a response for that request.');
 });
 
-test('streamLoop yields assistant deltas and final message for the final streamed reply', async () => {
+test('streamLoop yields assistant deltas and final message while events stay coarse', async () => {
   const sessionStore = new MemorySessionStore();
   const session: Session = {
     createdAt: new Date().toISOString(),
@@ -248,20 +248,7 @@ test('streamLoop yields assistant deltas and final message for the final streame
   ]);
   assert.deepEqual(
     events.map((event) => event.type),
-    [
-      'turn_started',
-      'provider_requested',
-      'provider_text_delta',
-      'provider_text_delta',
-      'provider_responded',
-      'turn_finished',
-    ],
-  );
-  assert.deepEqual(
-    events
-      .filter((event) => event.type === 'provider_text_delta')
-      .map((event) => (event.type === 'provider_text_delta' ? event.delta : '')),
-    ['hel', 'lo'],
+    ['turn_started', 'provider_requested', 'provider_responded', 'turn_finished'],
   );
 });
 
