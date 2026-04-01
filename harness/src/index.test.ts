@@ -542,6 +542,67 @@ test('createHarness resumes a paused turn after denial with a tool error', async
   assert.equal(harness.session.turnStatus, 'idle');
 });
 
+test('createHarness does not reopen approval after a denial append failure and restart', async () => {
+  class FailOnceDeniedToolAppendStore extends MemorySessionStore {
+    private failed = false;
+
+    override async appendMessage(sessionId: string, message: Message): Promise<void> {
+      if (!this.failed && message.role === 'tool' && message.toolCallId === 'call-write-1') {
+        this.failed = true;
+        throw new Error('transient append failure');
+      }
+
+      await super.appendMessage(sessionId, message);
+    }
+  }
+
+  let callCount = 0;
+  const sessionStore = new FailOnceDeniedToolAppendStore();
+  const provider = new FakeProvider({
+    reply: (input) => {
+      callCount += 1;
+
+      if (callCount === 1) {
+        return {
+          text: '',
+          toolCalls: [createWriteFileToolCall({ content: 'denied' })],
+        };
+      }
+
+      const lastMessage = input.messages.at(-1);
+
+      assert.equal(lastMessage?.role, 'tool');
+      assert.equal(lastMessage?.content, 'Tool execution denied by user approval.');
+      return { text: 'denial handled after restart' };
+    },
+  });
+  const firstHarness = createHarness({
+    providerInstance: provider,
+    sessionId: 'denial-retry-session',
+    sessionStore,
+    toolPolicy: { workspaceRoot: process.cwd() },
+    tools: [new WriteFileTool()],
+  });
+
+  expectAwaitingApproval(await firstHarness.sendUserMessage('write the note'));
+  await assert.rejects(() => firstHarness.denyPendingTool(), /transient append failure/);
+  assert.equal(firstHarness.session.pendingApproval?.stage, 'denied_executed');
+
+  const secondHarness = createHarness({
+    providerInstance: provider,
+    sessionId: 'denial-retry-session',
+    sessionStore,
+    toolPolicy: { workspaceRoot: process.cwd() },
+    tools: [new WriteFileTool()],
+  });
+
+  await assert.rejects(() => secondHarness.approvePendingTool(), /already denied by user approval/);
+  const reply = expectCompleted(await secondHarness.denyPendingTool());
+
+  assert.equal(reply.content, 'denial handled after restart');
+  assert.equal(callCount, 2);
+});
+
 test('createHarness blocks deny after approval has already been consumed', async () => {
   class ExecutingApprovalStore extends MemorySessionStore {
     override async getSession(sessionId: string): Promise<Session | null> {

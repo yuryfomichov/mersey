@@ -23,6 +23,11 @@ export type PendingApprovalState =
       stage: 'approved_executed';
       toolCallId: string;
       toolResult: PendingApprovalToolResult;
+    }
+  | {
+      stage: 'denied_executed';
+      toolCallId: string;
+      toolResult: PendingApprovalToolResult;
     };
 
 export type SessionStatePatch = {

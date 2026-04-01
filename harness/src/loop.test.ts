@@ -403,3 +403,46 @@ test('runLoop keeps a completed streamed response when stream teardown fails', a
   assert.equal(batchCallCount, 0);
   assert.equal(reply.content, 'stream reply');
 });
+
+test('runLoop preserves the original failure when session cleanup state reset also fails', async () => {
+  class FailCleanupStore extends MemorySessionStore {
+    override async updateSessionState(): Promise<void> {
+      throw new Error('cleanup failed');
+    }
+  }
+
+  const sessionStore = new FailCleanupStore();
+  const session: Session = {
+    createdAt: new Date().toISOString(),
+    id: 'cleanup-failure-session',
+    messages: [],
+  };
+  const events: string[] = [];
+
+  await sessionStore.createSession(session);
+
+  await assert.rejects(
+    () =>
+      runLoop({
+        content: 'hello',
+        emitEvent(event): void {
+          events.push(event.type);
+        },
+        provider: {
+          model: 'fake-model',
+          name: 'fake',
+          async generate(): Promise<never> {
+            throw new Error('provider failed');
+          },
+        },
+        session,
+        sessionStore,
+        toolPolicy: { workspaceRoot: process.cwd() },
+        tools: [],
+      }),
+    /provider failed/,
+  );
+
+  assert.ok(events.includes('turn_started'));
+  assert.ok(events.includes('turn_failed'));
+});

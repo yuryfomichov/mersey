@@ -1,5 +1,5 @@
 import type { ModelToolCall } from './models/index.js';
-import type { Message } from './sessions/index.js';
+import type { Message, ToolMessage } from './sessions/index.js';
 
 export type TurnProgress = {
   iteration: number;
@@ -19,6 +19,18 @@ export function findToolCall(messages: Message[], toolCallId: string): ModelTool
 
     if (toolCall) {
       return toolCall;
+    }
+  }
+
+  return null;
+}
+
+export function findToolMessage(messages: Message[], toolCallId: string): ToolMessage | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+
+    if (message?.role === 'tool' && message.toolCallId === toolCallId) {
+      return message;
     }
   }
 
