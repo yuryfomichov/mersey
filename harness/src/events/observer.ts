@@ -45,7 +45,7 @@ function getToolDefinitionNames(toolDefinitions: ModelToolDefinition[] | undefin
 
 export class HarnessObserver {
   private readonly debug: boolean;
-  private readonly getSessionIdValue: () => string;
+  private readonly getSessionId: () => string;
   private readonly logger: HarnessLogger | undefined;
   private readonly providerName: string;
   private readonly runId = randomUUID();
@@ -57,7 +57,7 @@ export class HarnessObserver {
 
   constructor({ debug, getSessionId, logger, providerName, stream }: HarnessObserverOptions) {
     this.debug = Boolean(debug);
-    this.getSessionIdValue = getSessionId;
+    this.getSessionId = getSessionId;
     this.logger = logger;
     this.providerName = providerName;
     this.stream = Boolean(stream);
@@ -314,10 +314,6 @@ export class HarnessObserver {
     }
 
     return this.currentTurnStartTime;
-  }
-
-  private getSessionId(): string {
-    return this.getSessionIdValue();
   }
 
   private publishEvent(event: HarnessEvent): void {
