@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import type { HarnessRuntimeTrace } from '../logger/types.js';
 import { HarnessEventPublisher } from './publisher.js';
 import type { HarnessEvent, TurnFinishedEvent } from './types.js';
 
@@ -41,15 +40,8 @@ test('HarnessEventPublisher snapshots events before delivery', () => {
   });
 });
 
-test('HarnessEventPublisher unsubscribes listeners and logs listener failures', async () => {
-  const traces: HarnessRuntimeTrace[] = [];
-  const publisher = new HarnessEventPublisher({
-    logger: {
-      log(trace): void {
-        traces.push(trace);
-      },
-    },
-  });
+test('HarnessEventPublisher unsubscribes listeners and swallows listener failures', async () => {
+  const publisher = new HarnessEventPublisher();
   let callCount = 0;
   const unsubscribe = publisher.subscribe(() => {
     callCount += 1;
@@ -66,6 +58,4 @@ test('HarnessEventPublisher unsubscribes listeners and logs listener failures', 
   await Promise.resolve();
 
   assert.equal(callCount, 1);
-  assert.ok(traces.some((trace) => trace.type === 'listener_failed'));
-  assert.ok(traces.some((trace) => trace.type === 'event_emitted'));
 });

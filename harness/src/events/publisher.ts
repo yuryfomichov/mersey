@@ -1,28 +1,25 @@
-import { emitRuntimeTrace } from '../logger/runtime-trace.js';
-import type { HarnessLogger } from '../logger/types.js';
 import { freezeDeep } from '../utils/object.js';
 import type { HarnessEvent, HarnessEventListener } from './types.js';
 
 export type HarnessEventPublisherOptions = {
-  logger?: HarnessLogger;
+  onEventPublished?: (event: HarnessEvent) => void;
+  onListenerFailed?: (event: HarnessEvent) => void;
 };
 
 export type HarnessEventSink = Pick<HarnessEventPublisher, 'publish'>;
 
 export class HarnessEventPublisher {
   private readonly listeners = new Set<HarnessEventListener>();
-  private readonly logger: HarnessLogger | undefined;
+  private readonly onEventPublished: ((event: HarnessEvent) => void) | undefined;
+  private readonly onListenerFailed: ((event: HarnessEvent) => void) | undefined;
 
-  constructor({ logger }: HarnessEventPublisherOptions = {}) {
-    this.logger = logger;
+  constructor({ onEventPublished, onListenerFailed }: HarnessEventPublisherOptions = {}) {
+    this.onEventPublished = onEventPublished;
+    this.onListenerFailed = onListenerFailed;
   }
 
   publish(event: HarnessEvent): void {
-    emitRuntimeTrace(this.logger, 'event_emitted', {
-      eventType: event.type,
-      sessionId: event.sessionId,
-      turnId: event.turnId,
-    });
+    this.onEventPublished?.(event);
 
     if (this.listeners.size === 0) {
       return;
@@ -36,15 +33,11 @@ export class HarnessEventPublisher {
 
         if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
           void Promise.resolve(result).catch(() => {
-            emitRuntimeTrace(this.logger, 'listener_failed', {
-              eventType: snapshot.type,
-            });
+            this.onListenerFailed?.(snapshot);
           });
         }
       } catch {
-        emitRuntimeTrace(this.logger, 'listener_failed', {
-          eventType: snapshot.type,
-        });
+        this.onListenerFailed?.(snapshot);
       }
     }
   }

@@ -1,10 +1,7 @@
-import { randomUUID } from 'node:crypto';
-
 import { createAsyncQueue } from './async-queue.js';
-import { HarnessEventPublisher } from './events/publisher.js';
+import { HarnessObserver } from './events/observer.js';
 import type { HarnessEventListener } from './events/types.js';
 import { createFanoutLogger } from './logger/fanout.js';
-import { emitRuntimeTrace } from './logger/runtime-trace.js';
 import type { HarnessLogger } from './logger/types.js';
 import { streamLoop, type TurnChunk } from './loop/loop.js';
 import { snapshotTurnChunk } from './loop/snapshot.js';
@@ -14,6 +11,7 @@ import { MemorySessionStore } from './sessions/memory-store.js';
 import { Session } from './sessions/session.js';
 import type { Message } from './sessions/types.js';
 import type { ToolPolicy } from './tools/context.js';
+import { getToolDefinitions } from './tools/runtime.js';
 import type { Tool } from './tools/types.js';
 
 export type Harness = {
@@ -42,21 +40,21 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
   const systemPrompt = options.systemPrompt;
   const toolPolicy = options.toolPolicy ?? { workspaceRoot: process.cwd() };
   const tools = options.tools ?? [];
-  const eventPublisher = new HarnessEventPublisher({ logger: runtimeLogger });
 
   if (!provider) {
     throw new Error('Missing provider. Pass providerInstance or provider config to createHarness().');
   }
 
   const resolvedProvider = provider;
-
-  emitRuntimeTrace(runtimeLogger, 'session_started', {
-    debug: Boolean(options.debug),
-    provider: provider.name,
-    runId: randomUUID(),
+  const toolDefinitions = getToolDefinitions(tools);
+  const observer = new HarnessObserver({
+    debug: options.debug,
+    logger: runtimeLogger,
+    providerName: resolvedProvider.name,
     sessionId: session.id,
-    stream: Boolean(options.stream),
+    stream: options.stream,
   });
+  observer.sessionStarted();
 
   function enqueueStream(content: string): AsyncIterable<TurnChunk> & AsyncIterator<TurnChunk> {
     const queue = createAsyncQueue<TurnChunk>();
@@ -77,12 +75,9 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
 
           const iterator = streamLoop({
             content,
-            debug: options.debug,
-            eventPublisher,
             history: session.messages,
-            logger: runtimeLogger,
+            observer,
             provider: resolvedProvider,
-            sessionId: session.id,
             signal: abortController.signal,
             stream: options.stream,
             systemPrompt,
@@ -159,7 +154,7 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
       return enqueueStream(content);
     },
     subscribe(listener: HarnessEventListener): () => void {
-      return eventPublisher.subscribe(listener);
+      return observer.subscribe(listener);
     },
   };
 }
