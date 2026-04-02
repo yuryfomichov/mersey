@@ -40,6 +40,27 @@ test('HarnessEventPublisher snapshots events before delivery', () => {
   });
 });
 
+test('HarnessEventPublisher passes immutable snapshots to hooks', () => {
+  const event = createEvent();
+  const seenEvents: HarnessEvent[] = [];
+  const publisher = new HarnessEventPublisher({
+    onEventPublished(receivedEvent): void {
+      seenEvents.push(receivedEvent);
+    },
+  });
+
+  publisher.publish(event);
+  event.turnId = 'mutated-turn';
+
+  const receivedEvent = seenEvents[0] as TurnFinishedEvent | undefined;
+
+  assert.ok(receivedEvent);
+  assert.equal(receivedEvent.turnId, 'turn-1');
+  assert.throws(() => {
+    receivedEvent.turnId = 'changed';
+  });
+});
+
 test('HarnessEventPublisher unsubscribes listeners and swallows listener failures', async () => {
   const publisher = new HarnessEventPublisher();
   let callCount = 0;
@@ -55,6 +76,28 @@ test('HarnessEventPublisher unsubscribes listeners and swallows listener failure
   unsubscribe();
   publisher.publish(createEvent());
 
+  await Promise.resolve();
+
+  assert.equal(callCount, 1);
+});
+
+test('HarnessEventPublisher swallows hook failures', async () => {
+  const publisher = new HarnessEventPublisher({
+    onEventPublished(): void {
+      throw new Error('publish hook failed');
+    },
+    onListenerFailed(): Promise<void> {
+      return Promise.reject(new Error('listener hook failed'));
+    },
+  });
+  let callCount = 0;
+
+  publisher.subscribe(() => {
+    callCount += 1;
+    throw new Error('listener boom');
+  });
+
+  publisher.publish(createEvent());
   await Promise.resolve();
 
   assert.equal(callCount, 1);

@@ -46,6 +46,7 @@ function createTurnStream({
     backgroundTask = session.runExclusive(async () => {
       try {
         await session.ensure();
+        observer.sessionStarted();
 
         const iterator = streamLoop({
           content,

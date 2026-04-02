@@ -7,13 +7,13 @@ test('HarnessObserver emits session_started and event delivery traces', async ()
   const traces: HarnessRuntimeTrace[] = [];
   const observer = new HarnessObserver({
     debug: false,
+    getSessionId: () => 'session-1',
     logger: {
       log(trace): void {
         traces.push(trace);
       },
     },
     providerName: 'fake',
-    sessionId: 'session-1',
     stream: true,
   });
   observer.sessionStarted();

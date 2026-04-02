@@ -61,9 +61,9 @@ function createObserver(input: {
 }) {
   const observer = new HarnessObserver({
     debug: input.debug,
+    getSessionId: () => input.sessionId,
     logger: undefined,
     providerName: input.provider.name,
-    sessionId: input.sessionId,
     stream: false,
   });
 

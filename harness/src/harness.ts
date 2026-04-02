@@ -47,9 +47,9 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
 
   const observer = new HarnessObserver({
     debug: options.debug,
+    getSessionId: () => session.id,
     logger: createFanoutLogger(options.loggers),
     providerName: resolvedProvider.name,
-    sessionId: session.id,
     stream: options.stream,
   });
   const streamTurn = createTurnStreamFactory({
@@ -61,8 +61,6 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
     toolPolicy: options.toolPolicy ?? { workspaceRoot: process.cwd() },
     tools: options.tools ?? [],
   });
-
-  observer.sessionStarted();
 
   return {
     session,

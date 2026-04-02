@@ -2,16 +2,16 @@ import { snapshot } from '../utils/object.js';
 import type { HarnessEvent, HarnessEventListener } from './types.js';
 
 export type HarnessEventPublisherOptions = {
-  onEventPublished?: (event: HarnessEvent) => void;
-  onListenerFailed?: (event: HarnessEvent) => void;
+  onEventPublished?: (event: HarnessEvent) => unknown;
+  onListenerFailed?: (event: HarnessEvent) => unknown;
 };
 
 export type HarnessEventSink = Pick<HarnessEventPublisher, 'publish'>;
 
 export class HarnessEventPublisher {
   private readonly listeners = new Set<HarnessEventListener>();
-  private readonly onEventPublished: ((event: HarnessEvent) => void) | undefined;
-  private readonly onListenerFailed: ((event: HarnessEvent) => void) | undefined;
+  private readonly onEventPublished: ((event: HarnessEvent) => unknown) | undefined;
+  private readonly onListenerFailed: ((event: HarnessEvent) => unknown) | undefined;
 
   constructor({ onEventPublished, onListenerFailed }: HarnessEventPublisherOptions = {}) {
     this.onEventPublished = onEventPublished;
@@ -19,13 +19,13 @@ export class HarnessEventPublisher {
   }
 
   publish(event: HarnessEvent): void {
-    this.onEventPublished?.(event);
+    const eventSnapshot = snapshot(event);
+
+    this.invokeHook(this.onEventPublished, eventSnapshot);
 
     if (this.listeners.size === 0) {
       return;
     }
-
-    const eventSnapshot = snapshot(event);
 
     for (const listener of this.listeners) {
       try {
@@ -33,11 +33,11 @@ export class HarnessEventPublisher {
 
         if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
           void Promise.resolve(result).catch(() => {
-            this.onListenerFailed?.(eventSnapshot);
+            this.invokeHook(this.onListenerFailed, eventSnapshot);
           });
         }
       } catch {
-        this.onListenerFailed?.(eventSnapshot);
+        this.invokeHook(this.onListenerFailed, eventSnapshot);
       }
     }
   }
@@ -48,5 +48,21 @@ export class HarnessEventPublisher {
     return () => {
       this.listeners.delete(listener);
     };
+  }
+
+  private invokeHook(hook: ((event: HarnessEvent) => unknown) | undefined, event: HarnessEvent): void {
+    if (!hook) {
+      return;
+    }
+
+    try {
+      const result = hook(event);
+
+      if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
+        void Promise.resolve(result).catch(() => {});
+      }
+    } catch {
+      // Hook failures are best-effort and must never break event delivery.
+    }
   }
 }

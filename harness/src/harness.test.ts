@@ -149,6 +149,51 @@ test('createHarness uses the canonical session returned by the store', async () 
   assert.equal(harness.session.messages[0]?.content, 'from-store');
 });
 
+test('createHarness emits events and traces with the canonical session id after ensure', async () => {
+  const recordedTraces: HarnessRuntimeTrace[] = [];
+  const recordedEvents: HarnessEvent[] = [];
+
+  class CanonicalSessionStore extends MemorySessionStore {
+    override async getSession(_sessionId: string): Promise<SessionState | null> {
+      return null;
+    }
+
+    override async createSession(session: SessionState): Promise<SessionState> {
+      return {
+        ...session,
+        id: 'canonical-session',
+        messages: [],
+      };
+    }
+  }
+
+  const harness = createHarness({
+    loggers: [
+      {
+        log(trace): void {
+          recordedTraces.push(trace);
+        },
+      },
+    ],
+    providerInstance: new FakeProvider(),
+    sessionStore: new CanonicalSessionStore(),
+  });
+
+  harness.subscribe((event) => {
+    recordedEvents.push(event);
+  });
+
+  await harness.sendUserMessage('hello');
+
+  assert.equal(harness.session.id, 'canonical-session');
+  assert.ok(
+    recordedTraces
+      .filter((trace) => trace.type === 'session_started')
+      .every((trace) => trace.detail.sessionId === 'canonical-session'),
+  );
+  assert.ok(recordedEvents.every((event) => event.sessionId === 'canonical-session'));
+});
+
 test('createHarness initializes the session once across concurrent first use', async () => {
   class CountingSessionStore extends MemorySessionStore {
     createSessionCalls = 0;
