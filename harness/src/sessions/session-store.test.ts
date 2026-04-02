@@ -6,15 +6,15 @@ import test from 'node:test';
 
 import { FilesystemSessionStore } from './filesystem-store.js';
 import { MemorySessionStore } from './memory-store.js';
-import type { Message, Session } from './types.js';
+import type { Message, SessionState } from './types.js';
 
 async function verifyStoreRoundTrip(store: {
   appendMessage(sessionId: string, message: Message): Promise<void>;
-  createSession(session: Session): Promise<Session>;
-  getSession(sessionId: string): Promise<Session | null>;
+  createSession(session: SessionState): Promise<SessionState>;
+  getSession(sessionId: string): Promise<SessionState | null>;
   listMessages(sessionId: string): Promise<Message[]>;
 }): Promise<void> {
-  const session: Session = {
+  const session: SessionState = {
     id: 'session-1',
     createdAt: '2026-03-29T00:00:00.000Z',
     messages: [],
@@ -109,7 +109,7 @@ test('FilesystemSessionStore createSession does not clobber existing messages', 
 
   try {
     const store = new FilesystemSessionStore({ rootDir });
-    const session: Session = {
+    const session: SessionState = {
       id: 'session-1',
       createdAt: '2026-03-29T00:00:00.000Z',
       messages: [],
@@ -146,7 +146,7 @@ test('FilesystemSessionStore skips corrupt JSONL lines and returns the valid mes
 
   try {
     const store = new FilesystemSessionStore({ rootDir });
-    const session: Session = {
+    const session: SessionState = {
       id: 'session-1',
       createdAt: '2026-03-29T00:00:00.000Z',
       messages: [],
@@ -176,7 +176,7 @@ test('FilesystemSessionStore skips corrupt JSONL lines and returns the valid mes
 
 test('MemorySessionStore isolates nested message mutations', async () => {
   const store = new MemorySessionStore();
-  const session: Session = {
+  const session: SessionState = {
     id: 'session-1',
     createdAt: '2026-03-29T00:00:00.000Z',
     messages: [],

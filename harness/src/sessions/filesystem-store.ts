@@ -3,13 +3,13 @@ import { join } from 'node:path';
 
 import { assertValidSessionId } from './utils.js';
 import type { SessionStore } from './store.js';
-import type { Message, Session } from './types.js';
+import type { Message, SessionState } from './types.js';
 
 export type FilesystemSessionStoreOptions = {
   rootDir?: string;
 };
 
-type SessionMetadata = Omit<Session, 'messages'>;
+type SessionMetadata = Omit<SessionState, 'messages'>;
 
 function isErrnoCode(error: unknown, code: string): boolean {
   return error instanceof Error && 'code' in error && error.code === code;
@@ -27,7 +27,7 @@ export class FilesystemSessionStore implements SessionStore {
     await appendFile(this.getMessagesPath(sessionId), `${JSON.stringify(message)}\n`, 'utf8');
   }
 
-  async createSession(session: Session): Promise<Session> {
+  async createSession(session: SessionState): Promise<SessionState> {
     const existingSession = await this.getSession(session.id);
 
     if (existingSession) {
@@ -74,7 +74,7 @@ export class FilesystemSessionStore implements SessionStore {
     };
   }
 
-  async getSession(sessionId: string): Promise<Session | null> {
+  async getSession(sessionId: string): Promise<SessionState | null> {
     try {
       const contents = await readFile(this.getSessionPath(sessionId), 'utf8');
       const session = JSON.parse(contents) as SessionMetadata;
@@ -126,7 +126,7 @@ export class FilesystemSessionStore implements SessionStore {
     return join(this.getSessionDir(sessionId), 'session.json');
   }
 
-  private toSessionMetadata(session: Session): SessionMetadata {
+  private toSessionMetadata(session: SessionState): SessionMetadata {
     return {
       createdAt: session.createdAt,
       id: session.id,

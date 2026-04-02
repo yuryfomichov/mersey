@@ -19,7 +19,8 @@ export type { ProviderDefinition, ProviderName } from './src/providers/factory.j
 
 export { FilesystemSessionStore } from './src/sessions/filesystem-store.js';
 export { MemorySessionStore } from './src/sessions/memory-store.js';
-export type { Message, Session } from './src/sessions/types.js';
+export { Session } from './src/sessions/session.js';
+export type { Message, SessionState } from './src/sessions/types.js';
 export type { SessionStore } from './src/sessions/store.js';
 
 export { EditFileTool } from './src/tools/edit-file.js';

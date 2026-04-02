@@ -25,7 +25,7 @@ export type ToolMessage = {
 
 export type Message = UserMessage | AssistantMessage | ToolMessage;
 
-export type Session = {
+export type SessionState = {
   id: string;
   createdAt: string;
   messages: Message[];

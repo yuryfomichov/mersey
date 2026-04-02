@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { createHarness } from './harness.js';
+import { createHarness as createBaseHarness, type CreateHarnessOptions } from './harness.js';
 import type { HarnessEvent } from './events/types.js';
 import type { HarnessRuntimeTrace } from './logger/types.js';
 import type { ModelProvider } from './models/provider.js';
@@ -13,10 +13,33 @@ import type { ModelRequest, ModelResponse } from './models/types.js';
 import { parseProviderName } from './providers/factory.js';
 import { FakeProvider } from './providers/fake.js';
 import { MemorySessionStore } from './sessions/memory-store.js';
-import type { Message, Session } from './sessions/types.js';
+import { Session } from './sessions/session.js';
 import type { SessionStore } from './sessions/store.js';
+import type { Message, SessionState } from './sessions/types.js';
 import { ReadFileTool } from './tools/read-file.js';
 import { RunCommandTool } from './tools/run-command.js';
+
+type TestHarnessOptions = Omit<CreateHarnessOptions, 'session'> & {
+  session?: Session;
+  sessionId?: string;
+  sessionStore?: SessionStore;
+};
+
+function createTestSession(sessionStore: SessionStore = new MemorySessionStore(), sessionId = 'local-session'): Session {
+  return new Session({
+    id: sessionId,
+    store: sessionStore,
+  });
+}
+
+function createHarness(options: TestHarnessOptions = {}) {
+  const { session: providedSession, sessionId, sessionStore, ...rest } = options;
+
+  return createBaseHarness({
+    ...rest,
+    session: providedSession ?? createTestSession(sessionStore ?? new MemorySessionStore(), sessionId ?? 'local-session'),
+  });
+}
 
 test('createHarness uses the injected provider and appends session history', async () => {
   const provider = new FakeProvider();
@@ -57,14 +80,14 @@ test('createHarness retries session initialization after a transient store failu
 
     async appendMessage(_sessionId: string, _message: Message): Promise<void> {}
 
-    async createSession(session: Session): Promise<Session> {
+    async createSession(session: SessionState): Promise<SessionState> {
       return {
         ...session,
         messages: [],
       };
     }
 
-    async getSession(_sessionId: string): Promise<Session | null> {
+    async getSession(_sessionId: string): Promise<SessionState | null> {
       if (!this.failed) {
         this.failed = true;
         throw new Error('temporary failure');
@@ -92,11 +115,11 @@ test('createHarness retries session initialization after a transient store failu
 
 test('createHarness uses the canonical session returned by the store', async () => {
   class CanonicalSessionStore extends MemorySessionStore {
-    override async getSession(_sessionId: string): Promise<Session | null> {
+    override async getSession(_sessionId: string): Promise<SessionState | null> {
       return null;
     }
 
-    override async createSession(session: Session): Promise<Session> {
+    override async createSession(session: SessionState): Promise<SessionState> {
       return {
         ...session,
         createdAt: '2026-03-29T00:00:00.000Z',
@@ -120,6 +143,72 @@ test('createHarness uses the canonical session returned by the store', async () 
 
   assert.equal(harness.session.createdAt, '2026-03-29T00:00:00.000Z');
   assert.equal(harness.session.messages[0]?.content, 'from-store');
+});
+
+test('createHarness initializes the session once across concurrent first use', async () => {
+  class CountingSessionStore extends MemorySessionStore {
+    createSessionCalls = 0;
+    getSessionCalls = 0;
+
+    override async createSession(session: SessionState): Promise<SessionState> {
+      this.createSessionCalls += 1;
+      return super.createSession(session);
+    }
+
+    override async getSession(sessionId: string): Promise<SessionState | null> {
+      this.getSessionCalls += 1;
+      await delay(5);
+      return super.getSession(sessionId);
+    }
+  }
+
+  let releaseFirstRequest!: () => void;
+  let firstRequestStarted!: () => void;
+
+  const firstRequestStartedPromise = new Promise<void>((resolve) => {
+    firstRequestStarted = resolve;
+  });
+  const releaseFirstRequestPromise = new Promise<void>((resolve) => {
+    releaseFirstRequest = resolve;
+  });
+
+  const provider: ModelProvider = {
+    model: 'fake-model',
+    name: 'fake',
+    async generate(input: ModelRequest): Promise<ModelResponse> {
+      const lastMessage = input.messages.at(-1);
+
+      if (lastMessage?.role !== 'user') {
+        throw new Error('Expected the last message to be a user message.');
+      }
+
+      if (lastMessage.content === 'first') {
+        firstRequestStarted();
+        await releaseFirstRequestPromise;
+      }
+
+      return { text: `reply:${lastMessage.content}` };
+    },
+  };
+
+  const sessionStore = new CountingSessionStore();
+  const harness = createHarness({
+    providerInstance: provider,
+    sessionStore,
+  });
+
+  const firstReplyPromise = harness.sendUserMessage('first');
+
+  await firstRequestStartedPromise;
+
+  const secondReplyPromise = harness.sendUserMessage('second');
+
+  releaseFirstRequest();
+
+  await Promise.all([firstReplyPromise, secondReplyPromise]);
+
+  assert.equal(sessionStore.getSessionCalls, 1);
+  assert.equal(sessionStore.createSessionCalls, 1);
 });
 
 test('createHarness executes read_file tool calls and continues the loop', async () => {
@@ -592,7 +681,8 @@ test('createHarness streamUserMessage starts on first pull and pre-consumption r
   });
 });
 
-test('createHarness streamUserMessage return aborts an active turn and frees the queue', async () => {
+test('createHarness streamUserMessage return aborts an active turn, drops partial history, and frees the queue', async () => {
+  const sessionStore = new MemorySessionStore();
   const harness = createHarness({
     providerInstance: new FakeProvider({
       streamReply: async function* (input: ModelRequest) {
@@ -614,7 +704,8 @@ test('createHarness streamUserMessage return aborts an active turn and frees the
         });
       },
     }),
-    sessionStore: new MemorySessionStore(),
+    sessionId: 'cancelled-stream-session',
+    sessionStore,
     stream: true,
   });
 
@@ -626,6 +717,9 @@ test('createHarness streamUserMessage return aborts an active turn and frees the
 
   await iterator.return?.();
 
+  assert.equal(harness.session.messages.length, 0);
+  assert.equal((await sessionStore.listMessages('cancelled-stream-session')).length, 0);
+
   const reply = await Promise.race([
     harness.sendUserMessage('second'),
     delay(1_000).then(() => {
@@ -634,6 +728,81 @@ test('createHarness streamUserMessage return aborts an active turn and frees the
   ]);
 
   assert.equal(reply.content, 'reply:second');
+  assert.deepEqual(
+    harness.session.messages.map((message) => ({ content: message.content, role: message.role })),
+    [
+      { content: 'second', role: 'user' },
+      { content: 'reply:second', role: 'assistant' },
+    ],
+  );
+  assert.deepEqual(
+    (await sessionStore.listMessages('cancelled-stream-session')).map((message) => ({
+      content: message.content,
+      role: message.role,
+    })),
+    [
+      { content: 'second', role: 'user' },
+      { content: 'reply:second', role: 'assistant' },
+    ],
+  );
+});
+
+test('createHarness streamUserMessage return waits for abort cleanup', async () => {
+  let markAbortCleanupStarted!: () => void;
+  let finishAbortCleanup!: () => void;
+
+  const abortCleanupStartedPromise = new Promise<void>((resolve) => {
+    markAbortCleanupStarted = resolve;
+  });
+  const abortCleanupFinishedPromise = new Promise<void>((resolve) => {
+    finishAbortCleanup = resolve;
+  });
+
+  const harness = createHarness({
+    providerInstance: new FakeProvider({
+      streamReply: async function* (input: ModelRequest) {
+        yield { delta: 'partial', type: 'text_delta' };
+
+        await new Promise((_, reject) => {
+          input.signal?.addEventListener(
+            'abort',
+            () => {
+              markAbortCleanupStarted();
+
+              void (async () => {
+                await abortCleanupFinishedPromise;
+                reject(input.signal?.reason);
+              })();
+            },
+            { once: true },
+          );
+        });
+      },
+    }),
+    sessionStore: new MemorySessionStore(),
+    stream: true,
+  });
+
+  const iterator = harness.streamUserMessage('first')[Symbol.asyncIterator]();
+
+  await iterator.next();
+
+  let returnResolved = false;
+  const returnPromise = iterator.return?.().then((result) => {
+    returnResolved = true;
+    return result;
+  });
+
+  await abortCleanupStartedPromise;
+  await delay(0);
+  assert.equal(returnResolved, false);
+
+  finishAbortCleanup();
+
+  const result = await returnPromise;
+
+  assert.equal(returnResolved, true);
+  assert.equal(result?.done, true);
 });
 
 test('createHarness degrades malformed tool input into a normal tool error', async () => {
