@@ -1,4 +1,4 @@
-import { snapshotMessages, snapshotSessionState } from './snapshot.js';
+import { snapshot } from '../utils/object.js';
 import type { SessionStore } from './store.js';
 import type { Message, SessionState } from './types.js';
 
@@ -47,7 +47,7 @@ export class Session {
 
   get messages(): readonly Message[] {
     if (!this.messagesSnapshot) {
-      this.messagesSnapshot = snapshotMessages(this.stateValue.messages);
+      this.messagesSnapshot = snapshot(this.stateValue.messages);
     }
 
     return this.messagesSnapshot;
@@ -55,7 +55,7 @@ export class Session {
 
   get state(): SessionState {
     if (!this.stateSnapshot) {
-      this.stateSnapshot = snapshotSessionState(this.stateValue);
+      this.stateSnapshot = snapshot(this.stateValue);
     }
 
     return this.stateSnapshot;

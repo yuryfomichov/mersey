@@ -1,12 +1,12 @@
 import { createAsyncQueue } from './async-queue.js';
 import { HarnessObserver } from './events/observer.js';
 import { streamLoop, type TurnChunk } from './loop/loop.js';
-import { snapshotTurnChunk } from './loop/snapshot.js';
 import type { ModelProvider } from './models/provider.js';
 import { Session } from './sessions/session.js';
 import type { Message } from './sessions/types.js';
 import type { ToolPolicy } from './tools/context.js';
 import type { Tool } from './tools/types.js';
+import { snapshot } from './utils/object.js';
 
 type TurnStreamOptions = {
   content: string;
@@ -68,7 +68,7 @@ function createTurnStream({
             break;
           }
 
-          queue.push(snapshotTurnChunk(result.value));
+          queue.push(snapshot(result.value));
         }
 
         await session.commit(turnMessages);

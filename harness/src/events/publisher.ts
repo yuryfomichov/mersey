@@ -1,4 +1,4 @@
-import { freezeDeep } from '../utils/object.js';
+import { snapshot } from '../utils/object.js';
 import type { HarnessEvent, HarnessEventListener } from './types.js';
 
 export type HarnessEventPublisherOptions = {
@@ -25,19 +25,19 @@ export class HarnessEventPublisher {
       return;
     }
 
-    const snapshot = this.snapshot(event);
+    const eventSnapshot = snapshot(event);
 
     for (const listener of this.listeners) {
       try {
-        const result = listener(snapshot);
+        const result = listener(eventSnapshot);
 
         if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
           void Promise.resolve(result).catch(() => {
-            this.onListenerFailed?.(snapshot);
+            this.onListenerFailed?.(eventSnapshot);
           });
         }
       } catch {
-        this.onListenerFailed?.(snapshot);
+        this.onListenerFailed?.(eventSnapshot);
       }
     }
   }
@@ -48,9 +48,5 @@ export class HarnessEventPublisher {
     return () => {
       this.listeners.delete(listener);
     };
-  }
-
-  private snapshot(event: HarnessEvent): HarnessEvent {
-    return freezeDeep(structuredClone(event));
   }
 }
