@@ -9,7 +9,7 @@ import { MemorySessionStore } from './sessions/memory-store.js';
 import { Session } from './sessions/session.js';
 import type { SessionStore } from './sessions/store.js';
 import { createToolRuntimeFactory } from './tools/runtime/index.js';
-import type { Tool } from './tools/types.js';
+import type { HarnessTool, Tool } from './tools/types.js';
 import { createTurnStreamFactory } from './turn-stream.js';
 
 function createTestSession(
@@ -32,7 +32,12 @@ async function collectChunks<T>(iterable: AsyncIterable<T>): Promise<T[]> {
   return chunks;
 }
 
+function toHarnessTools(tools: Tool[]): HarnessTool[] {
+  return tools.map((tool) => ({ policy: { action: 'auto_allow', type: 'fixed' }, tool }));
+}
+
 function createStreamTurnFactory(input: {
+  harnessTools?: HarnessTool[];
   provider?: FakeProvider;
   sessionId?: string;
   sessionStore?: MemorySessionStore;
@@ -58,7 +63,7 @@ function createStreamTurnFactory(input: {
       stream: input.stream,
       toolRuntimeFactory: createToolRuntimeFactory({
         policy: { workspaceRoot: process.cwd() },
-        tools: input.tools ?? [],
+        tools: input.harnessTools ?? toHarnessTools(input.tools ?? []),
       }),
     }),
   };
@@ -67,13 +72,13 @@ function createStreamTurnFactory(input: {
 test('createTurnStreamFactory starts on first pull and ignores pre-consumption return', async () => {
   const { provider, streamTurn } = createStreamTurnFactory({});
 
-  const abandonedIterator = streamTurn('abandoned')[Symbol.asyncIterator]();
+  const abandonedIterator = streamTurn.streamUserMessage('abandoned')[Symbol.asyncIterator]();
 
   assert.equal(provider.requests.length, 0);
   await abandonedIterator.return?.();
   assert.equal(provider.requests.length, 0);
 
-  const iterator = streamTurn('hello')[Symbol.asyncIterator]();
+  const iterator = streamTurn.streamUserMessage('hello')[Symbol.asyncIterator]();
 
   assert.equal(provider.requests.length, 0);
 
@@ -115,7 +120,7 @@ test('createTurnStreamFactory rejects iteration when the background turn throws 
 
   await assert.rejects(
     async () => {
-      for await (const _chunk of streamTurn('hello')) {
+      for await (const _chunk of streamTurn.streamUserMessage('hello')) {
         // No-op.
       }
     },
@@ -151,7 +156,7 @@ test('createTurnStreamFactory return aborts an active turn, drops partial histor
     stream: true,
   });
 
-  const iterator = streamTurn('first')[Symbol.asyncIterator]();
+  const iterator = streamTurn.streamUserMessage('first')[Symbol.asyncIterator]();
   const firstChunk = await iterator.next();
 
   assert.equal(firstChunk.done, false);
@@ -163,7 +168,7 @@ test('createTurnStreamFactory return aborts an active turn, drops partial histor
   assert.equal((await sessionStore.listMessages('cancelled-stream-session')).length, 0);
 
   const reply = await Promise.race([
-    collectChunks(streamTurn('second')).then((chunks) => chunks.at(-1)),
+    collectChunks(streamTurn.streamUserMessage('second')).then((chunks) => chunks.at(-1)),
     delay(1_000).then(() => {
       throw new Error('second turn stayed blocked after stream cancellation');
     }),
@@ -215,7 +220,7 @@ test('createTurnStreamFactory return waits for abort cleanup', async () => {
     stream: true,
   });
 
-  const iterator = streamTurn('first')[Symbol.asyncIterator]();
+  const iterator = streamTurn.streamUserMessage('first')[Symbol.asyncIterator]();
 
   await iterator.next();
 
@@ -250,7 +255,7 @@ test('createTurnStreamFactory yields only final_message when streaming is disabl
     stream: false,
   });
 
-  const chunks = await collectChunks(streamTurn('hello'));
+  const chunks = await collectChunks(streamTurn.streamUserMessage('hello'));
 
   assert.deepEqual(chunks, [
     {
@@ -276,7 +281,7 @@ test('createTurnStreamFactory snapshots final_message chunks before exposing the
     }),
     stream: true,
   });
-  const iterator = streamTurn('hello')[Symbol.asyncIterator]();
+  const iterator = streamTurn.streamUserMessage('hello')[Symbol.asyncIterator]();
 
   const firstChunk = await iterator.next();
   const secondChunk = await iterator.next();
@@ -302,6 +307,76 @@ test('createTurnStreamFactory snapshots final_message chunks before exposing the
     [
       { content: 'hello', role: 'user' },
       { content: 'hello', role: 'assistant' },
+    ],
+  );
+});
+
+test('createTurnStreamFactory pauses for approval and resumes through streamApproval', async () => {
+  let callCount = 0;
+  const { session, streamTurn } = createStreamTurnFactory({
+    harnessTools: [
+      {
+        policy: { action: 'require_approval', type: 'fixed' },
+        tool: {
+          description: 'Read file tool',
+          async execute() {
+            return { content: 'file body' };
+          },
+          inputSchema: {
+            additionalProperties: false,
+            properties: {
+              path: { type: 'string' },
+            },
+            required: ['path'],
+            type: 'object',
+          },
+          name: 'read_file',
+        },
+      },
+    ],
+    provider: new FakeProvider({
+      reply: (input) => {
+        callCount += 1;
+
+        if (callCount === 1) {
+          return {
+            text: '',
+            toolCalls: [{ id: 'call-1', input: { path: 'note.txt' }, name: 'read_file' }],
+          };
+        }
+
+        assert.equal(input.messages.at(-1)?.role, 'tool');
+        assert.equal(input.messages.at(-1)?.content, 'file body');
+
+        return { text: 'done' };
+      },
+    }),
+  });
+
+  const initialChunks = await collectChunks(streamTurn.streamUserMessage('read the file'));
+
+  assert.equal(initialChunks.at(-1)?.type, 'approval_requested');
+  assert.equal(session.turnStatus, 'awaiting_approval');
+  assert.equal(session.pendingApproval?.requiredToolCallIds[0], 'call-1');
+  assert.deepEqual(
+    session.messages.map((message) => message.role),
+    ['user', 'assistant'],
+  );
+
+  const resumedChunks = await collectChunks(streamTurn.streamApproval([{ toolCallId: 'call-1', type: 'approve' }]));
+  const finalChunk = resumedChunks.at(-1);
+
+  assert.equal(finalChunk?.type, 'final_message');
+  assert.equal(finalChunk && finalChunk.type === 'final_message' ? finalChunk.message.content : undefined, 'done');
+  assert.equal(session.turnStatus, 'idle');
+  assert.equal(session.pendingApproval, null);
+  assert.deepEqual(
+    session.messages.map((message) => ({ content: message.content, role: message.role })),
+    [
+      { content: 'read the file', role: 'user' },
+      { content: '', role: 'assistant' },
+      { content: 'file body', role: 'tool' },
+      { content: 'done', role: 'assistant' },
     ],
   );
 });

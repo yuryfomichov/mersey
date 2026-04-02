@@ -1,7 +1,8 @@
 import { realpath } from 'node:fs/promises';
 
+import type { ToolCallAction } from '../../approvals/types.js';
 import type { ModelToolCall, ModelToolDefinition } from '../../models/types.js';
-import type { Tool, ToolExecutionResult } from '../types.js';
+import type { HarnessTool, ToolExecutionResult } from '../types.js';
 import { CancellationService } from './cancellation/cancellation-service.js';
 import { CommandService } from './commands/command-service.js';
 import { FileService } from './files/file-service.js';
@@ -16,30 +17,30 @@ import type {
   ToolRuntimeServices,
 } from './types.js';
 
-function getToolDefinitions(tools: Tool[]): ModelToolDefinition[] | undefined {
+function getToolDefinitions(tools: HarnessTool[]): ModelToolDefinition[] | undefined {
   if (tools.length === 0) {
     return undefined;
   }
 
-  return tools.map(({ description, inputSchema, name }) => ({
+  return tools.map(({ tool: { description, inputSchema, name } }) => ({
     description,
     inputSchema,
     name,
   }));
 }
 
-function getToolMap(tools: Tool[]): Map<string, Tool> {
-  return new Map(tools.map((tool) => [tool.name, tool]));
+function getToolMap(tools: HarnessTool[]): Map<string, HarnessTool> {
+  return new Map(tools.map((toolRegistration) => [toolRegistration.tool.name, toolRegistration]));
 }
 
 async function executeToolCall(
   toolCall: ModelToolCall,
-  tools: Map<string, Tool>,
+  tools: Map<string, HarnessTool>,
   runtimeServices: ToolRuntimeServices,
 ): Promise<ToolExecutionResult> {
-  const tool = tools.get(toolCall.name);
+  const toolRegistration = tools.get(toolCall.name);
 
-  if (!tool) {
+  if (!toolRegistration) {
     return {
       content: `Unknown tool: ${toolCall.name}`,
       isError: true,
@@ -49,7 +50,7 @@ async function executeToolCall(
   }
 
   try {
-    const result = await tool.execute(toolCall.input, runtimeServices);
+    const result = await toolRegistration.tool.execute(toolCall.input, runtimeServices);
 
     return {
       content: result.content,
@@ -66,6 +67,10 @@ async function executeToolCall(
       toolCallId: toolCall.id,
     };
   }
+}
+
+function getToolCallAction(toolCall: ModelToolCall, tools: Map<string, HarnessTool>): ToolCallAction {
+  return tools.get(toolCall.name)?.policy.action ?? 'auto_allow';
 }
 
 export function createToolRuntimeFactory({ policy, tools }: ToolRuntimeFactoryOptions): ToolRuntimeFactory {
@@ -113,6 +118,9 @@ export function createToolRuntimeFactory({ policy, tools }: ToolRuntimeFactoryOp
       ...runtimeServices,
       executeToolCall(toolCall: ModelToolCall): Promise<ToolExecutionResult> {
         return executeToolCall(toolCall, toolMap, runtimeServices);
+      },
+      getToolCallAction(toolCall: ModelToolCall): ToolCallAction {
+        return getToolCallAction(toolCall, toolMap);
       },
       toolDefinitions,
     };

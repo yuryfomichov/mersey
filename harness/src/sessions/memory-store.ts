@@ -54,4 +54,20 @@ export class MemorySessionStore implements SessionStore {
   async listMessages(sessionId: string): Promise<Message[]> {
     return (this.messages.get(sessionId) ?? []).map((message) => cloneMessage(message));
   }
+
+  async updateSession(session: SessionState): Promise<SessionState> {
+    this.messages.set(
+      session.id,
+      session.messages.map((message) => cloneMessage(message)),
+    );
+    this.sessions.set(session.id, {
+      ...structuredClone(session),
+      messages: [],
+    });
+
+    return {
+      ...structuredClone(session),
+      messages: await this.listMessages(session.id),
+    };
+  }
 }

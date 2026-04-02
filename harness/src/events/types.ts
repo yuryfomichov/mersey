@@ -3,7 +3,11 @@ export type HarnessEventBase = {
   timestamp: string;
   turnId: string;
   type:
+    | 'approval_requested'
+    | 'approval_resolved'
     | 'turn_started'
+    | 'turn_paused'
+    | 'turn_resumed'
     | 'provider_requested'
     | 'provider_responded'
     | 'tool_requested'
@@ -16,6 +20,29 @@ export type HarnessEventBase = {
 export type TurnStartedEvent = HarnessEventBase & {
   type: 'turn_started';
   userMessageLength: number;
+};
+
+export type ApprovalRequestedEvent = HarnessEventBase & {
+  requiredToolCallCount: number;
+  toolCallCount: number;
+  toolCallNames: string[];
+  type: 'approval_requested';
+};
+
+export type ApprovalResolvedEvent = HarnessEventBase & {
+  approvedCount: number;
+  approvedToolCallIds: string[];
+  deniedCount: number;
+  deniedToolCallIds: string[];
+  type: 'approval_resolved';
+};
+
+export type TurnPausedEvent = HarnessEventBase & {
+  type: 'turn_paused';
+};
+
+export type TurnResumedEvent = HarnessEventBase & {
+  type: 'turn_resumed';
 };
 
 export type ProviderRequestedEvent = HarnessEventBase & {
@@ -116,6 +143,8 @@ export type TurnFailedEvent = HarnessEventBase & {
 };
 
 export type HarnessEvent =
+  | ApprovalRequestedEvent
+  | ApprovalResolvedEvent
   | ProviderRequestedEvent
   | ProviderRespondedEvent
   | ToolFinishedEvent
@@ -123,6 +152,8 @@ export type HarnessEvent =
   | ToolStartedEvent
   | TurnFailedEvent
   | TurnFinishedEvent
+  | TurnPausedEvent
+  | TurnResumedEvent
   | TurnStartedEvent;
 
 export type HarnessEventListener = (event: HarnessEvent) => void | Promise<void>;

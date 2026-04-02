@@ -4,7 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import { withTempDir, writeWorkspaceFiles } from '../test/test-helpers.js';
 import type { HarnessEvent } from './events/types.js';
-import { createHarness, type CreateHarnessOptions } from './harness.js';
+import { ApprovalRequiredError, createHarness, type CreateHarnessOptions } from './harness.js';
 import type { HarnessRuntimeTrace } from './logger/types.js';
 import type { ModelProvider } from './models/provider.js';
 import type { ModelRequest, ModelResponse } from './models/types.js';
@@ -39,6 +39,16 @@ function createTestHarness(options: TestHarnessOptions = {}) {
     session:
       providedSession ?? createTestSession(sessionStore ?? new MemorySessionStore(), sessionId ?? 'local-session'),
   });
+}
+
+async function collectChunks<T>(iterable: AsyncIterable<T>): Promise<T[]> {
+  const chunks: T[] = [];
+
+  for await (const chunk of iterable) {
+    chunks.push(chunk);
+  }
+
+  return chunks;
 }
 
 test('createHarness requires a provider', () => {
@@ -112,6 +122,66 @@ test('createHarness emits events and traces with the canonical session id after 
       .every((trace) => trace.detail.sessionId === 'canonical-session'),
   );
   assert.ok(recordedEvents.every((event) => event.sessionId === 'canonical-session'));
+});
+
+test('createHarness ready loads pending approval from persisted session state', async () => {
+  const sessionStore = new MemorySessionStore();
+
+  await sessionStore.createSession({
+    createdAt: '2026-04-02T00:00:00.000Z',
+    id: 'pending-approval-session',
+    messages: [],
+    pendingApproval: {
+      assistantMessage: {
+        content: '',
+        createdAt: '2026-04-02T00:00:01.000Z',
+        role: 'assistant',
+        toolCalls: [{ id: 'call-1', input: { path: 'note.txt' }, name: 'read_file' }],
+      },
+      requiredToolCallIds: ['call-1'],
+      turnId: 'turn-1',
+    },
+    turnStatus: 'awaiting_approval',
+  });
+
+  const harness = createTestHarness({
+    providerInstance: new FakeProvider(),
+    sessionId: 'pending-approval-session',
+    sessionStore,
+  });
+
+  await harness.ready();
+
+  assert.equal(harness.getPendingApproval()?.requiredToolCallIds[0], 'call-1');
+});
+
+test('createHarness sendUserMessage throws ApprovalRequiredError without approvalHandler', async () => {
+  const harness = createTestHarness({
+    providerInstance: new FakeProvider({
+      reply: {
+        text: '',
+        toolCalls: [{ id: 'call-read-1', input: { path: 'note.txt' }, name: 'read_file' }],
+      },
+    }),
+    sessionStore: new MemorySessionStore(),
+    toolExecutionPolicy: { workspaceRoot: process.cwd() },
+    tools: [{ policy: { action: 'require_approval', type: 'fixed' }, tool: new ReadFileTool() }],
+  });
+
+  await assert.rejects(
+    () => harness.sendUserMessage('read the note'),
+    (error) => error instanceof ApprovalRequiredError && error.pendingApproval.requiredToolCallIds[0] === 'call-read-1',
+  );
+
+  assert.equal(harness.getPendingApproval()?.requiredToolCallIds[0], 'call-read-1');
+});
+
+test('createHarness accepts empty-string user messages', async () => {
+  const harness = createTestHarness({ providerInstance: new FakeProvider() });
+
+  const reply = await harness.sendUserMessage('');
+
+  assert.equal(reply.content, 'reply:');
 });
 
 test('createHarness serializes concurrent sendUserMessage calls for one session', async () => {
@@ -204,7 +274,7 @@ test('createHarness emits live events in stable order without leaking raw conten
       sessionId: 'events-session',
       sessionStore: new MemorySessionStore(),
       toolExecutionPolicy: { workspaceRoot: rootDir },
-      tools: [new ReadFileTool()],
+      tools: [{ policy: { action: 'auto_allow', type: 'fixed' }, tool: new ReadFileTool() }],
     });
 
     harness.subscribe((event) => {
@@ -235,4 +305,205 @@ test('createHarness emits live events in stable order without leaking raw conten
     assert.doesNotMatch(serializedEvents, /"path":"note\.txt"/);
     assert.doesNotMatch(serializedEvents, /\/note\.txt/);
   });
+});
+
+test('createHarness approvalHandler auto-resumes approval-required turns in streamUserMessage', async () => {
+  await withTempDir(async (rootDir) => {
+    await writeWorkspaceFiles(rootDir, { 'note.txt': 'secret file body' });
+
+    let callCount = 0;
+    const harness = createTestHarness({
+      approvalHandler: async (pendingApproval) =>
+        pendingApproval.requiredToolCallIds.map((toolCallId) => ({ toolCallId, type: 'approve' as const })),
+      providerInstance: new FakeProvider({
+        reply: (input) => {
+          callCount += 1;
+
+          if (callCount === 1) {
+            return {
+              text: '',
+              toolCalls: [{ id: 'call-read-1', input: { path: 'note.txt' }, name: 'read_file' }],
+            };
+          }
+
+          assert.equal(input.messages.at(-1)?.role, 'tool');
+          assert.equal(input.messages.at(-1)?.content, 'secret file body');
+
+          return { text: 'done' };
+        },
+      }),
+      sessionStore: new MemorySessionStore(),
+      toolExecutionPolicy: { workspaceRoot: rootDir },
+      tools: [{ policy: { action: 'require_approval', type: 'fixed' }, tool: new ReadFileTool() }],
+    });
+
+    const chunks = await collectChunks(harness.streamUserMessage('read the note'));
+
+    assert.deepEqual(
+      chunks.map((chunk) => chunk.type),
+      ['final_message'],
+    );
+    assert.equal(chunks[0] && chunks[0].type === 'final_message' ? chunks[0].message.content : '', 'done');
+  });
+});
+
+test('createHarness resumePendingApprovalIfNeeded resumes persisted approvals through approvalHandler', async () => {
+  await withTempDir(async (rootDir) => {
+    await writeWorkspaceFiles(rootDir, { 'note.txt': 'secret file body' });
+
+    const sessionStore = new MemorySessionStore();
+
+    await sessionStore.createSession({
+      createdAt: '2026-04-02T00:00:00.000Z',
+      id: 'startup-approval-session',
+      messages: [],
+      pendingApproval: {
+        assistantMessage: {
+          content: '',
+          createdAt: '2026-04-02T00:00:02.000Z',
+          role: 'assistant',
+          toolCalls: [{ id: 'call-read-1', input: { path: 'note.txt' }, name: 'read_file' }],
+        },
+        requiredToolCallIds: ['call-read-1'],
+        turnId: 'turn-1',
+      },
+      turnStatus: 'awaiting_approval',
+    });
+    await sessionStore.appendMessage('startup-approval-session', {
+      content: 'read the note',
+      createdAt: '2026-04-02T00:00:01.000Z',
+      role: 'user',
+    });
+    await sessionStore.appendMessage('startup-approval-session', {
+      content: '',
+      createdAt: '2026-04-02T00:00:02.000Z',
+      role: 'assistant',
+      toolCalls: [{ id: 'call-read-1', input: { path: 'note.txt' }, name: 'read_file' }],
+    });
+
+    const harness = createTestHarness({
+      approvalHandler: async (pendingApproval) =>
+        pendingApproval.requiredToolCallIds.map((toolCallId) => ({ toolCallId, type: 'approve' as const })),
+      providerInstance: new FakeProvider({
+        reply: (input) => {
+          assert.equal(input.messages.at(-1)?.role, 'tool');
+          assert.equal(input.messages.at(-1)?.content, 'secret file body');
+
+          return { text: 'done' };
+        },
+      }),
+      sessionId: 'startup-approval-session',
+      sessionStore,
+      toolExecutionPolicy: { workspaceRoot: rootDir },
+      tools: [{ policy: { action: 'require_approval', type: 'fixed' }, tool: new ReadFileTool() }],
+    });
+
+    const chunks = await collectChunks(harness.resumePendingApprovalIfNeeded());
+
+    assert.deepEqual(
+      chunks.map((chunk) => chunk.type),
+      ['final_message'],
+    );
+    assert.equal(chunks[0] && chunks[0].type === 'final_message' ? chunks[0].message.content : '', 'done');
+    assert.equal(harness.getPendingApproval(), null);
+  });
+});
+
+test('createHarness emits approval_resolved with approved and denied tool calls', async () => {
+  const events: HarnessEvent[] = [];
+  let callCount = 0;
+  const harness = createTestHarness({
+    providerInstance: new FakeProvider({
+      reply: (input) => {
+        callCount += 1;
+
+        if (callCount === 1) {
+          return {
+            text: '',
+            toolCalls: [
+              {
+                id: 'call-read-1',
+                input: { path: 'note-a.txt' },
+                name: 'read_file',
+              },
+              {
+                id: 'call-read-2',
+                input: { path: 'note-b.txt' },
+                name: 'read_file',
+              },
+            ],
+          };
+        }
+
+        return { text: 'done' };
+      },
+    }),
+    sessionStore: new MemorySessionStore(),
+    toolExecutionPolicy: { workspaceRoot: process.cwd() },
+    tools: [{ policy: { action: 'require_approval', type: 'fixed' }, tool: new ReadFileTool() }],
+  });
+
+  harness.subscribe((event) => {
+    events.push(event);
+  });
+
+  await collectChunks(harness.streamUserMessage('read both notes'));
+  await harness.sendApproval([
+    { toolCallId: 'call-read-1', type: 'approve' },
+    { toolCallId: 'call-read-2', type: 'deny' },
+  ]);
+
+  const approvalResolvedEvent = events.find((event) => event.type === 'approval_resolved');
+
+  assert.deepEqual(approvalResolvedEvent, {
+    approvedCount: 1,
+    approvedToolCallIds: ['call-read-1'],
+    deniedCount: 1,
+    deniedToolCallIds: ['call-read-2'],
+    sessionId: 'local-session',
+    timestamp: approvalResolvedEvent?.timestamp,
+    turnId: approvalResolvedEvent?.turnId,
+    type: 'approval_resolved',
+  });
+});
+
+test('createHarness sendApproval returns another pending approval for chained approval turns', async () => {
+  let callCount = 0;
+  const harness = createTestHarness({
+    providerInstance: new FakeProvider({
+      reply: () => {
+        callCount += 1;
+
+        if (callCount === 1) {
+          return {
+            text: '',
+            toolCalls: [{ id: 'call-read-1', input: { path: 'note-a.txt' }, name: 'read_file' }],
+          };
+        }
+
+        if (callCount === 2) {
+          return {
+            text: '',
+            toolCalls: [{ id: 'call-read-2', input: { path: 'note-b.txt' }, name: 'read_file' }],
+          };
+        }
+
+        return { text: 'done' };
+      },
+    }),
+    sessionStore: new MemorySessionStore(),
+    toolExecutionPolicy: { workspaceRoot: process.cwd() },
+    tools: [{ policy: { action: 'require_approval', type: 'fixed' }, tool: new ReadFileTool() }],
+  });
+
+  await collectChunks(harness.streamUserMessage('read two notes'));
+
+  const secondPendingApproval = await harness.sendApproval([{ toolCallId: 'call-read-1', type: 'deny' }]);
+
+  assert.equal('turnId' in secondPendingApproval, true);
+  assert.equal(
+    'turnId' in secondPendingApproval ? secondPendingApproval.requiredToolCallIds[0] : undefined,
+    'call-read-2',
+  );
+  assert.equal(harness.session.turnStatus, 'awaiting_approval');
 });

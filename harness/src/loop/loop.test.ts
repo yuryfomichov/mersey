@@ -11,7 +11,7 @@ import { FakeProvider } from '../providers/fake.js';
 import type { Message, SessionState } from '../sessions/types.js';
 import { ReadFileTool } from '../tools/read-file.js';
 import { createToolRuntimeFactory, type ToolExecutionPolicy } from '../tools/runtime/index.js';
-import type { Tool } from '../tools/types.js';
+import type { HarnessTool, Tool } from '../tools/types.js';
 import { streamLoop } from './loop.js';
 
 function createSession(id: string): SessionState {
@@ -19,6 +19,8 @@ function createSession(id: string): SessionState {
     createdAt: new Date().toISOString(),
     id,
     messages: [],
+    pendingApproval: null,
+    turnStatus: 'idle',
   };
 }
 
@@ -44,7 +46,7 @@ async function collectLoopResult(
 
       return {
         finalMessage,
-        turnMessages: result.value,
+        turnMessages: result.value.turnMessages,
       };
     }
 
@@ -81,6 +83,10 @@ function createObserver(input: {
   return observer;
 }
 
+function toHarnessTools(tools: Tool[]): HarnessTool[] {
+  return tools.map((tool) => ({ policy: { action: 'auto_allow', type: 'fixed' }, tool }));
+}
+
 function createLoopInput(input: {
   content: string;
   debug?: boolean;
@@ -107,7 +113,10 @@ function createLoopInput(input: {
     provider: input.provider,
     stream: input.stream,
     systemPrompt: input.systemPrompt,
-    toolRuntimeFactory: createToolRuntimeFactory({ policy: input.toolExecutionPolicy, tools: [...input.tools] }),
+    toolRuntimeFactory: createToolRuntimeFactory({
+      policy: input.toolExecutionPolicy,
+      tools: toHarnessTools(input.tools),
+    }),
   };
 }
 
@@ -428,7 +437,7 @@ test('streamLoop yields assistant deltas and final message while events stay coa
 
     if (result.done) {
       assert.deepEqual(
-        result.value.map((message) => message.role),
+        result.value.turnMessages.map((message) => message.role),
         ['user', 'assistant'],
       );
       break;

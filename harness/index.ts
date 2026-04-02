@@ -1,5 +1,13 @@
-export { createHarness } from './src/harness.js';
-export type { CreateHarnessOptions, Harness } from './src/harness.js';
+export { ApprovalRequiredError, createHarness } from './src/harness.js';
+export type { ApprovalHandler, CreateHarnessOptions, Harness } from './src/harness.js';
+
+export type {
+  ApprovalDecision,
+  ApprovalResult,
+  PendingApproval,
+  ToolCallAction,
+  ToolCallPolicy,
+} from './src/approvals/types.js';
 
 export type { HarnessEvent, HarnessEventListener } from './src/events/types.js';
 
@@ -26,4 +34,4 @@ export { RunCommandTool } from './src/tools/run-command.js';
 export type { RunCommandToolOptions } from './src/tools/run-command.js';
 export { WriteFileTool } from './src/tools/write-file.js';
 export type { ToolExecutionPolicy } from './src/tools/runtime/index.js';
-export type { Tool } from './src/tools/types.js';
+export type { HarnessTool, Tool } from './src/tools/types.js';

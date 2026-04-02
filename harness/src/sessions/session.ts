@@ -1,16 +1,29 @@
+import type { PendingApproval } from '../approvals/types.js';
 import { snapshot } from '../utils/object.js';
 import type { SessionStore } from './store.js';
-import type { Message, SessionState } from './types.js';
+import type { Message, SessionState, TurnStatus } from './types.js';
+
+function normalizeState(state: SessionState): SessionState {
+  return {
+    ...state,
+    pendingApproval: state.pendingApproval ?? null,
+    turnStatus: state.turnStatus ?? 'idle',
+  };
+}
 
 function cloneMessage<T extends Message>(message: T): T {
   return structuredClone(message);
 }
 
 function cloneState(state: SessionState): SessionState {
+  const normalizedState = normalizeState(state);
+
   return {
-    createdAt: state.createdAt,
-    id: state.id,
-    messages: state.messages.map((message) => cloneMessage(message)),
+    createdAt: normalizedState.createdAt,
+    id: normalizedState.id,
+    messages: normalizedState.messages.map((message) => cloneMessage(message)),
+    pendingApproval: structuredClone(normalizedState.pendingApproval),
+    turnStatus: normalizedState.turnStatus,
   };
 }
 
@@ -34,6 +47,8 @@ export class Session {
       createdAt: createdAt ?? new Date().toISOString(),
       id,
       messages: [],
+      pendingApproval: null,
+      turnStatus: 'idle',
     };
   }
 
@@ -43,6 +58,14 @@ export class Session {
 
   get id(): string {
     return this.stateValue.id;
+  }
+
+  get pendingApproval(): PendingApproval | null {
+    return this.state.pendingApproval;
+  }
+
+  get turnStatus(): TurnStatus {
+    return this.state.turnStatus;
   }
 
   get messages(): readonly Message[] {
@@ -79,6 +102,19 @@ export class Session {
     this.invalidateSnapshots();
   }
 
+  async applyTurn(messages: Message[], pendingApproval: PendingApproval | null): Promise<void> {
+    await this.ensure();
+
+    for (const message of messages) {
+      this.stateValue.messages.push(cloneMessage(message));
+    }
+
+    this.stateValue.pendingApproval = structuredClone(pendingApproval);
+    this.stateValue.turnStatus = pendingApproval ? 'awaiting_approval' : 'idle';
+    await this.store.updateSession(this.stateValue);
+    this.invalidateSnapshots();
+  }
+
   async ensure(): Promise<void> {
     if (this.initialized) {
       return this.initialized;
@@ -89,7 +125,7 @@ export class Session {
         const existingSession = await this.store.getSession(this.id);
         const resolvedSession = existingSession ?? (await this.store.createSession(this.state));
 
-        this.stateValue = cloneState(resolvedSession);
+        this.stateValue = cloneState(normalizeState(resolvedSession));
         this.invalidateSnapshots();
       } catch (error: unknown) {
         this.initialized = null;
@@ -115,6 +151,27 @@ export class Session {
     } finally {
       releaseTurn();
     }
+  }
+
+  async setPendingApproval(pendingApproval: PendingApproval): Promise<void> {
+    await this.ensure();
+    this.stateValue.pendingApproval = structuredClone(pendingApproval);
+    this.stateValue.turnStatus = 'awaiting_approval';
+    await this.store.updateSession(this.stateValue);
+    this.invalidateSnapshots();
+  }
+
+  async clearPendingApproval(): Promise<void> {
+    await this.ensure();
+
+    if (!this.stateValue.pendingApproval && this.stateValue.turnStatus === 'idle') {
+      return;
+    }
+
+    this.stateValue.pendingApproval = null;
+    this.stateValue.turnStatus = 'idle';
+    await this.store.updateSession(this.stateValue);
+    this.invalidateSnapshots();
   }
 
   private invalidateSnapshots(): void {

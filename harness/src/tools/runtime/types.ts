@@ -1,5 +1,6 @@
+import type { ToolCallAction } from '../../approvals/types.js';
 import type { ModelToolCall, ModelToolDefinition } from '../../models/types.js';
-import type { Tool, ToolExecutionResult } from '../types.js';
+import type { HarnessTool, ToolExecutionResult } from '../types.js';
 import type { ToolCommandRunner } from './commands/types.js';
 
 export type ToolFileAccess = 'read' | 'write';
@@ -55,6 +56,7 @@ export type ToolRuntimeServices = {
 
 export type ToolRuntime = ToolRuntimeServices & {
   executeToolCall(toolCall: ModelToolCall): Promise<ToolExecutionResult>;
+  getToolCallAction(toolCall: ModelToolCall): ToolCallAction;
   toolDefinitions: ModelToolDefinition[] | undefined;
 };
 
@@ -64,7 +66,7 @@ export type ToolRuntimeFactory = ((options?: { signal?: AbortSignal }) => ToolRu
 
 export type ToolRuntimeFactoryOptions = {
   policy: ToolExecutionPolicy;
-  tools: Tool[];
+  tools: HarnessTool[];
 };
 
 export type ToolRuntimeOptions = ToolRuntimeFactoryOptions & {

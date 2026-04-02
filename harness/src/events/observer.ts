@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
+import type { ApprovalDecision } from '../approvals/types.js';
 import { emitRuntimeTrace } from '../logger/runtime-trace.js';
 import type { HarnessLogger, HarnessRuntimeTraceType } from '../logger/types.js';
 import type { ModelProvider } from '../models/provider.js';
@@ -171,6 +172,38 @@ export class HarnessObserver {
     // Raw streamed text is exposed through streamUserMessage(), not the event bus.
   }
 
+  approvalRequested(toolCalls: ModelToolCall[], requiredToolCallIds: string[]): void {
+    this.publishEvent({
+      requiredToolCallCount: requiredToolCallIds.length,
+      sessionId: this.getSessionId(),
+      timestamp: new Date().toISOString(),
+      toolCallCount: toolCalls.length,
+      toolCallNames: getToolCallNames(toolCalls),
+      turnId: this.getTurnId(),
+      type: 'approval_requested',
+    });
+  }
+
+  approvalResolved(approvalDecisions: ApprovalDecision[]): void {
+    const approvedToolCallIds = approvalDecisions
+      .filter((decision) => decision.type === 'approve')
+      .map((decision) => decision.toolCallId);
+    const deniedToolCallIds = approvalDecisions
+      .filter((decision) => decision.type === 'deny')
+      .map((decision) => decision.toolCallId);
+
+    this.publishEvent({
+      approvedCount: approvedToolCallIds.length,
+      approvedToolCallIds,
+      deniedCount: deniedToolCallIds.length,
+      deniedToolCallIds,
+      sessionId: this.getSessionId(),
+      timestamp: new Date().toISOString(),
+      turnId: this.getTurnId(),
+      type: 'approval_resolved',
+    });
+  }
+
   toolFinished(iteration: number, toolCall: ModelToolCall, toolResult: ToolExecutionResult, durationMs: number): void {
     this.publishEvent({
       durationMs,
@@ -254,6 +287,29 @@ export class HarnessObserver {
     this.clearTurn();
   }
 
+  turnPaused(): void {
+    this.publishEvent({
+      sessionId: this.getSessionId(),
+      timestamp: new Date().toISOString(),
+      turnId: this.getTurnId(),
+      type: 'turn_paused',
+    });
+
+    this.clearTurn();
+  }
+
+  turnResumed(turnId: string): void {
+    this.currentTurnId = turnId;
+    this.currentTurnStartTime = Date.now();
+
+    this.publishEvent({
+      sessionId: this.getSessionId(),
+      timestamp: new Date().toISOString(),
+      turnId,
+      type: 'turn_resumed',
+    });
+  }
+
   turnStarted(userMessageLength: number): void {
     this.currentTurnId = randomUUID();
     this.currentTurnStartTime = Date.now();
@@ -269,6 +325,10 @@ export class HarnessObserver {
 
   subscribe(listener: HarnessEventListener): () => void {
     return this.eventPublisher.subscribe(listener);
+  }
+
+  activeTurnId(): string {
+    return this.getTurnId();
   }
 
   private clearTurn(): void {

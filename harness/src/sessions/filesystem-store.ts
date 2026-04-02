@@ -113,6 +113,25 @@ export class FilesystemSessionStore implements SessionStore {
     }
   }
 
+  async updateSession(session: SessionState): Promise<SessionState> {
+    await mkdir(this.getSessionDir(session.id), { recursive: true });
+    await writeFile(
+      this.getMessagesPath(session.id),
+      session.messages.map((message) => JSON.stringify(message)).join('\n') + (session.messages.length > 0 ? '\n' : ''),
+      {
+        encoding: 'utf8',
+      },
+    );
+    await writeFile(this.getSessionPath(session.id), `${JSON.stringify(this.toSessionMetadata(session), null, 2)}\n`, {
+      encoding: 'utf8',
+    });
+
+    return {
+      ...session,
+      messages: await this.listMessages(session.id),
+    };
+  }
+
   private getMessagesPath(sessionId: string): string {
     return join(this.getSessionDir(sessionId), 'messages.jsonl');
   }
@@ -130,6 +149,8 @@ export class FilesystemSessionStore implements SessionStore {
     return {
       createdAt: session.createdAt,
       id: session.id,
+      pendingApproval: session.pendingApproval,
+      turnStatus: session.turnStatus,
     };
   }
 }

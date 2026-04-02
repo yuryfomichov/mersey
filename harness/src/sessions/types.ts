@@ -1,3 +1,4 @@
+import type { PendingApproval } from '../approvals/types.js';
 import type { ModelToolCall } from '../models/types.js';
 
 export type UserMessage = {
@@ -25,8 +26,12 @@ export type ToolMessage = {
 
 export type Message = UserMessage | AssistantMessage | ToolMessage;
 
+export type TurnStatus = 'awaiting_approval' | 'idle';
+
 export type SessionState = {
   id: string;
   createdAt: string;
+  pendingApproval: PendingApproval | null;
+  turnStatus: TurnStatus;
   messages: Message[];
 };

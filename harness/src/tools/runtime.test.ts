@@ -8,7 +8,7 @@ import { createToolRuntime } from './runtime/index.js';
 test('executeToolCall returns an error result for unknown tools', async () => {
   const result = await createToolRuntime({
     policy: { workspaceRoot: process.cwd() },
-    tools: [new ReadFileTool()],
+    tools: [{ policy: { action: 'auto_allow', type: 'fixed' }, tool: new ReadFileTool() }],
   }).executeToolCall({
     id: 'call-1',
     input: { path: 'note.txt' },
@@ -22,7 +22,7 @@ test('executeToolCall returns an error result for unknown tools', async () => {
 test('executeToolCall wraps tool execution errors', async () => {
   const result = await createToolRuntime({
     policy: { workspaceRoot: process.cwd() },
-    tools: [new ReadFileTool()],
+    tools: [{ policy: { action: 'auto_allow', type: 'fixed' }, tool: new ReadFileTool() }],
   }).executeToolCall({
     id: 'call-1',
     input: {},
@@ -39,7 +39,7 @@ test('executeToolCall returns tool results with tool metadata', async () => {
 
     const result = await createToolRuntime({
       policy: { workspaceRoot: rootDir },
-      tools: [new ReadFileTool()],
+      tools: [{ policy: { action: 'auto_allow', type: 'fixed' }, tool: new ReadFileTool() }],
     }).executeToolCall({
       id: 'call-1',
       input: { path: 'note.txt' },

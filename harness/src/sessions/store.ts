@@ -5,4 +5,5 @@ export interface SessionStore {
   createSession(session: SessionState): Promise<SessionState>;
   getSession(sessionId: string): Promise<SessionState | null>;
   listMessages(sessionId: string): Promise<Message[]>;
+  updateSession(session: SessionState): Promise<SessionState>;
 }
