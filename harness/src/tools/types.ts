@@ -1,5 +1,5 @@
 import type { ModelToolDefinition, ModelToolInput } from '../models/types.js';
-import type { ToolServices } from './services/index.js';
+import type { ToolRuntimeServices } from './runtime/index.js';
 
 export type ToolResultData = Record<string, unknown>;
 
@@ -18,5 +18,5 @@ export type ToolExecutionResult = {
 };
 
 export interface Tool extends ModelToolDefinition {
-  execute(input: ModelToolInput, services: ToolServices): Promise<ToolExecuteResult>;
+  execute(input: ModelToolInput, runtime: ToolRuntimeServices): Promise<ToolExecuteResult>;
 }

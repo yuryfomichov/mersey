@@ -3,9 +3,7 @@ import type { ModelProvider } from '../models/provider.js';
 import { supportsStreaming } from '../models/provider.js';
 import type { ModelMessage, ModelRequest, ModelResponse } from '../models/types.js';
 import type { Message } from '../sessions/types.js';
-import { createToolRuntime } from '../tools/services/index.js';
-import type { ToolExecutionPolicy } from '../tools/services/index.js';
-import type { Tool } from '../tools/types.js';
+import type { ToolRuntimeFactory } from '../tools/runtime/index.js';
 
 export type LoopOptions = {
   maxToolIterations?: number;
@@ -20,8 +18,7 @@ export type LoopInput = {
   signal?: AbortSignal;
   stream?: boolean;
   systemPrompt?: string;
-  toolExecutionPolicy: ToolExecutionPolicy;
-  tools: Tool[];
+  toolRuntimeFactory: ToolRuntimeFactory;
 };
 
 export type TurnChunk =
@@ -179,8 +176,7 @@ export async function* streamLoop({
   signal,
   stream,
   systemPrompt,
-  toolExecutionPolicy,
-  tools,
+  toolRuntimeFactory,
 }: LoopInput): AsyncGenerator<TurnChunk, Message[]> {
   let currentIteration = 0;
   let currentErrorType: 'provider' | 'tool' | 'runtime' = 'runtime';
@@ -192,7 +188,7 @@ export async function* streamLoop({
     content,
     createdAt: new Date().toISOString(),
   };
-  const toolRuntime = createToolRuntime({ policy: toolExecutionPolicy, signal, tools });
+  const toolRuntime = toolRuntimeFactory({ signal });
   const maxToolIterations = options?.maxToolIterations ?? DEFAULT_MAX_TOOL_ITERATIONS;
   let toolIterations = 0;
   observer.turnStarted(content.length);

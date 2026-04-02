@@ -8,6 +8,7 @@ import { FakeProvider } from './providers/fake.js';
 import { MemorySessionStore } from './sessions/memory-store.js';
 import { Session } from './sessions/session.js';
 import type { SessionStore } from './sessions/store.js';
+import { createToolRuntimeFactory } from './tools/runtime/index.js';
 import type { Tool } from './tools/types.js';
 import { createTurnStreamFactory } from './turn-stream.js';
 
@@ -55,8 +56,10 @@ function createStreamTurnFactory(input: {
       provider,
       session,
       stream: input.stream,
-      toolExecutionPolicy: { workspaceRoot: process.cwd() },
-      tools: input.tools ?? [],
+      toolRuntimeFactory: createToolRuntimeFactory({
+        policy: { workspaceRoot: process.cwd() },
+        tools: input.tools ?? [],
+      }),
     }),
   };
 }
@@ -107,8 +110,7 @@ test('createTurnStreamFactory rejects iteration when the background turn throws 
     }),
     provider,
     session,
-    toolExecutionPolicy: { workspaceRoot: process.cwd() },
-    tools: [],
+    toolRuntimeFactory: createToolRuntimeFactory({ policy: { workspaceRoot: process.cwd() }, tools: [] }),
   });
 
   await assert.rejects(

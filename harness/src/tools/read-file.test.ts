@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import { ReadFileTool } from './read-file.js';
-import { createToolServices } from './services/index.js';
+import { createToolRuntime } from './runtime/index.js';
 
 test('ReadFileTool reads files relative to the workspace root', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
@@ -14,7 +14,10 @@ test('ReadFileTool reads files relative to the workspace root', async () => {
     await writeFile(join(rootDir, 'note.txt'), 'hello from file', 'utf8');
 
     const tool = new ReadFileTool();
-    const result = await tool.execute({ path: 'note.txt' }, createToolServices({ workspaceRoot: rootDir }));
+    const result = await tool.execute(
+      { path: 'note.txt' },
+      createToolRuntime({ policy: { workspaceRoot: rootDir }, tools: [] }),
+    );
 
     assert.equal(typeof result, 'object');
     assert.equal(result.content, 'hello from file');
@@ -32,7 +35,10 @@ test('ReadFileTool allows in-workspace paths that start with two dots', async ()
     await writeFile(join(rootDir, '..note.txt'), 'hidden but valid', 'utf8');
 
     const tool = new ReadFileTool();
-    const result = await tool.execute({ path: '..note.txt' }, createToolServices({ workspaceRoot: rootDir }));
+    const result = await tool.execute(
+      { path: '..note.txt' },
+      createToolRuntime({ policy: { workspaceRoot: rootDir }, tools: [] }),
+    );
 
     assert.equal(typeof result, 'object');
     assert.equal(result.content, 'hidden but valid');
@@ -50,7 +56,7 @@ test('ReadFileTool truncates large output to the shared result limit', async () 
     const tool = new ReadFileTool();
     const result = await tool.execute(
       { path: 'note.txt' },
-      createToolServices({ maxToolResultBytes: 4, workspaceRoot: rootDir }),
+      createToolRuntime({ policy: { maxToolResultBytes: 4, workspaceRoot: rootDir }, tools: [] }),
     );
 
     assert.equal(typeof result, 'object');
@@ -74,15 +80,15 @@ test('ReadFileTool rejects paths outside the workspace root', async () => {
     const tool = new ReadFileTool();
 
     await assert.rejects(
-      () => tool.execute({ path: '../secret.txt' }, createToolServices({ workspaceRoot })),
+      () => tool.execute({ path: '../secret.txt' }, createToolRuntime({ policy: { workspaceRoot }, tools: [] })),
       /read_file path must stay inside workspace root/,
     );
     await assert.rejects(
-      () => tool.execute({ path: outsidePath }, createToolServices({ workspaceRoot })),
+      () => tool.execute({ path: outsidePath }, createToolRuntime({ policy: { workspaceRoot }, tools: [] })),
       /read_file path must stay inside workspace root/,
     );
     await assert.rejects(
-      () => tool.execute({ path: '../missing.txt' }, createToolServices({ workspaceRoot })),
+      () => tool.execute({ path: '../missing.txt' }, createToolRuntime({ policy: { workspaceRoot }, tools: [] })),
       /read_file path must stay inside workspace root/,
     );
   } finally {
@@ -99,7 +105,11 @@ test('ReadFileTool rejects files larger than the shared policy limit', async () 
     const tool = new ReadFileTool();
 
     await assert.rejects(
-      () => tool.execute({ path: 'large.txt' }, createToolServices({ maxReadBytes: 4, workspaceRoot: rootDir })),
+      () =>
+        tool.execute(
+          { path: 'large.txt' },
+          createToolRuntime({ policy: { maxReadBytes: 4, workspaceRoot: rootDir }, tools: [] }),
+        ),
       /read_file refuses files larger than 4 bytes/,
     );
   } finally {
@@ -119,9 +129,12 @@ test('ReadFileTool rejects denylisted paths from shared policy', async () => {
       () =>
         tool.execute(
           { path: '.env' },
-          createToolServices({
-            pathDenylist: [{ basename: '.env', reason: 'sensitive file' }],
-            workspaceRoot: rootDir,
+          createToolRuntime({
+            policy: {
+              pathDenylist: [{ basename: '.env', reason: 'sensitive file' }],
+              workspaceRoot: rootDir,
+            },
+            tools: [],
           }),
         ),
       /read_file path is blocked by tool policy: \.env \(sensitive file\)/,

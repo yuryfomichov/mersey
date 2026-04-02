@@ -8,7 +8,8 @@ import { createProvider, type ProviderDefinition } from './providers/factory.js'
 import { MemorySessionStore } from './sessions/memory-store.js';
 import { Session } from './sessions/session.js';
 import type { Message } from './sessions/types.js';
-import type { ToolExecutionPolicy } from './tools/services/index.js';
+import { createToolRuntimeFactory } from './tools/runtime/index.js';
+import type { ToolExecutionPolicy } from './tools/runtime/index.js';
 import type { Tool } from './tools/types.js';
 import { createTurnStreamFactory } from './turn-stream.js';
 
@@ -44,6 +45,10 @@ function ensureProvider(options: Pick<CreateHarnessOptions, 'provider' | 'provid
 export function createHarness(options: CreateHarnessOptions = {}): Harness {
   const resolvedProvider = ensureProvider(options);
   const session = options.session ?? new Session({ id: 'local-session', store: new MemorySessionStore() });
+  const toolRuntimeFactory = createToolRuntimeFactory({
+    policy: options.toolExecutionPolicy ?? { workspaceRoot: process.cwd() },
+    tools: options.tools ?? [],
+  });
 
   const observer = new HarnessObserver({
     debug: options.debug,
@@ -58,8 +63,7 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
     session,
     stream: options.stream,
     systemPrompt: options.systemPrompt,
-    toolExecutionPolicy: options.toolExecutionPolicy ?? { workspaceRoot: process.cwd() },
-    tools: options.tools ?? [],
+    toolRuntimeFactory,
   });
 
   return {

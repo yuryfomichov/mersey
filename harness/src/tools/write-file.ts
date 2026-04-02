@@ -4,7 +4,7 @@ import { dirname } from 'node:path';
 import { z } from 'zod';
 
 import type { ModelToolInput } from '../models/types.js';
-import type { ToolServices } from './services/index.js';
+import type { ToolRuntimeServices } from './runtime/index.js';
 import type { Tool, ToolExecuteResult } from './types.js';
 import { parseToolInput, toToolInputSchema } from './utils/schema.js';
 
@@ -24,11 +24,11 @@ export class WriteFileTool implements Tool {
   readonly inputSchema = toToolInputSchema(WriteFileTool.input);
   readonly name = 'write_file';
 
-  async execute(input: ModelToolInput, services: ToolServices): Promise<ToolExecuteResult> {
+  async execute(input: ModelToolInput, runtime: ToolRuntimeServices): Promise<ToolExecuteResult> {
     const { content, overwrite, path } = parseToolInput(WriteFileTool.input, input);
 
-    const resolvedPath = await services.files.resolveForWrite(path, this.name);
-    services.files.assertWriteSize(content, this.name);
+    const resolvedPath = await runtime.files.resolveForWrite(path, this.name);
+    runtime.files.assertWriteSize(content, this.name);
 
     await mkdir(dirname(resolvedPath), { recursive: true });
 

@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { withTempDir, writeWorkspaceFiles } from '../../test/test-helpers.js';
 import { ReadFileTool } from './read-file.js';
-import { createToolRuntime } from './services/index.js';
+import { createToolRuntime } from './runtime/index.js';
 
 test('executeToolCall returns an error result for unknown tools', async () => {
   const result = await createToolRuntime({
