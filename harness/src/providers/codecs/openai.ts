@@ -133,9 +133,17 @@ export class OpenAICodec {
     const normalizedSchema = Object.fromEntries(normalizedEntries);
 
     if (normalizedSchema.type === 'object') {
+      const propertyNames =
+        normalizedSchema.properties &&
+        typeof normalizedSchema.properties === 'object' &&
+        !Array.isArray(normalizedSchema.properties)
+          ? Object.keys(normalizedSchema.properties)
+          : [];
+
       return {
         ...normalizedSchema,
         additionalProperties: normalizedSchema.additionalProperties ?? false,
+        required: propertyNames,
       };
     }
 

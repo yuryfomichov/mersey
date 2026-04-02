@@ -30,7 +30,7 @@ function createAnthropicMessage(content: Anthropic.Message['content']): Anthropi
   };
 }
 
-test('getAnthropicMessages replays tool-only assistant responses without fake text', () => {
+test('getMessages replays tool-only assistant responses without fake text', () => {
   const messages = codec.getMessages({
     messages: [
       { content: 'Read note.txt', role: 'user' },
@@ -67,7 +67,7 @@ test('getAnthropicMessages replays tool-only assistant responses without fake te
   });
 });
 
-test('getAnthropicMessages groups consecutive tool results into one user message', () => {
+test('getMessages groups consecutive tool results into one user message', () => {
   const messages = codec.getMessages({
     messages: [
       { content: 'Read two files', role: 'user' },
@@ -119,11 +119,11 @@ test('getAnthropicMessages groups consecutive tool results into one user message
   });
 });
 
-test('getAnthropicResponseText leaves empty non-tool replies blank', () => {
+test('getResponseText leaves empty non-tool replies blank', () => {
   assert.equal(codec.getResponseText(createAnthropicMessage([{ citations: null, text: '   ', type: 'text' }])), '');
 });
 
-test('getAnthropicToolCalls extracts tool calls from tool-only responses', () => {
+test('getToolCalls extracts tool calls from tool-only responses', () => {
   assert.deepEqual(
     codec.getToolCalls(
       createAnthropicMessage([

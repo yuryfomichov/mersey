@@ -240,7 +240,7 @@ test('OpenAILikeProvider forwards codec-produced input and tools to responses.cr
           command: { type: 'string' },
           cwd: { type: 'string' },
         },
-        required: ['command'],
+        required: ['command', 'cwd'],
         type: 'object',
       },
       strict: true,

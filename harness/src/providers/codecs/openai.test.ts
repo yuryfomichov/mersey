@@ -27,7 +27,7 @@ function createResponse(overrides: Partial<OpenAI.Responses.Response>): OpenAI.R
   } as unknown as OpenAI.Responses.Response;
 }
 
-test('getOpenAIToolCalls rejects incomplete function calls', () => {
+test('getToolCalls rejects incomplete function calls', () => {
   const response = createResponse({
     incomplete_details: { reason: 'max_output_tokens' },
     output: [
@@ -44,7 +44,7 @@ test('getOpenAIToolCalls rejects incomplete function calls', () => {
   assert.throws(() => codec.getToolCalls(response), /OpenAI response returned incomplete tool calls/);
 });
 
-test('getOpenAIToolCalls rejects incomplete non-tool responses', () => {
+test('getToolCalls rejects incomplete non-tool responses', () => {
   const response = createResponse({
     incomplete_details: { reason: 'max_output_tokens' },
     output_text: 'partial answer',
@@ -53,7 +53,7 @@ test('getOpenAIToolCalls rejects incomplete non-tool responses', () => {
   assert.throws(() => codec.getToolCalls(response), /OpenAI response was incomplete/);
 });
 
-test('getOpenAITools adds additionalProperties false to function schemas', () => {
+test('getTools adds strict object requirements to function schemas', () => {
   const request: ModelRequest = {
     messages: [{ content: 'hello', role: 'user' }],
     tools: [
@@ -88,6 +88,7 @@ test('getOpenAITools adds additionalProperties false to function schemas', () =>
             properties: {
               path: { type: 'string' },
             },
+            required: ['path'],
             type: 'object',
           },
         },
@@ -100,7 +101,7 @@ test('getOpenAITools adds additionalProperties false to function schemas', () =>
   ]);
 });
 
-test('getOpenAITools preserves optional function properties', () => {
+test('getTools requires every declared property for strict OpenAI schemas', () => {
   const request: ModelRequest = {
     messages: [{ content: 'hello', role: 'user' }],
     tools: [
@@ -131,7 +132,7 @@ test('getOpenAITools preserves optional function properties', () => {
           overwrite: { type: 'boolean' },
           path: { type: 'string' },
         },
-        required: ['content', 'path'],
+        required: ['content', 'overwrite', 'path'],
         type: 'object',
       },
       strict: true,
@@ -140,7 +141,7 @@ test('getOpenAITools preserves optional function properties', () => {
   ]);
 });
 
-test('getOpenAIInputItems preserves empty-string user messages', () => {
+test('getInputItems preserves empty-string user messages', () => {
   assert.deepEqual(
     codec.getInputItems({
       messages: [{ content: '', role: 'user' }],
@@ -155,7 +156,7 @@ test('getOpenAIInputItems preserves empty-string user messages', () => {
   );
 });
 
-test('getOpenAIInputItems skips empty assistant placeholder text while keeping tool calls', () => {
+test('getInputItems skips empty assistant placeholder text while keeping tool calls', () => {
   assert.deepEqual(
     codec.getInputItems({
       messages: [
@@ -177,11 +178,11 @@ test('getOpenAIInputItems skips empty assistant placeholder text while keeping t
   );
 });
 
-test('getOpenAIResponseText trims whitespace-only replies to empty text', () => {
+test('getResponseText trims whitespace-only replies to empty text', () => {
   assert.equal(codec.getResponseText(createResponse({ output_text: '   ' })), '');
 });
 
-test('getOpenAIResponseText derives text from output items when output_text is undefined', () => {
+test('getResponseText derives text from output items when output_text is undefined', () => {
   const response = createResponse({
     output: [
       {
