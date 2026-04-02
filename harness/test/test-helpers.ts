@@ -4,11 +4,25 @@ import { dirname, join } from 'node:path';
 
 export async function withTempDir<T>(run: (rootDir: string) => Promise<T>, prefix = 'mersey-'): Promise<T> {
   const rootDir = await mkdtemp(join(tmpdir(), prefix));
+  let runError: unknown;
 
   try {
     return await run(rootDir);
+  } catch (error: unknown) {
+    runError = error;
+    throw error;
   } finally {
-    await rm(rootDir, { force: true, recursive: true });
+    try {
+      await rm(rootDir, { force: true, recursive: true });
+    } catch (cleanupError: unknown) {
+      if (!runError) {
+        throw cleanupError;
+      }
+
+      if (runError instanceof Error && cleanupError instanceof Error && runError.cause === undefined) {
+        runError.cause = cleanupError;
+      }
+    }
   }
 }
 
