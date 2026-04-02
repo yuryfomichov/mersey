@@ -203,7 +203,7 @@ test('createHarness emits live events in stable order without leaking raw conten
       }),
       sessionId: 'events-session',
       sessionStore: new MemorySessionStore(),
-      toolPolicy: { workspaceRoot: rootDir },
+      toolExecutionPolicy: { workspaceRoot: rootDir },
       tools: [new ReadFileTool()],
     });
 

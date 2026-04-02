@@ -1,4 +1,4 @@
-import type { ToolOutputLimitResult } from './types.js';
+import type { ToolOutputLimitResult } from '../types.js';
 
 const DEFAULT_MAX_TOOL_RESULT_BYTES = 32 * 1024;
 

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { assertFileSizeWithinLimit, resolvePathInWorkspace } from './file_system.js';
+import { assertFileSizeWithinLimit, resolvePathInWorkspace } from './path-utils.js';
 
 test('resolvePathInWorkspace resolves relative paths inside the workspace', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));

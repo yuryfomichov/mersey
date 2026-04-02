@@ -55,7 +55,7 @@ function createStreamTurnFactory(input: {
       provider,
       session,
       stream: input.stream,
-      toolPolicy: { workspaceRoot: process.cwd() },
+      toolExecutionPolicy: { workspaceRoot: process.cwd() },
       tools: input.tools ?? [],
     }),
   };
@@ -107,7 +107,7 @@ test('createTurnStreamFactory rejects iteration when the background turn throws 
     }),
     provider,
     session,
-    toolPolicy: { workspaceRoot: process.cwd() },
+    toolExecutionPolicy: { workspaceRoot: process.cwd() },
     tools: [],
   });
 

@@ -1,14 +1,15 @@
 import { spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 
-import { limitText } from './output.js';
-import type { ToolCommandResult, ToolCommandSpec, ToolOutputLimitResult, ToolPolicy } from './types.js';
+import { limitText } from '../output/output-utils.js';
+import type { ToolOutputLimitResult } from '../types.js';
+import type { ToolCommandPolicy, ToolCommandResult, ToolCommandSpec } from './types.js';
 
 const DEFAULT_MAX_COMMAND_OUTPUT_BYTES = 32 * 1024;
 const DEFAULT_COMMAND_TIMEOUT_MS = 10_000;
 const COMMAND_KILL_GRACE_MS = 250;
 
-function assertCommandAllowed(command: string, toolName: string, policy: ToolPolicy): void {
+function assertCommandAllowed(command: string, toolName: string, policy: ToolCommandPolicy): void {
   if (policy.commandAllowlist && !policy.commandAllowlist.includes(command)) {
     throw new Error(`${toolName} command is not in the allowlist: ${command}`);
   }
@@ -18,14 +19,14 @@ function assertCommandAllowed(command: string, toolName: string, policy: ToolPol
   }
 }
 
-function resolveCommandTimeout(timeoutMs: number | undefined, toolName: string, policy: ToolPolicy): number {
-  const resolvedTimeout = timeoutMs ?? policy.defaultCommandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
+function resolveCommandTimeout(timeoutMs: number | undefined, toolName: string, policy: ToolCommandPolicy): number {
+  const resolvedTimeout = timeoutMs ?? policy.defaultTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
 
   if (resolvedTimeout <= 0) {
     throw new Error(`${toolName} timeout must be greater than 0.`);
   }
 
-  const maxTimeout = policy.maxCommandTimeoutMs;
+  const maxTimeout = policy.maxTimeoutMs;
 
   if (maxTimeout !== undefined && resolvedTimeout > maxTimeout) {
     throw new Error(`${toolName} timeout exceeds the configured maximum of ${maxTimeout} ms.`);
@@ -81,7 +82,7 @@ function readStream(stream: NodeJS.ReadableStream | null, maxBytes: number): Pro
 export async function runCommand(
   spec: ToolCommandSpec,
   toolName: string,
-  policy: ToolPolicy,
+  policy: ToolCommandPolicy,
   getDefaultCwd: () => Promise<string>,
   resolveCwd: (cwd: string, toolName: string) => Promise<string>,
   signal?: AbortSignal,
@@ -92,7 +93,7 @@ export async function runCommand(
   const timeoutMs = resolveCommandTimeout(spec.timeoutMs, toolName, policy);
   const cwd = spec.cwd ? await resolveCwd(spec.cwd, toolName) : await getDefaultCwd();
   const startedAt = Date.now();
-  const maxOutputBytes = policy.maxCommandOutputBytes ?? DEFAULT_MAX_COMMAND_OUTPUT_BYTES;
+  const maxOutputBytes = policy.maxOutputBytes ?? DEFAULT_MAX_COMMAND_OUTPUT_BYTES;
 
   const child = spawn(spec.command, spec.args ?? [], {
     cwd,

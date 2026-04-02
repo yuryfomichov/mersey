@@ -3,7 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { z } from 'zod';
 
 import type { ModelToolInput } from '../models/types.js';
-import type { ToolContext } from './context.js';
+import type { ToolServices } from './services/index.js';
 import type { Tool, ToolExecuteResult } from './types.js';
 import { parseToolInput, toToolInputSchema } from './utils/schema.js';
 
@@ -42,12 +42,12 @@ export class EditFileTool implements Tool {
   readonly inputSchema = toToolInputSchema(EditFileTool.input);
   readonly name = 'edit_file';
 
-  async execute(input: ModelToolInput, context: ToolContext): Promise<ToolExecuteResult> {
+  async execute(input: ModelToolInput, services: ToolServices): Promise<ToolExecuteResult> {
     const { newText, oldText, path } = parseToolInput(EditFileTool.input, input);
 
-    const resolvedPath = await context.files.resolveForRead(path, this.name);
-    await context.files.resolveForWrite(path, this.name);
-    await context.files.assertReadSize(resolvedPath, this.name);
+    const resolvedPath = await services.files.resolveForRead(path, this.name);
+    await services.files.resolveForWrite(path, this.name);
+    await services.files.assertReadSize(resolvedPath, this.name);
     const content = await readFile(resolvedPath, 'utf8');
     const matchCount = getMatchCount(content, oldText);
 
@@ -61,7 +61,7 @@ export class EditFileTool implements Tool {
 
     const nextContent = content.replace(oldText, newText);
 
-    context.files.assertWriteSize(nextContent, this.name);
+    services.files.assertWriteSize(nextContent, this.name);
     await writeFile(resolvedPath, nextContent, 'utf8');
     return {
       content: `Edited file: ${resolvedPath}`,

@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { createToolContext } from './context.js';
 import { EditFileTool } from './edit-file.js';
+import { createToolServices } from './services/index.js';
 
 test('EditFileTool replaces exactly one matching string', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
@@ -16,7 +16,7 @@ test('EditFileTool replaces exactly one matching string', async () => {
     const tool = new EditFileTool();
     const result = await tool.execute(
       { newText: 'mersey', oldText: 'world', path: 'note.txt' },
-      createToolContext({ workspaceRoot: rootDir }),
+      createToolServices({ workspaceRoot: rootDir }),
     );
     const content = await readFile(join(rootDir, 'note.txt'), 'utf8');
 
@@ -43,13 +43,16 @@ test('EditFileTool rejects paths outside the workspace root', async () => {
       () =>
         tool.execute(
           { newText: 'public', oldText: 'secret', path: '../secret.txt' },
-          createToolContext({ workspaceRoot }),
+          createToolServices({ workspaceRoot }),
         ),
       /edit_file path must stay inside workspace root/,
     );
     await assert.rejects(
       () =>
-        tool.execute({ newText: 'public', oldText: 'secret', path: outsidePath }, createToolContext({ workspaceRoot })),
+        tool.execute(
+          { newText: 'public', oldText: 'secret', path: outsidePath },
+          createToolServices({ workspaceRoot }),
+        ),
       /edit_file path must stay inside workspace root/,
     );
   } finally {
@@ -69,7 +72,7 @@ test('EditFileTool requires oldText to match exactly once', async () => {
       () =>
         tool.execute(
           { newText: 'mersey', oldText: 'missing', path: 'note.txt' },
-          createToolContext({ workspaceRoot: rootDir }),
+          createToolServices({ workspaceRoot: rootDir }),
         ),
       /edit_file could not find oldText in file/,
     );
@@ -77,7 +80,7 @@ test('EditFileTool requires oldText to match exactly once', async () => {
       () =>
         tool.execute(
           { newText: 'mersey', oldText: 'world', path: 'note.txt' },
-          createToolContext({ workspaceRoot: rootDir }),
+          createToolServices({ workspaceRoot: rootDir }),
         ),
       /edit_file requires oldText to match exactly once/,
     );
@@ -96,7 +99,7 @@ test('EditFileTool rejects overlapping oldText matches', async () => {
 
     await assert.rejects(
       () =>
-        tool.execute({ newText: 'b', oldText: 'aa', path: 'note.txt' }, createToolContext({ workspaceRoot: rootDir })),
+        tool.execute({ newText: 'b', oldText: 'aa', path: 'note.txt' }, createToolServices({ workspaceRoot: rootDir })),
       /edit_file requires oldText to match exactly once/,
     );
   } finally {
@@ -111,22 +114,22 @@ test('EditFileTool validates path and text inputs', async () => {
     const tool = new EditFileTool();
 
     await assert.rejects(
-      () => tool.execute({ newText: 'mersey', oldText: 'world' }, createToolContext({ workspaceRoot: rootDir })),
+      () => tool.execute({ newText: 'mersey', oldText: 'world' }, createToolServices({ workspaceRoot: rootDir })),
       /edit_file requires a string path/,
     );
     await assert.rejects(
-      () => tool.execute({ newText: 'mersey', path: 'note.txt' }, createToolContext({ workspaceRoot: rootDir })),
+      () => tool.execute({ newText: 'mersey', path: 'note.txt' }, createToolServices({ workspaceRoot: rootDir })),
       /edit_file requires string oldText/,
     );
     await assert.rejects(
-      () => tool.execute({ oldText: 'world', path: 'note.txt' }, createToolContext({ workspaceRoot: rootDir })),
+      () => tool.execute({ oldText: 'world', path: 'note.txt' }, createToolServices({ workspaceRoot: rootDir })),
       /edit_file requires string newText/,
     );
     await assert.rejects(
       () =>
         tool.execute(
           { newText: 'mersey', oldText: '', path: 'note.txt' },
-          createToolContext({ workspaceRoot: rootDir }),
+          createToolServices({ workspaceRoot: rootDir }),
         ),
       /edit_file requires a non-empty oldText/,
     );
@@ -147,7 +150,7 @@ test('EditFileTool rejects denylisted writes from shared policy', async () => {
       () =>
         tool.execute(
           { newText: 'SECRET=2', oldText: 'SECRET=1', path: '.env' },
-          createToolContext({
+          createToolServices({
             pathDenylist: [{ access: ['write'], basename: '.env', reason: 'sensitive file' }],
             workspaceRoot: rootDir,
           }),
@@ -171,7 +174,7 @@ test('EditFileTool rejects files blocked for read access by shared policy', asyn
       () =>
         tool.execute(
           { newText: 'hello mersey', oldText: 'hello world', path: 'note.txt' },
-          createToolContext({
+          createToolServices({
             pathDenylist: [{ access: ['read'], basename: 'note.txt', reason: 'read blocked' }],
             workspaceRoot: rootDir,
           }),

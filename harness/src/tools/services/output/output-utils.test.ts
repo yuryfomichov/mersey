@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { limitText } from './output.js';
+import { limitText } from './output-utils.js';
 
 test('limitText handles zero-byte limits without hanging', () => {
   assert.deepEqual(limitText('hello', 0), {

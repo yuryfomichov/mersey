@@ -3,9 +3,8 @@ import type { ModelProvider } from '../models/provider.js';
 import { supportsStreaming } from '../models/provider.js';
 import type { ModelMessage, ModelRequest, ModelResponse } from '../models/types.js';
 import type { Message } from '../sessions/types.js';
-import { createToolContext } from '../tools/context.js';
-import type { ToolPolicy } from '../tools/context.js';
-import { executeToolCall, getToolDefinitions, getToolMap } from '../tools/runtime.js';
+import { createToolRuntime } from '../tools/services/index.js';
+import type { ToolExecutionPolicy } from '../tools/services/index.js';
 import type { Tool } from '../tools/types.js';
 
 export type LoopOptions = {
@@ -21,7 +20,7 @@ export type LoopInput = {
   signal?: AbortSignal;
   stream?: boolean;
   systemPrompt?: string;
-  toolPolicy: ToolPolicy;
+  toolExecutionPolicy: ToolExecutionPolicy;
   tools: Tool[];
 };
 
@@ -180,7 +179,7 @@ export async function* streamLoop({
   signal,
   stream,
   systemPrompt,
-  toolPolicy,
+  toolExecutionPolicy,
   tools,
 }: LoopInput): AsyncGenerator<TurnChunk, Message[]> {
   let currentIteration = 0;
@@ -193,9 +192,7 @@ export async function* streamLoop({
     content,
     createdAt: new Date().toISOString(),
   };
-  const toolsByName = getToolMap(tools);
-  const toolDefinitions = getToolDefinitions(tools);
-  const toolContext = createToolContext(toolPolicy, { signal });
+  const toolRuntime = createToolRuntime({ policy: toolExecutionPolicy, signal, tools });
   const maxToolIterations = options?.maxToolIterations ?? DEFAULT_MAX_TOOL_ITERATIONS;
   let toolIterations = 0;
   observer.turnStarted(content.length);
@@ -211,7 +208,7 @@ export async function* streamLoop({
 
       currentIteration += 1;
       observer.iterationStarted(currentIteration, transcript.length);
-      observer.providerRequested(currentIteration, transcript, provider, toolDefinitions);
+      observer.providerRequested(currentIteration, transcript, provider, toolRuntime.toolDefinitions);
 
       currentErrorType = 'provider';
       throwIfAborted(signal);
@@ -226,7 +223,7 @@ export async function* streamLoop({
           messages: toModelMessages(transcript),
           signal,
           systemPrompt: resolvedSystemPrompt,
-          tools: toolDefinitions,
+          tools: toolRuntime.toolDefinitions,
         },
         signal,
         stream,
@@ -298,7 +295,7 @@ export async function* streamLoop({
 
         currentErrorType = 'tool';
         const toolStartTime = Date.now();
-        const toolResult = await executeToolCall(toolCall, toolsByName, toolContext);
+        const toolResult = await toolRuntime.executeToolCall(toolCall);
         currentErrorType = 'runtime';
         throwIfAborted(signal);
         observer.toolFinished(currentIteration, toolCall, toolResult, Date.now() - toolStartTime);

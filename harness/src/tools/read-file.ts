@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
 
 import type { ModelToolInput } from '../models/types.js';
-import type { ToolContext } from './context.js';
+import type { ToolServices } from './services/index.js';
 import type { Tool, ToolExecuteResult } from './types.js';
 import { parseToolInput, toToolInputSchema } from './utils/schema.js';
 
@@ -19,13 +19,13 @@ export class ReadFileTool implements Tool {
   readonly inputSchema = toToolInputSchema(ReadFileTool.input);
   readonly name = 'read_file';
 
-  async execute(input: ModelToolInput, context: ToolContext): Promise<ToolExecuteResult> {
+  async execute(input: ModelToolInput, services: ToolServices): Promise<ToolExecuteResult> {
     const { path } = parseToolInput(ReadFileTool.input, input);
 
-    const resolvedPath = await context.files.resolveForRead(path, this.name);
-    await context.files.assertReadSize(resolvedPath, this.name);
+    const resolvedPath = await services.files.resolveForRead(path, this.name);
+    await services.files.assertReadSize(resolvedPath, this.name);
     const content = await readFile(resolvedPath, 'utf8');
-    const limited = context.output.limitResult(content);
+    const limited = services.output.limitResult(content);
 
     return {
       content: limited.text,
