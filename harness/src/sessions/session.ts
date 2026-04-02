@@ -31,6 +31,8 @@ export type SessionOptions = {
 export class Session {
   private readonly store: SessionStore;
   private stateValue: SessionState;
+  private messagesSnapshot: readonly Message[] | null = null;
+  private stateSnapshot: SessionState | null = null;
   private initialized: Promise<void> | null = null;
   private turnQueue: Promise<void> = Promise.resolve();
 
@@ -52,11 +54,19 @@ export class Session {
   }
 
   get messages(): readonly Message[] {
-    return this.stateValue.messages.map((message) => freezeMessageSnapshot(message));
+    if (!this.messagesSnapshot) {
+      this.messagesSnapshot = this.stateValue.messages.map((message) => freezeMessageSnapshot(message));
+    }
+
+    return this.messagesSnapshot;
   }
 
   get state(): SessionState {
-    return freezeStateSnapshot(this.stateValue);
+    if (!this.stateSnapshot) {
+      this.stateSnapshot = freezeStateSnapshot(this.stateValue);
+    }
+
+    return this.stateSnapshot;
   }
 
   async commit(messages: Message[]): Promise<void> {
@@ -67,9 +77,14 @@ export class Session {
     await this.ensure();
 
     for (const message of messages) {
-      await this.store.appendMessage(this.id, message);
-      this.stateValue.messages.push(cloneMessage(message));
+      const storedMessage = cloneMessage(message);
+      const stateMessage = cloneMessage(message);
+
+      await this.store.appendMessage(this.id, storedMessage);
+      this.stateValue.messages.push(stateMessage);
     }
+
+    this.invalidateSnapshots();
   }
 
   async ensure(): Promise<void> {
@@ -83,6 +98,7 @@ export class Session {
         const resolvedSession = existingSession ?? (await this.store.createSession(this.state));
 
         this.stateValue = cloneState(resolvedSession);
+        this.invalidateSnapshots();
       } catch (error: unknown) {
         this.initialized = null;
         throw error;
@@ -107,5 +123,10 @@ export class Session {
     } finally {
       releaseTurn();
     }
+  }
+
+  private invalidateSnapshots(): void {
+    this.messagesSnapshot = null;
+    this.stateSnapshot = null;
   }
 }
