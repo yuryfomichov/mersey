@@ -1,6 +1,6 @@
 import { relative, sep } from 'node:path';
 
-import type { ToolFileService, ToolFileAccess, ToolExecutionPolicy } from '../types.js';
+import type { ToolFileAccess, ToolExecutionPolicy, ToolFileService } from '../types.js';
 import {
   assertWriteSizeWithinLimit,
   getPolicyError,

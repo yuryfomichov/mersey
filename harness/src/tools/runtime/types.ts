@@ -41,20 +41,32 @@ export type ToolOutputService = {
   limitText(text: string, maxBytes?: number): ToolOutputLimitResult;
 };
 
-export type ToolServices = {
+export type ToolCancellationService = {
+  signal(): AbortSignal | undefined;
+  throwIfAborted(): void;
+};
+
+export type ToolRuntimeServices = {
+  cancellation: ToolCancellationService;
   commands: ToolCommandRunner;
   files: ToolFileService;
   output: ToolOutputService;
-  signal?: AbortSignal;
 };
 
-export type ToolRuntime = ToolServices & {
+export type ToolRuntime = ToolRuntimeServices & {
   executeToolCall(toolCall: ModelToolCall): Promise<ToolExecutionResult>;
   toolDefinitions: ModelToolDefinition[] | undefined;
 };
 
-export type ToolRuntimeOptions = {
+export type ToolRuntimeFactory = ((options?: { signal?: AbortSignal }) => ToolRuntime) & {
+  toolDefinitions: ModelToolDefinition[] | undefined;
+};
+
+export type ToolRuntimeFactoryOptions = {
   policy: ToolExecutionPolicy;
-  signal?: AbortSignal;
   tools: Tool[];
+};
+
+export type ToolRuntimeOptions = ToolRuntimeFactoryOptions & {
+  signal?: AbortSignal;
 };

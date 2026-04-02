@@ -10,6 +10,8 @@ import type { ModelProvider } from '../models/provider.js';
 import { FakeProvider } from '../providers/fake.js';
 import type { Message, SessionState } from '../sessions/types.js';
 import { ReadFileTool } from '../tools/read-file.js';
+import { createToolRuntimeFactory, type ToolExecutionPolicy } from '../tools/runtime/index.js';
+import type { Tool } from '../tools/types.js';
 import { streamLoop } from './loop.js';
 
 function createSession(id: string): SessionState {
@@ -59,7 +61,6 @@ function createObserver(input: {
   eventPublisher?: HarnessEventSink;
   provider: ModelProvider;
   sessionId: string;
-  tools: Parameters<typeof streamLoop>[0]['tools'];
 }) {
   const observer = new HarnessObserver({
     debug: input.debug,
@@ -90,8 +91,8 @@ function createLoopInput(input: {
   sessionId: string;
   stream?: boolean;
   systemPrompt?: string;
-  toolExecutionPolicy: Parameters<typeof streamLoop>[0]['toolExecutionPolicy'];
-  tools: Parameters<typeof streamLoop>[0]['tools'];
+  toolExecutionPolicy: ToolExecutionPolicy;
+  tools: Tool[];
 }): Parameters<typeof streamLoop>[0] {
   return {
     content: input.content,
@@ -101,14 +102,12 @@ function createLoopInput(input: {
       eventPublisher: input.eventPublisher,
       provider: input.provider,
       sessionId: input.sessionId,
-      tools: input.tools,
     }),
     options: input.options,
     provider: input.provider,
     stream: input.stream,
     systemPrompt: input.systemPrompt,
-    toolExecutionPolicy: input.toolExecutionPolicy,
-    tools: input.tools,
+    toolRuntimeFactory: createToolRuntimeFactory({ policy: input.toolExecutionPolicy, tools: [...input.tools] }),
   };
 }
 
