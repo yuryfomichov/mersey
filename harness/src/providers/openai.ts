@@ -1,172 +1,9 @@
 import OpenAI from 'openai';
-import type {
-  EasyInputMessage,
-  FunctionTool,
-  Response,
-  ResponseFunctionToolCall,
-  ResponseInputItem,
-} from 'openai/resources/responses/responses';
+import type { FunctionTool, ResponseInputItem } from 'openai/resources/responses/responses';
 
 import type { StreamingModelProvider } from '../models/provider.js';
 import type { ModelRequest, ModelResponse, ModelStreamEvent } from '../models/types.js';
-
-function normalizeOpenAIObjectSchema(schema: unknown): unknown {
-  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
-    return schema;
-  }
-
-  const normalizedEntries = Object.entries(schema).map(([key, value]) => {
-    if (key === 'properties' && value && typeof value === 'object' && !Array.isArray(value)) {
-      return [
-        key,
-        Object.fromEntries(
-          Object.entries(value).map(([propertyName, propertySchema]) => [
-            propertyName,
-            normalizeOpenAIObjectSchema(propertySchema),
-          ]),
-        ),
-      ];
-    }
-
-    if (key === 'items') {
-      return [key, normalizeOpenAIObjectSchema(value)];
-    }
-
-    if ((key === 'anyOf' || key === 'allOf' || key === 'oneOf') && Array.isArray(value)) {
-      return [key, value.map((item) => normalizeOpenAIObjectSchema(item))];
-    }
-
-    return [key, value];
-  });
-
-  const normalizedSchema = Object.fromEntries(normalizedEntries);
-
-  if (normalizedSchema.type === 'object') {
-    const propertyNames =
-      normalizedSchema.properties &&
-      typeof normalizedSchema.properties === 'object' &&
-      !Array.isArray(normalizedSchema.properties)
-        ? Object.keys(normalizedSchema.properties)
-        : [];
-
-    return {
-      ...normalizedSchema,
-      additionalProperties: normalizedSchema.additionalProperties ?? false,
-      required: propertyNames,
-    };
-  }
-
-  return normalizedSchema;
-}
-
-function parseToolInput(argumentsText: string): Record<string, unknown> {
-  let parsed: unknown;
-
-  try {
-    parsed = JSON.parse(argumentsText) as unknown;
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-
-    throw new Error(`OpenAI function call arguments were not valid JSON: ${message}`);
-  }
-
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('OpenAI function call arguments must be a JSON object.');
-  }
-
-  return parsed as Record<string, unknown>;
-}
-
-function getOpenAIInputItems(input: ModelRequest): ResponseInputItem[] {
-  return input.messages.flatMap((message) => {
-    if (message.role === 'tool') {
-      return [
-        {
-          call_id: message.toolCallId,
-          output: message.content,
-          type: 'function_call_output',
-        } as ResponseInputItem,
-      ];
-    }
-
-    const items: ResponseInputItem[] = [];
-
-    if (message.role === 'user' || (message.role === 'assistant' && message.content)) {
-      const openAIMessage: EasyInputMessage = {
-        content: message.content,
-        role: message.role,
-        type: 'message',
-      };
-
-      items.push(openAIMessage);
-    }
-
-    if (message.role === 'assistant' && message.toolCalls?.length) {
-      items.push(
-        ...message.toolCalls.map(
-          (toolCall) =>
-            ({
-              arguments: JSON.stringify(toolCall.input),
-              call_id: toolCall.id,
-              name: toolCall.name,
-              type: 'function_call',
-            }) as ResponseInputItem,
-        ),
-      );
-    }
-
-    return items;
-  });
-}
-
-function getOpenAITools(input: ModelRequest): FunctionTool[] | undefined {
-  return input.tools?.map(
-    (tool): FunctionTool => ({
-      description: tool.description,
-      name: tool.name,
-      parameters: normalizeOpenAIObjectSchema(tool.inputSchema) as FunctionTool['parameters'],
-      strict: true,
-      type: 'function',
-    }),
-  );
-}
-
-function getOpenAIToolCalls(response: Response): ModelResponse['toolCalls'] {
-  const toolCalls = response.output.filter((item): item is ResponseFunctionToolCall => item.type === 'function_call');
-
-  if (toolCalls.some((toolCall) => toolCall.status && toolCall.status !== 'completed')) {
-    const reason = response.incomplete_details ? JSON.stringify(response.incomplete_details) : 'unknown reason';
-
-    throw new Error(`OpenAI response returned incomplete tool calls: ${reason}`);
-  }
-
-  if (response.incomplete_details) {
-    throw new Error(`OpenAI response was incomplete: ${JSON.stringify(response.incomplete_details)}`);
-  }
-
-  return toolCalls.map((item) => ({
-    id: item.call_id,
-    input: parseToolInput(item.arguments),
-    name: item.name,
-  }));
-}
-
-function getOpenAIResponseText(response: Response): string {
-  const outputText =
-    typeof response.output_text === 'string'
-      ? response.output_text
-      : response.output
-          .flatMap((item) => {
-            if (item.type !== 'message') {
-              return [];
-            }
-
-            return item.content.flatMap((content) => (content.type === 'output_text' ? [content.text] : []));
-          })
-          .join('');
-
-  return outputText.trim();
-}
+import { OpenAICodec } from './codecs/openai.js';
 
 export type OpenAILikeProviderConfig = {
   apiKey: string;
@@ -178,6 +15,7 @@ export type OpenAILikeProviderConfig = {
 export type OpenAIConfig = OpenAILikeProviderConfig;
 
 export class OpenAILikeProvider implements StreamingModelProvider {
+  private readonly codec = new OpenAICodec();
   protected readonly client: OpenAI;
   readonly maxTokens: number;
   readonly model: string;
@@ -200,18 +38,18 @@ export class OpenAILikeProvider implements StreamingModelProvider {
     tools: FunctionTool[] | undefined;
   } {
     return {
-      input: getOpenAIInputItems(input),
+      input: this.codec.getInputItems(input),
       instructions: input.systemPrompt,
       max_output_tokens: this.maxTokens,
       model: this.model,
-      tools: getOpenAITools(input),
+      tools: this.codec.getTools(input),
     };
   }
 
   async generate(input: ModelRequest): Promise<ModelResponse> {
     const response = await this.client.responses.create(this.getRequest(input), { signal: input.signal });
-    const toolCalls = getOpenAIToolCalls(response);
-    const text = getOpenAIResponseText(response);
+    const toolCalls = this.codec.getToolCalls(response);
+    const text = this.codec.getResponseText(response);
 
     return {
       text,
@@ -235,8 +73,8 @@ export class OpenAILikeProvider implements StreamingModelProvider {
 
     yield {
       response: {
-        text: getOpenAIResponseText(response),
-        toolCalls: getOpenAIToolCalls(response),
+        text: this.codec.getResponseText(response),
+        toolCalls: this.codec.getToolCalls(response),
       },
       type: 'response_completed',
     };

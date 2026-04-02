@@ -6,9 +6,30 @@ import { HarnessObserver } from './events/observer.js';
 import type { ModelProvider } from './models/provider.js';
 import { FakeProvider } from './providers/fake.js';
 import { MemorySessionStore } from './sessions/memory-store.js';
-import { createTestSession, collectChunks } from './test-helpers.js';
+import { Session } from './sessions/session.js';
+import type { SessionStore } from './sessions/store.js';
 import type { Tool } from './tools/types.js';
 import { createTurnStreamFactory } from './turn-stream.js';
+
+function createTestSession(
+  sessionStore: SessionStore = new MemorySessionStore(),
+  sessionId = 'local-session',
+): Session {
+  return new Session({
+    id: sessionId,
+    store: sessionStore,
+  });
+}
+
+async function collectChunks<T>(iterable: AsyncIterable<T>): Promise<T[]> {
+  const chunks: T[] = [];
+
+  for await (const chunk of iterable) {
+    chunks.push(chunk);
+  }
+
+  return chunks;
+}
 
 function createStreamTurnFactory(input: {
   provider?: FakeProvider;

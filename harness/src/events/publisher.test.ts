@@ -81,6 +81,29 @@ test('HarnessEventPublisher unsubscribes listeners and swallows listener failure
   assert.equal(callCount, 1);
 });
 
+test('HarnessEventPublisher protects listeners from event mutation by other listeners', () => {
+  const publisher = new HarnessEventPublisher();
+  let mutationThrew = false;
+  let seenTurnId: string | undefined;
+
+  publisher.subscribe((event) => {
+    try {
+      event.turnId = 'mutated-turn';
+    } catch {
+      mutationThrew = true;
+    }
+  });
+
+  publisher.subscribe((event) => {
+    seenTurnId = event.turnId;
+  });
+
+  publisher.publish(createEvent());
+
+  assert.equal(mutationThrew, true);
+  assert.equal(seenTurnId, 'turn-1');
+});
+
 test('HarnessEventPublisher swallows hook failures', async () => {
   const publisher = new HarnessEventPublisher({
     onEventPublished(): void {

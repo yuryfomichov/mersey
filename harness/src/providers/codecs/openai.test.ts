@@ -1,0 +1,205 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import type OpenAI from 'openai';
+
+import type { ModelRequest } from '../../models/types.js';
+import { OpenAICodec } from './openai.js';
+
+const codec = new OpenAICodec();
+
+function createResponse(overrides: Partial<OpenAI.Responses.Response>): OpenAI.Responses.Response {
+  return {
+    created_at: 0,
+    error: null,
+    id: 'resp_123',
+    incomplete_details: null,
+    instructions: null,
+    metadata: null,
+    model: 'gpt-test-model',
+    object: 'response',
+    output: [],
+    output_text: '',
+    parallel_tool_calls: false,
+    temperature: null,
+    tool_choice: 'auto',
+    ...overrides,
+  } as unknown as OpenAI.Responses.Response;
+}
+
+test('getOpenAIToolCalls rejects incomplete function calls', () => {
+  const response = createResponse({
+    incomplete_details: { reason: 'max_output_tokens' },
+    output: [
+      {
+        arguments: '{"path":"note.txt"',
+        call_id: 'call_123',
+        name: 'read_file',
+        status: 'incomplete',
+        type: 'function_call',
+      },
+    ],
+  });
+
+  assert.throws(() => codec.getToolCalls(response), /OpenAI response returned incomplete tool calls/);
+});
+
+test('getOpenAIToolCalls rejects incomplete non-tool responses', () => {
+  const response = createResponse({
+    incomplete_details: { reason: 'max_output_tokens' },
+    output_text: 'partial answer',
+  });
+
+  assert.throws(() => codec.getToolCalls(response), /OpenAI response was incomplete/);
+});
+
+test('getOpenAITools adds additionalProperties false to function schemas', () => {
+  const request: ModelRequest = {
+    messages: [{ content: 'hello', role: 'user' }],
+    tools: [
+      {
+        description: 'Read a file.',
+        inputSchema: {
+          properties: {
+            options: {
+              properties: {
+                path: { type: 'string' },
+              },
+              type: 'object',
+            },
+          },
+          required: ['options'],
+          type: 'object',
+        },
+        name: 'read_file',
+      },
+    ],
+  };
+
+  assert.deepEqual(codec.getTools(request), [
+    {
+      description: 'Read a file.',
+      name: 'read_file',
+      parameters: {
+        additionalProperties: false,
+        properties: {
+          options: {
+            additionalProperties: false,
+            properties: {
+              path: { type: 'string' },
+            },
+            type: 'object',
+          },
+        },
+        required: ['options'],
+        type: 'object',
+      },
+      strict: true,
+      type: 'function',
+    },
+  ]);
+});
+
+test('getOpenAITools preserves optional function properties', () => {
+  const request: ModelRequest = {
+    messages: [{ content: 'hello', role: 'user' }],
+    tools: [
+      {
+        description: 'Write a file.',
+        inputSchema: {
+          properties: {
+            content: { type: 'string' },
+            overwrite: { type: 'boolean' },
+            path: { type: 'string' },
+          },
+          required: ['content', 'path'],
+          type: 'object',
+        },
+        name: 'write_file',
+      },
+    ],
+  };
+
+  assert.deepEqual(codec.getTools(request), [
+    {
+      description: 'Write a file.',
+      name: 'write_file',
+      parameters: {
+        additionalProperties: false,
+        properties: {
+          content: { type: 'string' },
+          overwrite: { type: 'boolean' },
+          path: { type: 'string' },
+        },
+        required: ['content', 'path'],
+        type: 'object',
+      },
+      strict: true,
+      type: 'function',
+    },
+  ]);
+});
+
+test('getOpenAIInputItems preserves empty-string user messages', () => {
+  assert.deepEqual(
+    codec.getInputItems({
+      messages: [{ content: '', role: 'user' }],
+    }),
+    [
+      {
+        content: '',
+        role: 'user',
+        type: 'message',
+      },
+    ],
+  );
+});
+
+test('getOpenAIInputItems skips empty assistant placeholder text while keeping tool calls', () => {
+  assert.deepEqual(
+    codec.getInputItems({
+      messages: [
+        {
+          content: '',
+          role: 'assistant',
+          toolCalls: [{ id: 'call_1', input: { path: 'note.txt' }, name: 'read_file' }],
+        },
+      ],
+    }),
+    [
+      {
+        arguments: '{"path":"note.txt"}',
+        call_id: 'call_1',
+        name: 'read_file',
+        type: 'function_call',
+      },
+    ],
+  );
+});
+
+test('getOpenAIResponseText trims whitespace-only replies to empty text', () => {
+  assert.equal(codec.getResponseText(createResponse({ output_text: '   ' })), '');
+});
+
+test('getOpenAIResponseText derives text from output items when output_text is undefined', () => {
+  const response = createResponse({
+    output: [
+      {
+        content: [
+          {
+            annotations: [],
+            text: 'hello',
+            type: 'output_text',
+          },
+        ],
+        id: 'msg_123',
+        role: 'assistant',
+        status: 'completed',
+        type: 'message',
+      },
+    ],
+    output_text: undefined,
+  });
+
+  assert.equal(codec.getResponseText(response), 'hello');
+});
