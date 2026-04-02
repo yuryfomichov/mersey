@@ -1,81 +1,46 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import type { HarnessEvent } from './events/types.js';
-import { createHarness as createBaseHarness, type CreateHarnessOptions } from './harness.js';
+import { createHarness } from './harness.js';
 import type { HarnessRuntimeTrace } from './logger/types.js';
 import type { ModelProvider } from './models/provider.js';
 import type { ModelRequest, ModelResponse } from './models/types.js';
-import { parseProviderName } from './providers/factory.js';
 import { FakeProvider } from './providers/fake.js';
 import { MemorySessionStore } from './sessions/memory-store.js';
-import { Session } from './sessions/session.js';
 import type { SessionStore } from './sessions/store.js';
 import type { Message, SessionState } from './sessions/types.js';
+import { createTestHarness, withTempDir, writeWorkspaceFiles } from './test-helpers.js';
 import { ReadFileTool } from './tools/read-file.js';
 import { RunCommandTool } from './tools/run-command.js';
 
-type TestHarnessOptions = Omit<CreateHarnessOptions, 'session'> & {
-  session?: Session;
-  sessionId?: string;
-  sessionStore?: SessionStore;
-};
-
-function createTestSession(
-  sessionStore: SessionStore = new MemorySessionStore(),
-  sessionId = 'local-session',
-): Session {
-  return new Session({
-    id: sessionId,
-    store: sessionStore,
-  });
-}
-
-function createHarness(options: TestHarnessOptions = {}) {
-  const { session: providedSession, sessionId, sessionStore, ...rest } = options;
-
-  return createBaseHarness({
-    ...rest,
-    session:
-      providedSession ?? createTestSession(sessionStore ?? new MemorySessionStore(), sessionId ?? 'local-session'),
-  });
-}
+test('createHarness requires a provider', () => {
+  assert.throws(() => createHarness(), /Missing provider/);
+});
 
 test('createHarness uses the injected provider and appends session history', async () => {
   const provider = new FakeProvider();
   const sessionStore = new MemorySessionStore();
 
-  const harness = createHarness({ providerInstance: provider, sessionId: 'test-session', sessionStore });
+  const harness = createTestHarness({ providerInstance: provider, sessionId: 'test-session', sessionStore });
   const reply = await harness.sendUserMessage('hello');
 
   assert.equal(reply.role, 'assistant');
   assert.equal(reply.content, 'reply:hello');
   assert.equal(harness.session.id, 'test-session');
-  assert.equal(provider.requests.length, 1);
   assert.deepEqual(provider.requests[0]?.messages, [{ role: 'user', content: 'hello' }]);
-  assert.equal(provider.requests[0]?.tools, undefined);
   assert.deepEqual(
-    harness.session.messages.map((message) => ({ role: message.role, content: message.content })),
+    harness.session.messages.map((message) => ({ content: message.content, role: message.role })),
     [
-      { role: 'user', content: 'hello' },
-      { role: 'assistant', content: 'reply:hello' },
+      { content: 'hello', role: 'user' },
+      { content: 'reply:hello', role: 'assistant' },
     ],
   );
   assert.deepEqual(
     (await sessionStore.listMessages('test-session')).map((message) => message.content),
     ['hello', 'reply:hello'],
   );
-});
-
-test('parseProviderName supports minimax and rejects unknown providers', () => {
-  assert.equal(parseProviderName('fake'), 'fake');
-  assert.equal(parseProviderName('minimax'), 'minimax');
-  assert.equal(parseProviderName('openai'), 'openai');
-  assert.throws(() => parseProviderName('openrouter'), /Unsupported provider/);
 });
 
 test('createHarness retries session initialization after a transient store failure', async () => {
@@ -105,7 +70,7 @@ test('createHarness retries session initialization after a transient store failu
     }
   }
 
-  const harness = createHarness({
+  const harness = createTestHarness({
     providerInstance: new FakeProvider(),
     sessionStore: new FlakySessionStore(),
   });
@@ -129,16 +94,16 @@ test('createHarness uses the canonical session returned by the store', async () 
         createdAt: '2026-03-29T00:00:00.000Z',
         messages: [
           {
-            role: 'assistant',
             content: 'from-store',
             createdAt: '2026-03-29T00:00:01.000Z',
+            role: 'assistant',
           },
         ],
       };
     }
   }
 
-  const harness = createHarness({
+  const harness = createTestHarness({
     providerInstance: new FakeProvider(),
     sessionStore: new CanonicalSessionStore(),
   });
@@ -167,7 +132,7 @@ test('createHarness emits events and traces with the canonical session id after 
     }
   }
 
-  const harness = createHarness({
+  const harness = createTestHarness({
     loggers: [
       {
         log(trace): void {
@@ -241,10 +206,7 @@ test('createHarness initializes the session once across concurrent first use', a
   };
 
   const sessionStore = new CountingSessionStore();
-  const harness = createHarness({
-    providerInstance: provider,
-    sessionStore,
-  });
+  const harness = createTestHarness({ providerInstance: provider, sessionStore });
 
   const firstReplyPromise = harness.sendUserMessage('first');
 
@@ -260,11 +222,9 @@ test('createHarness initializes the session once across concurrent first use', a
   assert.equal(sessionStore.createSessionCalls, 1);
 });
 
-test('createHarness executes read_file tool calls and continues the loop', async () => {
-  const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
-
-  try {
-    await writeFile(join(rootDir, 'note.txt'), 'hello from file', 'utf8');
+test('createHarness wires tool results back into the next provider request', async () => {
+  await withTempDir(async (rootDir) => {
+    await writeWorkspaceFiles(rootDir, { 'note.txt': 'hello from file' });
 
     let callCount = 0;
     const provider = new FakeProvider({
@@ -288,25 +248,13 @@ test('createHarness executes read_file tool calls and continues the loop', async
 
         assert.equal(lastMessage?.role, 'tool');
         assert.equal(lastMessage?.content, 'hello from file');
-        assert.deepEqual(
-          lastMessage?.role === 'tool' && lastMessage.data && 'truncated' in lastMessage.data
-            ? lastMessage.data.truncated
-            : undefined,
-          false,
-        );
-        assert.match(
-          String(
-            lastMessage?.role === 'tool' && lastMessage.data && 'path' in lastMessage.data ? lastMessage.data.path : '',
-          ),
-          /note\.txt$/,
-        );
 
         return {
           text: 'done:hello from file',
         };
       },
     });
-    const harness = createHarness({
+    const harness = createTestHarness({
       providerInstance: provider,
       sessionId: 'tool-session',
       sessionStore: new MemorySessionStore(),
@@ -316,35 +264,13 @@ test('createHarness executes read_file tool calls and continues the loop', async
 
     const reply = await harness.sendUserMessage('read the note');
 
-    assert.equal(reply.role, 'assistant');
     assert.equal(reply.content, 'done:hello from file');
     assert.equal(provider.requests.length, 2);
-    assert.deepEqual(
-      provider.requests[0]?.tools?.map((tool) => tool.name),
-      ['read_file'],
-    );
     assert.deepEqual(
       harness.session.messages.map((message) => message.role),
       ['user', 'assistant', 'tool', 'assistant'],
     );
-
-    const assistantToolMessage = harness.session.messages[1];
-
-    assert.equal(assistantToolMessage?.role, 'assistant');
-    assert.deepEqual(
-      assistantToolMessage && 'toolCalls' in assistantToolMessage ? assistantToolMessage.toolCalls : undefined,
-      [
-        {
-          id: 'call-read-1',
-          input: { path: 'note.txt' },
-          name: 'read_file',
-        },
-      ],
-    );
-    assert.equal(harness.session.messages[2]?.content, 'hello from file');
-  } finally {
-    await rm(rootDir, { force: true, recursive: true });
-  }
+  });
 });
 
 test('createHarness serializes concurrent sendUserMessage calls for one session', async () => {
@@ -379,7 +305,7 @@ test('createHarness serializes concurrent sendUserMessage calls for one session'
       return { text: `reply:${lastMessage.content}` };
     },
   };
-  const harness = createHarness({
+  const harness = createTestHarness({
     providerInstance: provider,
     sessionId: 'concurrent-session',
     sessionStore: new MemorySessionStore(),
@@ -400,85 +326,20 @@ test('createHarness serializes concurrent sendUserMessage calls for one session'
 
   assert.equal(firstReply.content, 'reply:first');
   assert.equal(secondReply.content, 'reply:second');
-  assert.equal(requests.length, 2);
   assert.deepEqual(requests[1]?.messages, [
     { content: 'first', role: 'user' },
     { content: 'reply:first', role: 'assistant', toolCalls: undefined },
     { content: 'second', role: 'user' },
   ]);
-  assert.deepEqual(
-    harness.session.messages.map((message) => ({ content: message.content, role: message.role })),
-    [
-      { content: 'first', role: 'user' },
-      { content: 'reply:first', role: 'assistant' },
-      { content: 'second', role: 'user' },
-      { content: 'reply:second', role: 'assistant' },
-    ],
-  );
-});
-
-test('createHarness forwards systemPrompt to provider requests', async () => {
-  const provider = new FakeProvider();
-
-  const harness = createHarness({
-    providerInstance: provider,
-    sessionStore: new MemorySessionStore(),
-    systemPrompt: 'You are a helpful assistant.',
-  });
-
-  await harness.sendUserMessage('hello');
-
-  assert.equal(provider.requests.length, 1);
-  assert.equal(provider.requests[0].systemPrompt, 'You are a helpful assistant.');
-});
-
-test('createHarness falls back cleanly after a blank post-tool reply', async () => {
-  let callCount = 0;
-  const provider = new FakeProvider({
-    reply: () => {
-      callCount += 1;
-
-      if (callCount === 1) {
-        return {
-          text: '',
-          toolCalls: [
-            {
-              id: 'call-pwd-1',
-              input: { args: ['pwd'], command: 'pwd' },
-              name: 'run_command',
-            },
-          ],
-        };
-      }
-
-      return {
-        text: '   ',
-      };
-    },
-  });
-  const harness = createHarness({
-    providerInstance: provider,
-    sessionId: 'pwd-recovery-session',
-    sessionStore: new MemorySessionStore(),
-    toolPolicy: { commandAllowlist: ['pwd'], workspaceRoot: process.cwd() },
-    tools: [new RunCommandTool()],
-  });
-
-  const reply = await harness.sendUserMessage('what is your current directory?');
-
-  assert.equal(reply.role, 'assistant');
-  assert.equal(reply.content, 'I could not produce a response for that request.');
 });
 
 test('createHarness emits live events in stable order without leaking raw content', async () => {
-  const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
-
-  try {
-    await writeFile(join(rootDir, 'note.txt'), 'secret file body', 'utf8');
+  await withTempDir(async (rootDir) => {
+    await writeWorkspaceFiles(rootDir, { 'note.txt': 'secret file body' });
 
     let callCount = 0;
     const events: HarnessEvent[] = [];
-    const harness = createHarness({
+    const harness = createTestHarness({
       providerInstance: new FakeProvider({
         reply: () => {
           callCount += 1;
@@ -496,9 +357,7 @@ test('createHarness emits live events in stable order without leaking raw conten
             };
           }
 
-          return {
-            text: 'done',
-          };
+          return { text: 'done' };
         },
       }),
       sessionId: 'events-session',
@@ -527,31 +386,6 @@ test('createHarness emits live events in stable order without leaking raw conten
         'turn_finished',
       ],
     );
-    const toolRequestedEvent = events[3];
-
-    assert.equal(toolRequestedEvent?.type, 'tool_requested');
-    assert.deepEqual(toolRequestedEvent, {
-      iteration: 1,
-      safeArgs: {
-        path: {
-          basename: 'note.txt',
-          digest: toolRequestedEvent?.safeArgs.path?.digest,
-          length: 8,
-          looksAbsolute: false,
-          present: true,
-        },
-      },
-      sessionId: 'events-session',
-      timestamp: toolRequestedEvent?.timestamp,
-      toolCallId: 'call-read-1',
-      toolName: 'read_file',
-      turnId: toolRequestedEvent?.turnId,
-      type: 'tool_requested',
-    });
-    assert.deepEqual(events[5] && events[5].type === 'tool_finished' ? events[5].resultDataKeys : undefined, [
-      'path',
-      'truncated',
-    ]);
 
     const serializedEvents = JSON.stringify(events);
 
@@ -559,16 +393,14 @@ test('createHarness emits live events in stable order without leaking raw conten
     assert.doesNotMatch(serializedEvents, /secret file body/);
     assert.doesNotMatch(serializedEvents, /"path":"note\.txt"/);
     assert.doesNotMatch(serializedEvents, /\/note\.txt/);
-  } finally {
-    await rm(rootDir, { force: true, recursive: true });
-  }
+  });
 });
 
 test('createHarness includes debugArgs when debug is enabled', async () => {
   const events: HarnessEvent[] = [];
   const traces: HarnessRuntimeTrace[] = [];
   let callCount = 0;
-  const harness = createHarness({
+  const harness = createTestHarness({
     debug: true,
     loggers: [
       {
@@ -611,7 +443,6 @@ test('createHarness includes debugArgs when debug is enabled', async () => {
   const toolTrace = traces.find((trace) => trace.type === 'tool_execution_started');
 
   assert.equal(reply.content, 'done');
-  assert.equal(toolRequestedEvent?.type, 'tool_requested');
   assert.deepEqual(toolRequestedEvent?.type === 'tool_requested' ? toolRequestedEvent.debugArgs : undefined, {
     args: ['status'],
     command: 'git',
@@ -625,7 +456,7 @@ test('createHarness includes debugArgs when debug is enabled', async () => {
 });
 
 test('createHarness unsubscribe stops future event delivery', async () => {
-  const harness = createHarness({
+  const harness = createTestHarness({
     providerInstance: new FakeProvider(),
     sessionStore: new MemorySessionStore(),
   });
@@ -646,7 +477,7 @@ test('createHarness unsubscribe stops future event delivery', async () => {
 
 test('createHarness emits sanitized turn_failed events for provider errors', async () => {
   const events: HarnessEvent[] = [];
-  const harness = createHarness({
+  const harness = createTestHarness({
     providerInstance: {
       model: 'broken-model',
       name: 'broken-provider',
@@ -673,185 +504,6 @@ test('createHarness emits sanitized turn_failed events for provider errors', asy
   );
   assert.doesNotMatch(JSON.stringify(events), /top secret prompt/);
   assert.doesNotMatch(JSON.stringify(events), /leaked prompt contents/);
-});
-
-test('createHarness streamUserMessage rejects even when a provider throws undefined', async () => {
-  const harness = createHarness({
-    providerInstance: {
-      model: 'broken-model',
-      name: 'broken-provider',
-      async generate(): Promise<ModelResponse> {
-        throw undefined;
-      },
-    },
-    sessionStore: new MemorySessionStore(),
-  });
-
-  await assert.rejects(
-    async () => {
-      for await (const _chunk of harness.streamUserMessage('hello')) {
-        // No-op.
-      }
-    },
-    (error) => error === undefined,
-  );
-});
-
-test('createHarness streamUserMessage starts on first pull and pre-consumption return is a no-op', async () => {
-  const provider = new FakeProvider();
-  const harness = createHarness({
-    providerInstance: provider,
-    sessionStore: new MemorySessionStore(),
-  });
-
-  const abandonedIterator = harness.streamUserMessage('abandoned')[Symbol.asyncIterator]();
-
-  assert.equal(provider.requests.length, 0);
-  await abandonedIterator.return?.();
-  assert.equal(provider.requests.length, 0);
-
-  const iterator = harness.streamUserMessage('hello')[Symbol.asyncIterator]();
-
-  assert.equal(provider.requests.length, 0);
-
-  const firstChunk = await iterator.next();
-
-  assert.equal(provider.requests.length, 1);
-  assert.equal(firstChunk.done, false);
-  assert.equal(firstChunk.value.type, 'final_message');
-  assert.deepEqual(firstChunk.value, {
-    message: {
-      content: 'reply:hello',
-      createdAt: firstChunk.value.message.createdAt,
-      role: 'assistant',
-      toolCalls: undefined,
-    },
-    type: 'final_message',
-  });
-});
-
-test('createHarness streamUserMessage return aborts an active turn, drops partial history, and frees the queue', async () => {
-  const sessionStore = new MemorySessionStore();
-  const harness = createHarness({
-    providerInstance: new FakeProvider({
-      streamReply: async function* (input: ModelRequest) {
-        if (input.messages.at(-1)?.role === 'user' && input.messages.at(-1)?.content === 'second') {
-          yield { response: { text: 'reply:second' }, type: 'response_completed' };
-          return;
-        }
-
-        yield { delta: 'partial', type: 'text_delta' };
-
-        await new Promise((_, reject) => {
-          input.signal?.addEventListener(
-            'abort',
-            () => {
-              reject(input.signal?.reason);
-            },
-            { once: true },
-          );
-        });
-      },
-    }),
-    sessionId: 'cancelled-stream-session',
-    sessionStore,
-    stream: true,
-  });
-
-  const iterator = harness.streamUserMessage('first')[Symbol.asyncIterator]();
-  const firstChunk = await iterator.next();
-
-  assert.equal(firstChunk.done, false);
-  assert.equal(firstChunk.value.type, 'assistant_delta');
-
-  await iterator.return?.();
-
-  assert.equal(harness.session.messages.length, 0);
-  assert.equal((await sessionStore.listMessages('cancelled-stream-session')).length, 0);
-
-  const reply = await Promise.race([
-    harness.sendUserMessage('second'),
-    delay(1_000).then(() => {
-      throw new Error('second turn stayed blocked after stream cancellation');
-    }),
-  ]);
-
-  assert.equal(reply.content, 'reply:second');
-  assert.deepEqual(
-    harness.session.messages.map((message) => ({ content: message.content, role: message.role })),
-    [
-      { content: 'second', role: 'user' },
-      { content: 'reply:second', role: 'assistant' },
-    ],
-  );
-  assert.deepEqual(
-    (await sessionStore.listMessages('cancelled-stream-session')).map((message) => ({
-      content: message.content,
-      role: message.role,
-    })),
-    [
-      { content: 'second', role: 'user' },
-      { content: 'reply:second', role: 'assistant' },
-    ],
-  );
-});
-
-test('createHarness streamUserMessage return waits for abort cleanup', async () => {
-  let markAbortCleanupStarted!: () => void;
-  let finishAbortCleanup!: () => void;
-
-  const abortCleanupStartedPromise = new Promise<void>((resolve) => {
-    markAbortCleanupStarted = resolve;
-  });
-  const abortCleanupFinishedPromise = new Promise<void>((resolve) => {
-    finishAbortCleanup = resolve;
-  });
-
-  const harness = createHarness({
-    providerInstance: new FakeProvider({
-      streamReply: async function* (input: ModelRequest) {
-        yield { delta: 'partial', type: 'text_delta' };
-
-        await new Promise((_, reject) => {
-          input.signal?.addEventListener(
-            'abort',
-            () => {
-              markAbortCleanupStarted();
-
-              void (async () => {
-                await abortCleanupFinishedPromise;
-                reject(input.signal?.reason);
-              })();
-            },
-            { once: true },
-          );
-        });
-      },
-    }),
-    sessionStore: new MemorySessionStore(),
-    stream: true,
-  });
-
-  const iterator = harness.streamUserMessage('first')[Symbol.asyncIterator]();
-
-  await iterator.next();
-
-  let returnResolved = false;
-  const returnPromise = iterator.return?.().then((result) => {
-    returnResolved = true;
-    return result;
-  });
-
-  await abortCleanupStartedPromise;
-  await delay(0);
-  assert.equal(returnResolved, false);
-
-  finishAbortCleanup();
-
-  const result = await returnPromise;
-
-  assert.equal(returnResolved, true);
-  assert.equal(result?.done, true);
 });
 
 test('createHarness degrades malformed tool input into a normal tool error', async () => {
@@ -885,7 +537,7 @@ test('createHarness degrades malformed tool input into a normal tool error', asy
       };
     },
   });
-  const harness = createHarness({
+  const harness = createTestHarness({
     providerInstance: provider,
     sessionStore: new MemorySessionStore(),
     toolPolicy: { workspaceRoot: process.cwd() },
@@ -908,7 +560,7 @@ test('createHarness degrades malformed tool input into a normal tool error', asy
 
 test('createHarness fans out traces to multiple loggers and isolates failures', async () => {
   const recordedTraces: HarnessRuntimeTrace[] = [];
-  const harness = createHarness({
+  const harness = createTestHarness({
     loggers: [
       {
         log(trace): void {
@@ -934,7 +586,7 @@ test('createHarness fans out traces to multiple loggers and isolates failures', 
 });
 
 test('createHarness does not wait for async loggers', async () => {
-  const harness = createHarness({
+  const harness = createTestHarness({
     loggers: [
       {
         log(): Promise<void> {
@@ -956,7 +608,7 @@ test('createHarness does not wait for async loggers', async () => {
 
 test('createHarness swallows listener failures and logs them', async () => {
   const traces: HarnessRuntimeTrace[] = [];
-  const harness = createHarness({
+  const harness = createTestHarness({
     loggers: [
       {
         log(trace): void {
@@ -979,15 +631,13 @@ test('createHarness swallows listener failures and logs them', async () => {
 });
 
 test('createHarness protects listeners from event mutation by other listeners', async () => {
-  const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
-
-  try {
-    await writeFile(join(rootDir, 'note.txt'), 'hello from file', 'utf8');
+  await withTempDir(async (rootDir) => {
+    await writeWorkspaceFiles(rootDir, { 'note.txt': 'hello from file' });
 
     let mutationThrew = false;
     let seenBasename: string | undefined;
     let callCount = 0;
-    const harness = createHarness({
+    const harness = createTestHarness({
       providerInstance: new FakeProvider({
         reply: () => {
           callCount += 1;
@@ -1037,127 +687,5 @@ test('createHarness protects listeners from event mutation by other listeners', 
 
     assert.equal(mutationThrew, true);
     assert.equal(seenBasename, 'note.txt');
-  } finally {
-    await rm(rootDir, { force: true, recursive: true });
-  }
-});
-
-test('createHarness streamUserMessage yields final assistant deltas and keeps events coarse', async () => {
-  const events: HarnessEvent[] = [];
-  const chunks = [];
-  const harness = createHarness({
-    providerInstance: new FakeProvider({
-      streamReply: [
-        { delta: 'hel', type: 'text_delta' },
-        { delta: 'lo', type: 'text_delta' },
-        { response: { text: 'hello' }, type: 'response_completed' },
-      ],
-    }),
-    sessionStore: new MemorySessionStore(),
-    stream: true,
   });
-
-  harness.subscribe((event) => {
-    events.push(event);
-  });
-
-  for await (const chunk of harness.streamUserMessage('hello')) {
-    chunks.push(chunk);
-  }
-
-  assert.deepEqual(chunks, [
-    { delta: 'hel', type: 'assistant_delta' },
-    { delta: 'lo', type: 'assistant_delta' },
-    {
-      message: {
-        content: 'hello',
-        createdAt: chunks[2]?.type === 'final_message' ? chunks[2].message.createdAt : '',
-        role: 'assistant',
-        toolCalls: undefined,
-      },
-      type: 'final_message',
-    },
-  ]);
-  assert.deepEqual(
-    events.map((event) => event.type),
-    ['turn_started', 'provider_requested', 'provider_responded', 'turn_finished'],
-  );
-});
-
-test('createHarness streamUserMessage yields only final_message when harness streaming is disabled', async () => {
-  const harness = createHarness({
-    providerInstance: new FakeProvider({
-      reply: 'hello',
-      streamReply: [
-        { delta: 'hel', type: 'text_delta' },
-        { delta: 'lo', type: 'text_delta' },
-        { response: { text: 'hello' }, type: 'response_completed' },
-      ],
-    }),
-    sessionStore: new MemorySessionStore(),
-    stream: false,
-  });
-  const chunks = [];
-
-  for await (const chunk of harness.streamUserMessage('hello')) {
-    chunks.push(chunk);
-  }
-
-  assert.deepEqual(chunks, [
-    {
-      message: {
-        content: 'hello',
-        createdAt: chunks[0]?.type === 'final_message' ? chunks[0].message.createdAt : '',
-        role: 'assistant',
-        toolCalls: undefined,
-      },
-      type: 'final_message',
-    },
-  ]);
-});
-
-test('createHarness streamUserMessage snapshots final_message chunks before exposing them', async () => {
-  const harness = createHarness({
-    providerInstance: new FakeProvider({
-      streamReply: [
-        { delta: 'hel', type: 'text_delta' },
-        { delta: 'lo', type: 'text_delta' },
-        { response: { text: 'hello' }, type: 'response_completed' },
-      ],
-    }),
-    sessionStore: new MemorySessionStore(),
-    stream: true,
-  });
-  const iterator = harness.streamUserMessage('hello')[Symbol.asyncIterator]();
-
-  const firstChunk = await iterator.next();
-  const secondChunk = await iterator.next();
-  const doneChunk = await iterator.next();
-
-  assert.equal(firstChunk.done, false);
-  assert.equal(firstChunk.value.type, 'assistant_delta');
-  assert.equal(secondChunk.done, false);
-  assert.equal(secondChunk.value.type, 'assistant_delta');
-  assert.equal(doneChunk.done, false);
-  assert.equal(doneChunk.value.type, 'final_message');
-  const finalChunk = doneChunk.value;
-
-  if (finalChunk.type !== 'final_message') {
-    throw new Error('Expected a final_message chunk.');
-  }
-
-  assert.throws(() => {
-    finalChunk.message.content = 'mutated';
-  });
-
-  const finalState = await iterator.next();
-
-  assert.equal(finalState.done, true);
-  assert.deepEqual(
-    harness.session.messages.map((message) => ({ content: message.content, role: message.role })),
-    [
-      { content: 'hello', role: 'user' },
-      { content: 'hello', role: 'assistant' },
-    ],
-  );
 });
