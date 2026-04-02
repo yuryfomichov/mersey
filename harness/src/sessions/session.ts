@@ -4,10 +4,12 @@ import type { SessionStore } from './store.js';
 import type { Message, SessionState, TurnStatus } from './types.js';
 
 function normalizeState(state: SessionState): SessionState {
+  const pendingApproval = state.pendingApproval ?? null;
+
   return {
     ...state,
-    pendingApproval: state.pendingApproval ?? null,
-    turnStatus: state.turnStatus ?? 'idle',
+    pendingApproval,
+    turnStatus: state.turnStatus ?? (pendingApproval ? 'awaiting_approval' : 'idle'),
   };
 }
 

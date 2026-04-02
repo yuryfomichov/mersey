@@ -1,7 +1,7 @@
 import type { ApprovalDecision } from './approvals/types.js';
 import { createAsyncQueue } from './async-queue.js';
 import { HarnessObserver } from './events/observer.js';
-import { streamApprovalLoop, streamLoop, type TurnChunk } from './loop/loop.js';
+import { streamApprovalLoop, streamLoop, type LoopResult, type TurnChunk } from './loop/loop.js';
 import type { ModelProvider } from './models/provider.js';
 import { Session } from './sessions/session.js';
 import type { Message } from './sessions/types.js';
@@ -71,7 +71,7 @@ function createTurnStream({
             systemPrompt,
             toolRuntimeFactory,
           });
-          let loopResult: Awaited<ReturnType<typeof iterator.next>>['value'];
+          let loopResult!: LoopResult;
 
           while (true) {
             const result = await iterator.next();
@@ -111,7 +111,7 @@ function createTurnStream({
           systemPrompt,
           toolRuntimeFactory,
         });
-        let loopResult: Awaited<ReturnType<typeof iterator.next>>['value'];
+        let loopResult!: LoopResult;
 
         while (true) {
           const result = await iterator.next();

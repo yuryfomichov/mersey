@@ -12,7 +12,7 @@ import type { Message, SessionState } from '../sessions/types.js';
 import { ReadFileTool } from '../tools/read-file.js';
 import { createToolRuntimeFactory, type ToolExecutionPolicy } from '../tools/runtime/index.js';
 import type { HarnessTool, Tool } from '../tools/types.js';
-import { streamLoop } from './loop.js';
+import { streamApprovalLoop, streamLoop } from './loop.js';
 
 function createSession(id: string): SessionState {
   return {
@@ -532,6 +532,117 @@ test('streamLoop yields assistant_message_completed before tool execution after 
       type: 'final_message',
     },
   ]);
+});
+
+test('streamApprovalLoop preserves tool iteration cap across repeated approval resumes', async () => {
+  const approvalTool: Tool = {
+    description: 'Approval test tool',
+    async execute() {
+      return { content: 'ok' };
+    },
+    inputSchema: {
+      additionalProperties: false,
+      properties: {},
+      type: 'object',
+    },
+    name: 'approval_tool',
+  };
+  const provider = new FakeProvider({
+    reply: (input) => {
+      const toolMessages = input.messages.filter((message) => message.role === 'tool');
+
+      if (toolMessages.length === 0) {
+        return {
+          text: '',
+          toolCalls: [{ id: 'call-1', input: {}, name: 'approval_tool' }],
+        };
+      }
+
+      if (toolMessages.length === 1) {
+        return {
+          text: '',
+          toolCalls: [{ id: 'call-2', input: {}, name: 'approval_tool' }],
+        };
+      }
+
+      return {
+        text: '',
+        toolCalls: [{ id: 'call-3', input: {}, name: 'approval_tool' }],
+      };
+    },
+  });
+  const createApprovalToolRuntimeFactory = () =>
+    createToolRuntimeFactory({
+      policy: { workspaceRoot: process.cwd() },
+      tools: [{ policy: { action: 'require_approval', type: 'fixed' }, tool: approvalTool }],
+    });
+  const firstIterator = streamLoop({
+    content: 'trigger approvals',
+    history: [],
+    observer: createObserver({ provider, sessionId: 'approval-cap-session' }),
+    options: { maxToolIterations: 2 },
+    provider,
+    toolRuntimeFactory: createApprovalToolRuntimeFactory(),
+  });
+
+  let firstResult!: Awaited<ReturnType<typeof firstIterator.next>>['value'];
+
+  while (true) {
+    const result = await firstIterator.next();
+
+    if (result.done) {
+      firstResult = result.value;
+      break;
+    }
+  }
+
+  if (firstResult.status !== 'awaiting_approval') {
+    throw new Error('Expected first loop to pause for approval.');
+  }
+
+  const resumeOneIterator = streamApprovalLoop({
+    approvalDecisions: [{ toolCallId: 'call-1', type: 'approve' }],
+    history: firstResult.turnMessages,
+    observer: createObserver({ provider, sessionId: 'approval-cap-session' }),
+    options: { maxToolIterations: 2 },
+    pendingApproval: firstResult.pendingApproval,
+    provider,
+    toolRuntimeFactory: createApprovalToolRuntimeFactory(),
+  });
+  let resumeOneResult!: Awaited<ReturnType<typeof resumeOneIterator.next>>['value'];
+
+  while (true) {
+    const result = await resumeOneIterator.next();
+
+    if (result.done) {
+      resumeOneResult = result.value;
+      break;
+    }
+  }
+
+  if (resumeOneResult.status !== 'awaiting_approval') {
+    throw new Error('Expected second loop to pause for approval.');
+  }
+
+  await assert.rejects(async () => {
+    const iterator = streamApprovalLoop({
+      approvalDecisions: [{ toolCallId: 'call-2', type: 'approve' }],
+      history: [...firstResult.turnMessages, ...resumeOneResult.turnMessages],
+      observer: createObserver({ provider, sessionId: 'approval-cap-session' }),
+      options: { maxToolIterations: 2 },
+      pendingApproval: resumeOneResult.pendingApproval,
+      provider,
+      toolRuntimeFactory: createApprovalToolRuntimeFactory(),
+    });
+
+    while (true) {
+      const result = await iterator.next();
+
+      if (result.done) {
+        break;
+      }
+    }
+  }, /Tool loop exceeded 2 iterations/);
 });
 
 test('streamLoop falls back to batch generation when streaming is enabled but unsupported', async () => {

@@ -11,6 +11,8 @@ export type ToolCallPolicy = {
 export type PendingApproval = {
   assistantMessage: AssistantMessage;
   requiredToolCallIds: string[];
+  toolIterations: number;
+  totalToolCalls: number;
   turnId: string;
 };
 

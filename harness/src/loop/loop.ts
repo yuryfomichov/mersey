@@ -139,10 +139,14 @@ function createPendingApproval(
   assistantMessage: AssistantMessage,
   observer: HarnessObserver,
   requiredToolCallIds: string[],
+  toolIterations: number,
+  totalToolCalls: number,
 ): PendingApproval {
   return {
     assistantMessage: structuredClone(assistantMessage),
     requiredToolCallIds,
+    toolIterations,
+    totalToolCalls,
     turnId: observer.activeTurnId(),
   };
 }
@@ -220,11 +224,16 @@ function validateApprovalDecisions(pendingApproval: PendingApproval, approvalDec
 
 function historyIncludesPendingApprovalMessage(history: readonly Message[], pendingApproval: PendingApproval): boolean {
   const lastMessage = history.at(-1);
+  const pendingToolCallIds = pendingApproval.assistantMessage.toolCalls?.map((toolCall) => toolCall.id) ?? [];
+  const lastToolCallIds =
+    lastMessage?.role === 'assistant' ? (lastMessage.toolCalls?.map((toolCall) => toolCall.id) ?? []) : [];
 
   return (
     lastMessage?.role === 'assistant' &&
     lastMessage.createdAt === pendingApproval.assistantMessage.createdAt &&
-    lastMessage.content === pendingApproval.assistantMessage.content
+    lastMessage.content === pendingApproval.assistantMessage.content &&
+    lastToolCallIds.length === pendingToolCallIds.length &&
+    lastToolCallIds.every((toolCallId, index) => toolCallId === pendingToolCallIds[index])
   );
 }
 
@@ -356,7 +365,13 @@ async function* continueLoop({
       const requiredToolCallIds = getRequiredToolCallIds(response.toolCalls, toolRuntime);
 
       if (requiredToolCallIds.length > 0) {
-        const pendingApproval = createPendingApproval(assistantMessage, observer, requiredToolCallIds);
+        const pendingApproval = createPendingApproval(
+          assistantMessage,
+          observer,
+          requiredToolCallIds,
+          toolIterations,
+          totalToolCalls,
+        );
 
         observer.approvalRequested(response.toolCalls, requiredToolCallIds);
         observer.turnPaused();
@@ -531,10 +546,9 @@ export async function* streamApprovalLoop({
 
   validateApprovalDecisions(pendingApproval, approvalDecisions);
 
-  const resumeHistory = historyIncludesPendingApprovalMessage(history, pendingApproval)
-    ? [...history]
-    : [...history, pendingApproval.assistantMessage];
-  const turnMessages: Message[] = [];
+  const hasPendingApprovalMessage = historyIncludesPendingApprovalMessage(history, pendingApproval);
+  const resumeHistory = hasPendingApprovalMessage ? [...history] : [...history, pendingApproval.assistantMessage];
+  const turnMessages: Message[] = hasPendingApprovalMessage ? [] : [pendingApproval.assistantMessage];
 
   observer.turnResumed(pendingApproval.turnId);
   observer.approvalResolved(approvalDecisions);
@@ -553,9 +567,9 @@ export async function* streamApprovalLoop({
     signal,
     stream,
     systemPrompt,
-    toolIterations: 1,
+    toolIterations: pendingApproval.toolIterations,
     toolRuntimeFactory,
-    totalToolCalls: assistantToolCalls.length,
+    totalToolCalls: pendingApproval.totalToolCalls,
     turnMessages,
   });
 }
