@@ -33,6 +33,103 @@ export type CreateHarnessOptions = {
   tools?: Tool[];
 };
 
+type TurnStreamOptions = {
+  content: string;
+  observer: HarnessObserver;
+  provider: ModelProvider;
+  session: Session;
+  stream?: boolean;
+  systemPrompt?: string;
+  toolPolicy: ToolPolicy;
+  tools: Tool[];
+};
+
+function createTurnStream({
+  content,
+  observer,
+  provider,
+  session,
+  stream,
+  systemPrompt,
+  toolPolicy,
+  tools,
+}: TurnStreamOptions): AsyncIterable<TurnChunk> & AsyncIterator<TurnChunk> {
+  const queue = createAsyncQueue<TurnChunk>();
+  const abortController = new AbortController();
+  let backgroundTask: Promise<void> | null = null;
+  let started = false;
+
+  const start = (): void => {
+    if (started) {
+      return;
+    }
+
+    started = true;
+
+    backgroundTask = session.runExclusive(async () => {
+      try {
+        await session.ensure();
+
+        const iterator = streamLoop({
+          content,
+          history: session.messages,
+          observer,
+          provider,
+          signal: abortController.signal,
+          stream,
+          systemPrompt,
+          toolPolicy,
+          tools,
+        });
+        let turnMessages: Message[] = [];
+
+        while (true) {
+          const result = await iterator.next();
+
+          if (result.done) {
+            turnMessages = result.value;
+            break;
+          }
+
+          queue.push(snapshotTurnChunk(result.value));
+        }
+
+        await session.commit(turnMessages);
+        queue.end();
+      } catch (error: unknown) {
+        queue.fail(error);
+        throw error;
+      }
+    });
+
+    void backgroundTask.catch(() => {});
+  };
+
+  return {
+    [Symbol.asyncIterator](): AsyncIterator<TurnChunk> {
+      return this;
+    },
+    next(): Promise<IteratorResult<TurnChunk>> {
+      start();
+      return queue.iterable.next();
+    },
+    return(): Promise<IteratorResult<TurnChunk>> {
+      if (!started) {
+        return Promise.resolve({ done: true, value: undefined });
+      }
+
+      abortController.abort();
+
+      return (async () => {
+        await (queue.iterable.return?.() ?? Promise.resolve({ done: true, value: undefined }));
+        await backgroundTask?.catch(() => {});
+
+        return { done: true, value: undefined };
+      })();
+    },
+  };
+}
+
 export function createHarness(options: CreateHarnessOptions = {}): Harness {
   const provider = options.providerInstance ?? (options.provider ? createProvider(options.provider) : null);
   const runtimeLogger = createFanoutLogger(options.loggers);
@@ -56,89 +153,21 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
   });
   observer.sessionStarted();
 
-  function enqueueStream(content: string): AsyncIterable<TurnChunk> & AsyncIterator<TurnChunk> {
-    const queue = createAsyncQueue<TurnChunk>();
-    const abortController = new AbortController();
-    let backgroundTask: Promise<void> | null = null;
-    let started = false;
-
-    const start = (): void => {
-      if (started) {
-        return;
-      }
-
-      started = true;
-
-      backgroundTask = session.runExclusive(async () => {
-        try {
-          await session.ensure();
-
-          const iterator = streamLoop({
-            content,
-            history: session.messages,
-            observer,
-            provider: resolvedProvider,
-            signal: abortController.signal,
-            stream: options.stream,
-            systemPrompt,
-            toolPolicy,
-            tools,
-          });
-          let turnMessages: Message[] = [];
-
-          while (true) {
-            const result = await iterator.next();
-
-            if (result.done) {
-              turnMessages = result.value;
-              break;
-            }
-
-            queue.push(snapshotTurnChunk(result.value));
-          }
-
-          await session.commit(turnMessages);
-          queue.end();
-        } catch (error: unknown) {
-          queue.fail(error);
-          throw error;
-        }
-      });
-
-      void backgroundTask.catch(() => {});
-    };
-
-    return {
-      [Symbol.asyncIterator](): AsyncIterator<TurnChunk> {
-        return this;
-      },
-      next(): Promise<IteratorResult<TurnChunk>> {
-        start();
-        return queue.iterable.next();
-      },
-      return(): Promise<IteratorResult<TurnChunk>> {
-        if (!started) {
-          return Promise.resolve({ done: true, value: undefined });
-        }
-
-        abortController.abort();
-
-        return (async () => {
-          await (queue.iterable.return?.() ?? Promise.resolve({ done: true, value: undefined }));
-          await backgroundTask?.catch(() => {});
-
-          return { done: true, value: undefined };
-        })();
-      },
-    };
-  }
-
   return {
     session,
     async sendUserMessage(content: string): Promise<Message> {
       let finalMessage: Message | null = null;
 
-      for await (const chunk of enqueueStream(content)) {
+      for await (const chunk of createTurnStream({
+        content,
+        observer,
+        provider: resolvedProvider,
+        session,
+        stream: options.stream,
+        systemPrompt,
+        toolPolicy,
+        tools,
+      })) {
         if (chunk.type === 'final_message') {
           finalMessage = chunk.message;
         }
@@ -151,7 +180,16 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
       return finalMessage;
     },
     streamUserMessage(content: string): AsyncIterable<TurnChunk> {
-      return enqueueStream(content);
+      return createTurnStream({
+        content,
+        observer,
+        provider: resolvedProvider,
+        session,
+        stream: options.stream,
+        systemPrompt,
+        toolPolicy,
+        tools,
+      });
     },
     subscribe(listener: HarnessEventListener): () => void {
       return observer.subscribe(listener);
