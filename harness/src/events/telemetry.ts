@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { basename, isAbsolute } from 'node:path';
 
-import type { DebugToolArgs, SafeCommandArgSummary, SafePathArgSummary, SafeToolArgs } from '../events/types.js';
+import type { DebugToolArgs, SafeCommandArgSummary, SafePathArgSummary, SafeToolArgs } from './types.js';
 
 export type TelemetryOptions = {
   debug?: boolean;

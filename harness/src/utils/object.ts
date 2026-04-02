@@ -2,6 +2,10 @@ export function freezeDeep<T>(value: T): T {
   return freezeDeepInternal(value, new WeakSet<object>());
 }
 
+export function snapshot<T>(value: T): T {
+  return freezeDeep(structuredClone(value));
+}
+
 function freezeDeepInternal<T>(value: T, visited: WeakSet<object>): T {
   if (!value || typeof value !== 'object') {
     return value;

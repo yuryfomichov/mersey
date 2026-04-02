@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import type { HarnessRuntimeTrace } from '../logger/types.js';
 import { HarnessEventPublisher } from './publisher.js';
 import type { HarnessEvent, TurnFinishedEvent } from './types.js';
 
@@ -41,15 +40,29 @@ test('HarnessEventPublisher snapshots events before delivery', () => {
   });
 });
 
-test('HarnessEventPublisher unsubscribes listeners and logs listener failures', async () => {
-  const traces: HarnessRuntimeTrace[] = [];
+test('HarnessEventPublisher passes immutable snapshots to hooks', () => {
+  const event = createEvent();
+  const seenEvents: HarnessEvent[] = [];
   const publisher = new HarnessEventPublisher({
-    logger: {
-      log(trace): void {
-        traces.push(trace);
-      },
+    onEventPublished(receivedEvent): void {
+      seenEvents.push(receivedEvent);
     },
   });
+
+  publisher.publish(event);
+  event.turnId = 'mutated-turn';
+
+  const receivedEvent = seenEvents[0] as TurnFinishedEvent | undefined;
+
+  assert.ok(receivedEvent);
+  assert.equal(receivedEvent.turnId, 'turn-1');
+  assert.throws(() => {
+    receivedEvent.turnId = 'changed';
+  });
+});
+
+test('HarnessEventPublisher unsubscribes listeners and swallows listener failures', async () => {
+  const publisher = new HarnessEventPublisher();
   let callCount = 0;
   const unsubscribe = publisher.subscribe(() => {
     callCount += 1;
@@ -66,6 +79,26 @@ test('HarnessEventPublisher unsubscribes listeners and logs listener failures', 
   await Promise.resolve();
 
   assert.equal(callCount, 1);
-  assert.ok(traces.some((trace) => trace.type === 'listener_failed'));
-  assert.ok(traces.some((trace) => trace.type === 'event_emitted'));
+});
+
+test('HarnessEventPublisher swallows hook failures', async () => {
+  const publisher = new HarnessEventPublisher({
+    onEventPublished(): void {
+      throw new Error('publish hook failed');
+    },
+    onListenerFailed(): Promise<void> {
+      return Promise.reject(new Error('listener hook failed'));
+    },
+  });
+  let callCount = 0;
+
+  publisher.subscribe(() => {
+    callCount += 1;
+    throw new Error('listener boom');
+  });
+
+  publisher.publish(createEvent());
+  await Promise.resolve();
+
+  assert.equal(callCount, 1);
 });

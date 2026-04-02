@@ -1,5 +1,4 @@
-import type { HarnessEventSink } from '../events/publisher.js';
-import type { HarnessLogger } from '../logger/types.js';
+import { HarnessObserver } from '../events/observer.js';
 import type { ModelProvider } from '../models/provider.js';
 import { supportsStreaming } from '../models/provider.js';
 import type { ModelMessage, ModelRequest, ModelResponse } from '../models/types.js';
@@ -8,7 +7,6 @@ import { createToolContext } from '../tools/context.js';
 import type { ToolPolicy } from '../tools/context.js';
 import { executeToolCall, getToolDefinitions, getToolMap } from '../tools/runtime.js';
 import type { Tool } from '../tools/types.js';
-import { createLoopObserver } from './observer.js';
 
 export type LoopOptions = {
   maxToolIterations?: number;
@@ -16,14 +14,11 @@ export type LoopOptions = {
 
 export type LoopInput = {
   content: string;
-  debug?: boolean;
-  eventPublisher?: HarnessEventSink;
   history: readonly Message[];
-  logger?: HarnessLogger;
+  observer: HarnessObserver;
   options?: LoopOptions;
   provider: ModelProvider;
   signal?: AbortSignal;
-  sessionId: string;
   stream?: boolean;
   systemPrompt?: string;
   toolPolicy: ToolPolicy;
@@ -101,7 +96,7 @@ function getProviderResponse({
   signal,
   stream,
 }: {
-  observer: ReturnType<typeof createLoopObserver>;
+  observer: HarnessObserver;
   provider: ModelProvider;
   request: ModelRequest;
   iteration: number;
@@ -115,7 +110,7 @@ function getProviderResponse({
       throwIfAborted(signal);
       const response = await provider.generate(request);
 
-      observer.providerResponded(iteration, response, Date.now() - providerStartTime);
+      observer.providerResponded(iteration, provider, response, Date.now() - providerStartTime);
 
       yield {
         response,
@@ -167,7 +162,7 @@ function getProviderResponse({
       throw new Error('Provider stream ended without a completed response.');
     }
 
-    observer.providerResponded(iteration, response, Date.now() - providerStartTime);
+    observer.providerResponded(iteration, provider, response, Date.now() - providerStartTime);
 
     yield {
       response,
@@ -178,14 +173,11 @@ function getProviderResponse({
 
 export async function* streamLoop({
   content,
-  debug,
-  eventPublisher,
   history,
-  logger,
+  observer,
   options,
   provider,
   signal,
-  sessionId,
   stream,
   systemPrompt,
   toolPolicy,
@@ -201,19 +193,11 @@ export async function* streamLoop({
     content,
     createdAt: new Date().toISOString(),
   };
-  const toolDefinitions = getToolDefinitions(tools);
   const toolsByName = getToolMap(tools);
+  const toolDefinitions = getToolDefinitions(tools);
   const toolContext = createToolContext(toolPolicy, { signal });
   const maxToolIterations = options?.maxToolIterations ?? DEFAULT_MAX_TOOL_ITERATIONS;
   let toolIterations = 0;
-  const observer = createLoopObserver({
-    debug,
-    eventPublisher,
-    logger,
-    provider,
-    sessionId,
-    toolDefinitions,
-  });
   observer.turnStarted(content.length);
   const resolvedSystemPrompt = systemPrompt?.trim() ? systemPrompt : undefined;
   const getTranscript = (): Message[] => [...history, ...turnMessages];
@@ -227,7 +211,7 @@ export async function* streamLoop({
 
       currentIteration += 1;
       observer.iterationStarted(currentIteration, transcript.length);
-      observer.providerRequested(currentIteration, transcript);
+      observer.providerRequested(currentIteration, transcript, provider, toolDefinitions);
 
       currentErrorType = 'provider';
       throwIfAborted(signal);

@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { HarnessObserver } from '../events/observer.js';
+import type { HarnessEventSink } from '../events/publisher.js';
 import { HarnessEventPublisher } from '../events/publisher.js';
 import type { HarnessEvent } from '../events/types.js';
+import type { ModelProvider } from '../models/provider.js';
 import { FakeProvider } from '../providers/fake.js';
 import type { Message, SessionState } from '../sessions/types.js';
 import { streamLoop } from './loop.js';
@@ -49,6 +52,64 @@ async function collectLoopResult(
   }
 }
 
+function createObserver(input: {
+  debug?: boolean;
+  eventPublisher?: HarnessEventSink;
+  provider: ModelProvider;
+  sessionId: string;
+  tools: Parameters<typeof streamLoop>[0]['tools'];
+}) {
+  const observer = new HarnessObserver({
+    debug: input.debug,
+    getSessionId: () => input.sessionId,
+    logger: undefined,
+    providerName: input.provider.name,
+    stream: false,
+  });
+
+  observer.sessionStarted();
+
+  if (input.eventPublisher) {
+    observer.subscribe((event) => {
+      input.eventPublisher?.publish(event);
+    });
+  }
+
+  return observer;
+}
+
+function createLoopInput(input: {
+  content: string;
+  debug?: boolean;
+  eventPublisher?: HarnessEventSink;
+  history: readonly Message[];
+  options?: Parameters<typeof streamLoop>[0]['options'];
+  provider: Parameters<typeof streamLoop>[0]['provider'];
+  sessionId: string;
+  stream?: boolean;
+  systemPrompt?: string;
+  toolPolicy: Parameters<typeof streamLoop>[0]['toolPolicy'];
+  tools: Parameters<typeof streamLoop>[0]['tools'];
+}): Parameters<typeof streamLoop>[0] {
+  return {
+    content: input.content,
+    history: input.history,
+    observer: createObserver({
+      debug: input.debug,
+      eventPublisher: input.eventPublisher,
+      provider: input.provider,
+      sessionId: input.sessionId,
+      tools: input.tools,
+    }),
+    options: input.options,
+    provider: input.provider,
+    stream: input.stream,
+    systemPrompt: input.systemPrompt,
+    toolPolicy: input.toolPolicy,
+    tools: input.tools,
+  };
+}
+
 test('streamLoop forwards systemPrompt to provider on every generate call including tool-loop iterations', async () => {
   const session = createSession('system-prompt-session');
 
@@ -68,15 +129,17 @@ test('streamLoop forwards systemPrompt to provider on every generate call includ
     },
   });
 
-  await collectFinalMessage({
-    content: 'hello',
-    history: session.messages,
-    provider,
-    sessionId: session.id,
-    systemPrompt: 'You are a helpful assistant.',
-    toolPolicy: { workspaceRoot: process.cwd() },
-    tools: [],
-  });
+  await collectFinalMessage(
+    createLoopInput({
+      content: 'hello',
+      history: session.messages,
+      provider,
+      sessionId: session.id,
+      systemPrompt: 'You are a helpful assistant.',
+      toolPolicy: { workspaceRoot: process.cwd() },
+      tools: [],
+    }),
+  );
 
   assert.equal(provider.requests.length, 2);
   assert.equal(provider.requests[0].systemPrompt, 'You are a helpful assistant.');
@@ -88,14 +151,16 @@ test('streamLoop omits systemPrompt from provider request when not provided', as
 
   const provider = new FakeProvider();
 
-  await collectFinalMessage({
-    content: 'hello',
-    history: session.messages,
-    provider,
-    sessionId: session.id,
-    toolPolicy: { workspaceRoot: process.cwd() },
-    tools: [],
-  });
+  await collectFinalMessage(
+    createLoopInput({
+      content: 'hello',
+      history: session.messages,
+      provider,
+      sessionId: session.id,
+      toolPolicy: { workspaceRoot: process.cwd() },
+      tools: [],
+    }),
+  );
 
   assert.equal(provider.requests.length, 1);
   assert.equal(provider.requests[0].systemPrompt, undefined);
@@ -106,15 +171,17 @@ test('streamLoop normalizes empty-string systemPrompt to undefined', async () =>
 
   const provider = new FakeProvider();
 
-  await collectFinalMessage({
-    content: 'hello',
-    history: session.messages,
-    provider,
-    sessionId: session.id,
-    systemPrompt: '   ',
-    toolPolicy: { workspaceRoot: process.cwd() },
-    tools: [],
-  });
+  await collectFinalMessage(
+    createLoopInput({
+      content: 'hello',
+      history: session.messages,
+      provider,
+      sessionId: session.id,
+      systemPrompt: '   ',
+      toolPolicy: { workspaceRoot: process.cwd() },
+      tools: [],
+    }),
+  );
 
   assert.equal(provider.requests.length, 1);
   assert.equal(provider.requests[0].systemPrompt, undefined);
@@ -127,26 +194,28 @@ test('streamLoop does not persist assistant tool calls when the tool iteration c
 
   await assert.rejects(
     () =>
-      collectFinalMessage({
-        content: 'trigger tool loop',
-        history,
-        options: { maxToolIterations: 0 },
-        provider: new FakeProvider({
-          reply: {
-            text: '',
-            toolCalls: [
-              {
-                id: 'call-1',
-                input: {},
-                name: 'missing_tool',
-              },
-            ],
-          },
+      collectFinalMessage(
+        createLoopInput({
+          content: 'trigger tool loop',
+          history,
+          options: { maxToolIterations: 0 },
+          provider: new FakeProvider({
+            reply: {
+              text: '',
+              toolCalls: [
+                {
+                  id: 'call-1',
+                  input: {},
+                  name: 'missing_tool',
+                },
+              ],
+            },
+          }),
+          sessionId: session.id,
+          toolPolicy: { workspaceRoot: process.cwd() },
+          tools: [],
         }),
-        sessionId: session.id,
-        toolPolicy: { workspaceRoot: process.cwd() },
-        tools: [],
-      }),
+      ),
     /Tool loop exceeded 0 iterations/,
   );
 
@@ -161,15 +230,19 @@ test('streamLoop swallows event sink failures', async () => {
     },
   };
 
-  const { finalMessage, turnMessages } = await collectLoopResult({
-    content: 'hello',
-    eventPublisher: publisher,
-    history: session.messages,
-    provider: new FakeProvider(),
-    sessionId: session.id,
-    toolPolicy: { workspaceRoot: process.cwd() },
-    tools: [],
-  });
+  const provider = new FakeProvider();
+
+  const { finalMessage, turnMessages } = await collectLoopResult(
+    createLoopInput({
+      content: 'hello',
+      history: session.messages,
+      eventPublisher: publisher,
+      provider,
+      sessionId: session.id,
+      toolPolicy: { workspaceRoot: process.cwd() },
+      tools: [],
+    }),
+  );
 
   assert.equal(finalMessage.content, 'reply:hello');
   assert.deepEqual(
@@ -182,18 +255,22 @@ test('streamLoop swallows event sink failures', async () => {
 test('streamLoop owns fallback text when provider returns an empty non-tool reply', async () => {
   const session = createSession('fallback-session');
 
-  const reply = await collectFinalMessage({
-    content: 'hello',
-    history: session.messages,
-    provider: new FakeProvider({
-      reply: {
-        text: '',
-      },
-    }),
-    sessionId: session.id,
-    toolPolicy: { workspaceRoot: process.cwd() },
-    tools: [],
+  const provider = new FakeProvider({
+    reply: {
+      text: '',
+    },
   });
+
+  const reply = await collectFinalMessage(
+    createLoopInput({
+      content: 'hello',
+      history: session.messages,
+      provider,
+      sessionId: session.id,
+      toolPolicy: { workspaceRoot: process.cwd() },
+      tools: [],
+    }),
+  );
 
   assert.equal(reply.content, 'I could not produce a response for that request.');
 });
@@ -209,22 +286,26 @@ test('streamLoop yields assistant deltas and final message while events stay coa
     events.push(event);
   });
 
-  const iterator = streamLoop({
-    content: 'hello',
-    eventPublisher: publisher,
-    history: session.messages,
-    provider: new FakeProvider({
-      streamReply: [
-        { delta: 'hel', type: 'text_delta' },
-        { delta: 'lo', type: 'text_delta' },
-        { response: { text: 'hello' }, type: 'response_completed' },
-      ],
-    }),
-    sessionId: session.id,
-    stream: true,
-    toolPolicy: { workspaceRoot: process.cwd() },
-    tools: [],
+  const provider = new FakeProvider({
+    streamReply: [
+      { delta: 'hel', type: 'text_delta' },
+      { delta: 'lo', type: 'text_delta' },
+      { response: { text: 'hello' }, type: 'response_completed' },
+    ],
   });
+
+  const iterator = streamLoop(
+    createLoopInput({
+      content: 'hello',
+      eventPublisher: publisher,
+      history: session.messages,
+      provider,
+      sessionId: session.id,
+      stream: true,
+      toolPolicy: { workspaceRoot: process.cwd() },
+      tools: [],
+    }),
+  );
 
   while (true) {
     const result = await iterator.next();
@@ -271,15 +352,17 @@ test('streamLoop falls back to batch generation when streaming is enabled but un
       return { text: 'batch reply' };
     },
   };
-  const reply = await collectFinalMessage({
-    content: 'hello',
-    history: session.messages,
-    provider,
-    sessionId: session.id,
-    stream: true,
-    toolPolicy: { workspaceRoot: process.cwd() },
-    tools: [],
-  });
+  const reply = await collectFinalMessage(
+    createLoopInput({
+      content: 'hello',
+      history: session.messages,
+      provider,
+      sessionId: session.id,
+      stream: true,
+      toolPolicy: { workspaceRoot: process.cwd() },
+      tools: [],
+    }),
+  );
 
   assert.equal(callCount, 1);
   assert.equal(reply.content, 'batch reply');
@@ -300,15 +383,17 @@ test('streamLoop falls back to batch generation when streaming fails before any 
       throw new Error('stream failed');
     },
   };
-  const reply = await collectFinalMessage({
-    content: 'hello',
-    history: session.messages,
-    provider,
-    sessionId: session.id,
-    stream: true,
-    toolPolicy: { workspaceRoot: process.cwd() },
-    tools: [],
-  });
+  const reply = await collectFinalMessage(
+    createLoopInput({
+      content: 'hello',
+      history: session.messages,
+      provider,
+      sessionId: session.id,
+      stream: true,
+      toolPolicy: { workspaceRoot: process.cwd() },
+      tools: [],
+    }),
+  );
 
   assert.equal(batchCallCount, 1);
   assert.equal(reply.content, 'batch reply');
@@ -330,15 +415,17 @@ test('streamLoop falls back to batch generation when streaming emits only empty 
       throw new Error('stream failed');
     },
   };
-  const reply = await collectFinalMessage({
-    content: 'hello',
-    history: session.messages,
-    provider,
-    sessionId: session.id,
-    stream: true,
-    toolPolicy: { workspaceRoot: process.cwd() },
-    tools: [],
-  });
+  const reply = await collectFinalMessage(
+    createLoopInput({
+      content: 'hello',
+      history: session.messages,
+      provider,
+      sessionId: session.id,
+      stream: true,
+      toolPolicy: { workspaceRoot: process.cwd() },
+      tools: [],
+    }),
+  );
 
   assert.equal(batchCallCount, 1);
   assert.equal(reply.content, 'batch reply');
@@ -360,15 +447,17 @@ test('streamLoop keeps a completed streamed response when stream teardown fails'
       throw new Error('stream teardown failed');
     },
   };
-  const reply = await collectFinalMessage({
-    content: 'hello',
-    history: session.messages,
-    provider,
-    sessionId: session.id,
-    stream: true,
-    toolPolicy: { workspaceRoot: process.cwd() },
-    tools: [],
-  });
+  const reply = await collectFinalMessage(
+    createLoopInput({
+      content: 'hello',
+      history: session.messages,
+      provider,
+      sessionId: session.id,
+      stream: true,
+      toolPolicy: { workspaceRoot: process.cwd() },
+      tools: [],
+    }),
+  );
 
   assert.equal(batchCallCount, 0);
   assert.equal(reply.content, 'stream reply');

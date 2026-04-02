@@ -1,50 +1,43 @@
-import { emitRuntimeTrace } from '../logger/runtime-trace.js';
-import type { HarnessLogger } from '../logger/types.js';
-import { freezeDeep } from '../utils/object.js';
+import { snapshot } from '../utils/object.js';
 import type { HarnessEvent, HarnessEventListener } from './types.js';
 
 export type HarnessEventPublisherOptions = {
-  logger?: HarnessLogger;
+  onEventPublished?: (event: HarnessEvent) => unknown;
+  onListenerFailed?: (event: HarnessEvent) => unknown;
 };
 
 export type HarnessEventSink = Pick<HarnessEventPublisher, 'publish'>;
 
 export class HarnessEventPublisher {
   private readonly listeners = new Set<HarnessEventListener>();
-  private readonly logger: HarnessLogger | undefined;
+  private readonly onEventPublished: ((event: HarnessEvent) => unknown) | undefined;
+  private readonly onListenerFailed: ((event: HarnessEvent) => unknown) | undefined;
 
-  constructor({ logger }: HarnessEventPublisherOptions = {}) {
-    this.logger = logger;
+  constructor({ onEventPublished, onListenerFailed }: HarnessEventPublisherOptions = {}) {
+    this.onEventPublished = onEventPublished;
+    this.onListenerFailed = onListenerFailed;
   }
 
   publish(event: HarnessEvent): void {
-    emitRuntimeTrace(this.logger, 'event_emitted', {
-      eventType: event.type,
-      sessionId: event.sessionId,
-      turnId: event.turnId,
-    });
+    const eventSnapshot = snapshot(event);
+
+    this.invokeHook(this.onEventPublished, eventSnapshot);
 
     if (this.listeners.size === 0) {
       return;
     }
 
-    const snapshot = this.snapshot(event);
-
     for (const listener of this.listeners) {
       try {
-        const result = listener(snapshot);
+        const result = listener(eventSnapshot);
 
         if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
           void Promise.resolve(result).catch(() => {
-            emitRuntimeTrace(this.logger, 'listener_failed', {
-              eventType: snapshot.type,
-            });
+            this.invokeHook(this.onListenerFailed, eventSnapshot);
           });
         }
       } catch {
-        emitRuntimeTrace(this.logger, 'listener_failed', {
-          eventType: snapshot.type,
-        });
+        this.invokeHook(this.onListenerFailed, eventSnapshot);
       }
     }
   }
@@ -57,7 +50,19 @@ export class HarnessEventPublisher {
     };
   }
 
-  private snapshot(event: HarnessEvent): HarnessEvent {
-    return freezeDeep(structuredClone(event));
+  private invokeHook(hook: ((event: HarnessEvent) => unknown) | undefined, event: HarnessEvent): void {
+    if (!hook) {
+      return;
+    }
+
+    try {
+      const result = hook(event);
+
+      if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
+        void Promise.resolve(result).catch(() => {});
+      }
+    } catch {
+      // Hook failures are best-effort and must never break event delivery.
+    }
   }
 }
