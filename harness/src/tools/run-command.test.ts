@@ -53,10 +53,7 @@ test('RunCommandTool rejects commands outside the allowlist', async () => {
 
   await assert.rejects(
     () =>
-      tool.execute(
-        { command: 'cat' },
-        createToolContext({ commandAllowlist: ['pwd'], workspaceRoot: process.cwd() }),
-      ),
+      tool.execute({ command: 'cat' }, createToolContext({ commandAllowlist: ['pwd'], workspaceRoot: process.cwd() })),
     /run_command command is not in the allowlist: cat/,
   );
 });

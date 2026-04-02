@@ -70,12 +70,10 @@ test('Session.commit snapshots caller messages before persistence', async () => 
   const storedMessage = (await store.listMessages(session.id))[0];
   const sessionMessage = session.messages[0];
 
-  assert.deepEqual(
-    storedMessage && 'toolCalls' in storedMessage ? storedMessage.toolCalls?.[0]?.input : undefined,
-    { path: 'note.txt' },
-  );
-  assert.deepEqual(
-    sessionMessage && 'toolCalls' in sessionMessage ? sessionMessage.toolCalls?.[0]?.input : undefined,
-    { path: 'note.txt' },
-  );
+  assert.deepEqual(storedMessage && 'toolCalls' in storedMessage ? storedMessage.toolCalls?.[0]?.input : undefined, {
+    path: 'note.txt',
+  });
+  assert.deepEqual(sessionMessage && 'toolCalls' in sessionMessage ? sessionMessage.toolCalls?.[0]?.input : undefined, {
+    path: 'note.txt',
+  });
 });

@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { createHarness as createBaseHarness, type CreateHarnessOptions } from './harness.js';
 import type { HarnessEvent } from './events/types.js';
+import { createHarness as createBaseHarness, type CreateHarnessOptions } from './harness.js';
 import type { HarnessRuntimeTrace } from './logger/types.js';
 import type { ModelProvider } from './models/provider.js';
 import type { ModelRequest, ModelResponse } from './models/types.js';
@@ -25,7 +25,10 @@ type TestHarnessOptions = Omit<CreateHarnessOptions, 'session'> & {
   sessionStore?: SessionStore;
 };
 
-function createTestSession(sessionStore: SessionStore = new MemorySessionStore(), sessionId = 'local-session'): Session {
+function createTestSession(
+  sessionStore: SessionStore = new MemorySessionStore(),
+  sessionId = 'local-session',
+): Session {
   return new Session({
     id: sessionId,
     store: sessionStore,
@@ -37,7 +40,8 @@ function createHarness(options: TestHarnessOptions = {}) {
 
   return createBaseHarness({
     ...rest,
-    session: providedSession ?? createTestSession(sessionStore ?? new MemorySessionStore(), sessionId ?? 'local-session'),
+    session:
+      providedSession ?? createTestSession(sessionStore ?? new MemorySessionStore(), sessionId ?? 'local-session'),
   });
 }
 

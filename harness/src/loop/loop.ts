@@ -1,4 +1,4 @@
-import type { HarnessEvent } from '../events/types.js';
+import type { HarnessEventSink } from '../events/publisher.js';
 import type { HarnessLogger } from '../logger/types.js';
 import type { ModelProvider } from '../models/provider.js';
 import { supportsStreaming } from '../models/provider.js';
@@ -17,7 +17,7 @@ export type LoopOptions = {
 export type LoopInput = {
   content: string;
   debug?: boolean;
-  emitEvent?: (event: HarnessEvent) => void;
+  eventPublisher?: HarnessEventSink;
   history: readonly Message[];
   logger?: HarnessLogger;
   options?: LoopOptions;
@@ -179,7 +179,7 @@ function getProviderResponse({
 export async function* streamLoop({
   content,
   debug,
-  emitEvent,
+  eventPublisher,
   history,
   logger,
   options,
@@ -208,7 +208,7 @@ export async function* streamLoop({
   let toolIterations = 0;
   const observer = createLoopObserver({
     debug,
-    emitEvent,
+    eventPublisher,
     logger,
     provider,
     sessionId,

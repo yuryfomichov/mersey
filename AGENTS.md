@@ -54,6 +54,7 @@ Main goals:
 ## Notes
 
 - Use `oxfmt` and `oxlint`.
+- Run `pnpm format` after code changes.
 - Keep tests small and important.
 - Add or update tests with behavior changes.
 - Prefer `FakeProvider` for non-network tests.

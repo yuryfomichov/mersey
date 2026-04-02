@@ -1,6 +1,6 @@
-import type { Message, SessionState } from './types.js';
-import type { SessionStore } from './store.js';
 import { snapshotMessages, snapshotSessionState } from './snapshot.js';
+import type { SessionStore } from './store.js';
+import type { Message, SessionState } from './types.js';
 
 function cloneMessage<T extends Message>(message: T): T {
   return structuredClone(message);
