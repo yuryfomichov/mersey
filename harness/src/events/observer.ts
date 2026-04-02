@@ -61,20 +61,24 @@ export class HarnessObserver {
     this.logger = logger;
     this.providerName = providerName;
     this.stream = Boolean(stream);
-    this.eventPublisher = new HarnessEventPublisher({
-      onEventPublished: (event) => {
-        this.emitTrace('event_emitted', {
-          eventType: event.type,
-          sessionId: event.sessionId,
-          turnId: event.turnId,
-        });
-      },
-      onListenerFailed: (event) => {
-        this.emitTrace('listener_failed', {
-          eventType: event.type,
-        });
-      },
-    });
+    const publisherOptions = this.logger
+      ? {
+          onEventPublished: (event: HarnessEvent) => {
+            this.emitTrace('event_emitted', {
+              eventType: event.type,
+              sessionId: event.sessionId,
+              turnId: event.turnId,
+            });
+          },
+          onListenerFailed: (event: HarnessEvent) => {
+            this.emitTrace('listener_failed', {
+              eventType: event.type,
+            });
+          },
+        }
+      : {};
+
+    this.eventPublisher = new HarnessEventPublisher(publisherOptions);
   }
 
   sessionStarted(): void {
