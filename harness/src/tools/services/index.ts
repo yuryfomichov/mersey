@@ -78,6 +78,7 @@ export function createToolServices(policy: ToolExecutionPolicy, options: { signa
     }),
     files: new FileService({ getCanonicalWorkspaceRoot, policy }),
     output: new OutputService(policy),
+    signal: options.signal,
   };
 }
 

@@ -45,6 +45,7 @@ export type ToolServices = {
   commands: ToolCommandRunner;
   files: ToolFileService;
   output: ToolOutputService;
+  signal?: AbortSignal;
 };
 
 export type ToolRuntime = ToolServices & {
