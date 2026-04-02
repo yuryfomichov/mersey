@@ -1066,3 +1066,49 @@ test('createHarness streamUserMessage yields only final_message when harness str
     },
   ]);
 });
+
+test('createHarness streamUserMessage snapshots final_message chunks before exposing them', async () => {
+  const harness = createHarness({
+    providerInstance: new FakeProvider({
+      streamReply: [
+        { delta: 'hel', type: 'text_delta' },
+        { delta: 'lo', type: 'text_delta' },
+        { response: { text: 'hello' }, type: 'response_completed' },
+      ],
+    }),
+    sessionStore: new MemorySessionStore(),
+    stream: true,
+  });
+  const iterator = harness.streamUserMessage('hello')[Symbol.asyncIterator]();
+
+  const firstChunk = await iterator.next();
+  const secondChunk = await iterator.next();
+  const doneChunk = await iterator.next();
+
+  assert.equal(firstChunk.done, false);
+  assert.equal(firstChunk.value.type, 'assistant_delta');
+  assert.equal(secondChunk.done, false);
+  assert.equal(secondChunk.value.type, 'assistant_delta');
+  assert.equal(doneChunk.done, false);
+  assert.equal(doneChunk.value.type, 'final_message');
+  const finalChunk = doneChunk.value;
+
+  if (finalChunk.type !== 'final_message') {
+    throw new Error('Expected a final_message chunk.');
+  }
+
+  assert.throws(() => {
+    finalChunk.message.content = 'mutated';
+  });
+
+  const finalState = await iterator.next();
+
+  assert.equal(finalState.done, true);
+  assert.deepEqual(
+    harness.session.messages.map((message) => ({ content: message.content, role: message.role })),
+    [
+      { content: 'hello', role: 'user' },
+      { content: 'hello', role: 'assistant' },
+    ],
+  );
+});

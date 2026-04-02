@@ -70,6 +70,10 @@ function emitHarnessEvent(
   }
 }
 
+function snapshotChunk(chunk: TurnChunk): TurnChunk {
+  return freezeDeep(structuredClone(chunk));
+}
+
 export function createHarness(options: CreateHarnessOptions = {}): Harness {
   const provider = options.providerInstance ?? (options.provider ? createProvider(options.provider) : null);
   const runtimeLogger = createFanoutLogger(options.loggers);
@@ -136,7 +140,7 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
               break;
             }
 
-            queue.push(result.value);
+            queue.push(snapshotChunk(result.value));
           }
 
           await session.commit(turnMessages);
