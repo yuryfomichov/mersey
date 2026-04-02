@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+
 import { z } from 'zod';
 
 import { parseToolInput, toToolInputSchema } from './schema.js';

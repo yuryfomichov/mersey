@@ -1,18 +1,19 @@
 import { randomUUID } from 'node:crypto';
 
+import type { HarnessEventSink } from '../events/publisher.js';
 import type { HarnessEvent, TurnFailedEvent } from '../events/types.js';
 import { emitRuntimeTrace } from '../logger/runtime-trace.js';
 import type { HarnessLogger, HarnessRuntimeTraceType } from '../logger/types.js';
 import type { ModelProvider } from '../models/provider.js';
 import type { ModelResponse, ModelToolCall, ModelToolDefinition } from '../models/types.js';
 import type { Message } from '../sessions/types.js';
-import { getDebugToolArgs, getResultDataKeys, getSafeToolArgs, sanitizeErrorMessage } from './telemetry.js';
 import type { ToolExecutionResult } from '../tools/types.js';
+import { getDebugToolArgs, getResultDataKeys, getSafeToolArgs, sanitizeErrorMessage } from './telemetry.js';
 
 type LoopObserverInput = {
   debug?: boolean;
-  emitEvent?: (event: HarnessEvent) => void;
   logger?: HarnessLogger;
+  eventPublisher?: HarnessEventSink;
   provider: ModelProvider;
   sessionId: string;
   toolDefinitions: ModelToolDefinition[] | undefined;
@@ -53,7 +54,7 @@ function getToolCallNames(toolCalls: { name: string }[] | undefined): string[] {
 
 export function createLoopObserver({
   debug,
-  emitEvent,
+  eventPublisher,
   logger,
   provider,
   sessionId,
@@ -63,12 +64,12 @@ export function createLoopObserver({
   const turnStartTime = Date.now();
 
   const publishEvent = (event: HarnessEvent): void => {
-    if (!emitEvent) {
+    if (!eventPublisher) {
       return;
     }
 
     try {
-      emitEvent(event);
+      eventPublisher.publish(event);
     } catch {
       emitRuntimeTrace(logger, 'event_delivery_failed', {
         eventType: event.type,

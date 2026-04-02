@@ -1,9 +1,9 @@
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { assertValidSessionId } from './utils.js';
 import type { SessionStore } from './store.js';
 import type { Message, SessionState } from './types.js';
+import { assertValidSessionId } from './utils.js';
 
 export type FilesystemSessionStoreOptions = {
   rootDir?: string;

@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 
-import { snapshotEvent } from './events/snapshot.js';
-import type { HarnessEvent, HarnessEventListener } from './events/types.js';
 import { createAsyncQueue } from './async-queue.js';
+import { HarnessEventPublisher } from './events/publisher.js';
+import type { HarnessEventListener } from './events/types.js';
 import { createFanoutLogger } from './logger/fanout.js';
 import { emitRuntimeTrace } from './logger/runtime-trace.js';
 import type { HarnessLogger } from './logger/types.js';
@@ -13,8 +13,8 @@ import { createProvider, type ProviderDefinition } from './providers/factory.js'
 import { MemorySessionStore } from './sessions/memory-store.js';
 import { Session } from './sessions/session.js';
 import type { Message } from './sessions/types.js';
-import type { Tool } from './tools/types.js';
 import type { ToolPolicy } from './tools/context.js';
+import type { Tool } from './tools/types.js';
 
 export type Harness = {
   session: Session;
@@ -35,42 +35,6 @@ export type CreateHarnessOptions = {
   tools?: Tool[];
 };
 
-function emitHarnessEvent(
-  event: HarnessEvent,
-  listeners: Set<HarnessEventListener>,
-  runtimeLogger: HarnessLogger | undefined,
-): void {
-  emitRuntimeTrace(runtimeLogger, 'event_emitted', {
-    eventType: event.type,
-    sessionId: event.sessionId,
-    turnId: event.turnId,
-  });
-
-  if (listeners.size === 0) {
-    return;
-  }
-
-  const frozenEvent = snapshotEvent(event);
-
-  for (const listener of listeners) {
-    try {
-      const result = listener(frozenEvent);
-
-      if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
-        void Promise.resolve(result).catch(() => {
-          emitRuntimeTrace(runtimeLogger, 'listener_failed', {
-            eventType: frozenEvent.type,
-          });
-        });
-      }
-    } catch {
-      emitRuntimeTrace(runtimeLogger, 'listener_failed', {
-        eventType: frozenEvent.type,
-      });
-    }
-  }
-}
-
 export function createHarness(options: CreateHarnessOptions = {}): Harness {
   const provider = options.providerInstance ?? (options.provider ? createProvider(options.provider) : null);
   const runtimeLogger = createFanoutLogger(options.loggers);
@@ -78,7 +42,7 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
   const systemPrompt = options.systemPrompt;
   const toolPolicy = options.toolPolicy ?? { workspaceRoot: process.cwd() };
   const tools = options.tools ?? [];
-  const listeners = new Set<HarnessEventListener>();
+  const eventPublisher = new HarnessEventPublisher({ logger: runtimeLogger });
 
   if (!provider) {
     throw new Error('Missing provider. Pass providerInstance or provider config to createHarness().');
@@ -114,9 +78,7 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
           const iterator = streamLoop({
             content,
             debug: options.debug,
-            emitEvent(event: HarnessEvent): void {
-              emitHarnessEvent(event, listeners, runtimeLogger);
-            },
+            eventPublisher,
             history: session.messages,
             logger: runtimeLogger,
             provider: resolvedProvider,
@@ -197,11 +159,7 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
       return enqueueStream(content);
     },
     subscribe(listener: HarnessEventListener): () => void {
-      listeners.add(listener);
-
-      return () => {
-        listeners.delete(listener);
-      };
+      return eventPublisher.subscribe(listener);
     },
   };
 }

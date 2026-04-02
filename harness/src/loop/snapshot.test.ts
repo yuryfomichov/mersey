@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { snapshotTurnChunk } from './snapshot.js';
 import type { TurnChunk } from './loop.js';
+import { snapshotTurnChunk } from './snapshot.js';
 
 test('snapshotTurnChunk freezes final_message payloads and detaches from source', () => {
   const chunk: TurnChunk = {

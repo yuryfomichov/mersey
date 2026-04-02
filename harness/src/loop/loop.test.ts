@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { HarnessEventPublisher } from '../events/publisher.js';
 import type { HarnessEvent } from '../events/types.js';
 import { FakeProvider } from '../providers/fake.js';
 import type { Message, SessionState } from '../sessions/types.js';
@@ -154,12 +155,15 @@ test('streamLoop does not persist assistant tool calls when the tool iteration c
 
 test('streamLoop swallows event sink failures', async () => {
   const session = createSession('event-sink-session');
+  const publisher = {
+    publish(): void {
+      throw new Error('sink failed');
+    },
+  };
 
   const { finalMessage, turnMessages } = await collectLoopResult({
     content: 'hello',
-    emitEvent(): void {
-      throw new Error('sink failed');
-    },
+    eventPublisher: publisher,
     history: session.messages,
     provider: new FakeProvider(),
     sessionId: session.id,
@@ -199,12 +203,15 @@ test('streamLoop yields assistant deltas and final message while events stay coa
 
   const chunks = [];
   const events: HarnessEvent[] = [];
+  const publisher = new HarnessEventPublisher();
+
+  publisher.subscribe((event) => {
+    events.push(event);
+  });
 
   const iterator = streamLoop({
     content: 'hello',
-    emitEvent(event): void {
-      events.push(event);
-    },
+    eventPublisher: publisher,
     history: session.messages,
     provider: new FakeProvider({
       streamReply: [

@@ -41,7 +41,10 @@ test('EditFileTool rejects paths outside the workspace root', async () => {
 
     await assert.rejects(
       () =>
-        tool.execute({ newText: 'public', oldText: 'secret', path: '../secret.txt' }, createToolContext({ workspaceRoot })),
+        tool.execute(
+          { newText: 'public', oldText: 'secret', path: '../secret.txt' },
+          createToolContext({ workspaceRoot }),
+        ),
       /edit_file path must stay inside workspace root/,
     );
     await assert.rejects(
@@ -92,7 +95,8 @@ test('EditFileTool rejects overlapping oldText matches', async () => {
     const tool = new EditFileTool();
 
     await assert.rejects(
-      () => tool.execute({ newText: 'b', oldText: 'aa', path: 'note.txt' }, createToolContext({ workspaceRoot: rootDir })),
+      () =>
+        tool.execute({ newText: 'b', oldText: 'aa', path: 'note.txt' }, createToolContext({ workspaceRoot: rootDir })),
       /edit_file requires oldText to match exactly once/,
     );
   } finally {
@@ -120,7 +124,10 @@ test('EditFileTool validates path and text inputs', async () => {
     );
     await assert.rejects(
       () =>
-        tool.execute({ newText: 'mersey', oldText: '', path: 'note.txt' }, createToolContext({ workspaceRoot: rootDir })),
+        tool.execute(
+          { newText: 'mersey', oldText: '', path: 'note.txt' },
+          createToolContext({ workspaceRoot: rootDir }),
+        ),
       /edit_file requires a non-empty oldText/,
     );
   } finally {

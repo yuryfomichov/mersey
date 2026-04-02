@@ -1,10 +1,7 @@
 export { createHarness } from './src/harness.js';
 export type { CreateHarnessOptions, Harness } from './src/harness.js';
 
-export type {
-  HarnessEvent,
-  HarnessEventListener,
-} from './src/events/types.js';
+export type { HarnessEvent, HarnessEventListener } from './src/events/types.js';
 
 export { createJsonlFileLogger } from './src/logger/jsonl.js';
 export { createTextFileLogger } from './src/logger/text.js';
