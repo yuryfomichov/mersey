@@ -23,6 +23,7 @@ export type { SessionStore } from './src/sessions/store.js';
 export { EditFileTool } from './src/tools/edit-file.js';
 export { ReadFileTool } from './src/tools/read-file.js';
 export { RunCommandTool } from './src/tools/run-command.js';
+export type { RunCommandToolOptions } from './src/tools/run-command.js';
 export { WriteFileTool } from './src/tools/write-file.js';
-export type { ToolPolicy } from './src/tools/context.js';
+export type { ToolExecutionPolicy } from './src/tools/services/index.js';
 export type { Tool } from './src/tools/types.js';

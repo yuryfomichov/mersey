@@ -4,7 +4,7 @@ import { streamLoop, type TurnChunk } from './loop/loop.js';
 import type { ModelProvider } from './models/provider.js';
 import { Session } from './sessions/session.js';
 import type { Message } from './sessions/types.js';
-import type { ToolPolicy } from './tools/context.js';
+import type { ToolExecutionPolicy } from './tools/services/index.js';
 import type { Tool } from './tools/types.js';
 import { snapshot } from './utils/object.js';
 
@@ -15,7 +15,7 @@ type TurnStreamOptions = {
   session: Session;
   stream?: boolean;
   systemPrompt?: string;
-  toolPolicy: ToolPolicy;
+  toolExecutionPolicy: ToolExecutionPolicy;
   tools: Tool[];
 };
 
@@ -28,7 +28,7 @@ function createTurnStream({
   session,
   stream,
   systemPrompt,
-  toolPolicy,
+  toolExecutionPolicy,
   tools,
 }: TurnStreamOptions): AsyncIterable<TurnChunk> & AsyncIterator<TurnChunk> {
   const queue = createAsyncQueue<TurnChunk>();
@@ -56,7 +56,7 @@ function createTurnStream({
           signal: abortController.signal,
           stream,
           systemPrompt,
-          toolPolicy,
+          toolExecutionPolicy,
           tools,
         });
         let turnMessages: Message[] = [];

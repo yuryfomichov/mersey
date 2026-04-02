@@ -1,7 +1,8 @@
 import { z } from 'zod';
 
 import type { ModelToolInput } from '../models/types.js';
-import type { ToolCommandResult, ToolContext } from './context.js';
+import type { ToolCommandPolicy, ToolCommandResult } from './services/commands/types.js';
+import type { ToolServices } from './services/index.js';
 import type { Tool, ToolExecuteResult } from './types.js';
 import { parseToolInput, toToolInputSchema } from './utils/schema.js';
 
@@ -30,6 +31,8 @@ function toResultContent(result: ToolCommandResult): string {
 
   return lines.join('\n');
 }
+
+export type RunCommandToolOptions = ToolCommandPolicy;
 
 export class RunCommandTool implements Tool {
   private static readonly input = z.object({
@@ -67,7 +70,9 @@ export class RunCommandTool implements Tool {
   readonly inputSchema = toToolInputSchema(RunCommandTool.input);
   readonly name = 'run_command';
 
-  async execute(input: ModelToolInput, context: ToolContext): Promise<ToolExecuteResult> {
+  constructor(private readonly options: RunCommandToolOptions = {}) {}
+
+  async execute(input: ModelToolInput, services: ToolServices): Promise<ToolExecuteResult> {
     const parsedSpec = parseToolInput(RunCommandTool.input, input);
     const spec =
       parsedSpec.args?.length === 1 &&
@@ -75,8 +80,8 @@ export class RunCommandTool implements Tool {
       ZERO_ARG_COMMANDS.has(parsedSpec.command)
         ? { ...parsedSpec, args: [] }
         : parsedSpec;
-    const result = await context.commands.run(spec, this.name);
-    const content = context.output.limitResult(toResultContent(result));
+    const result = await services.commands.run(spec, this.name, this.options);
+    const content = services.output.limitResult(toResultContent(result));
 
     return {
       content: content.text,

@@ -107,15 +107,21 @@ async function main(): Promise<void> {
     provider: providerDefinition,
     session,
     stream,
-    toolPolicy: {
-      commandAllowlist: ['git', 'ls', 'pwd'],
-      defaultCommandTimeoutMs: 5_000,
-      maxCommandOutputBytes: 16 * 1024,
-      maxCommandTimeoutMs: 15_000,
+    toolExecutionPolicy: {
       maxToolResultBytes: 16 * 1024,
       workspaceRoot: process.cwd(),
     },
-    tools: [new ReadFileTool(), new WriteFileTool(), new EditFileTool(), new RunCommandTool()],
+    tools: [
+      new ReadFileTool(),
+      new WriteFileTool(),
+      new EditFileTool(),
+      new RunCommandTool({
+        commandAllowlist: ['git', 'ls', 'pwd'],
+        defaultTimeoutMs: 5_000,
+        maxOutputBytes: 16 * 1024,
+        maxTimeoutMs: 15_000,
+      }),
+    ],
   });
   const providerModel = getProviderModel(providerDefinition);
 

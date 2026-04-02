@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { createToolContext } from './context.js';
 import { RunCommandTool } from './run-command.js';
+import { createToolServices } from './services/index.js';
 
 test('RunCommandTool executes allowlisted commands with structured result data', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
@@ -13,10 +13,10 @@ test('RunCommandTool executes allowlisted commands with structured result data',
   try {
     await writeFile(join(rootDir, 'note.txt'), 'hello', 'utf8');
 
-    const tool = new RunCommandTool();
+    const tool = new RunCommandTool({ commandAllowlist: ['cat'] });
     const result = await tool.execute(
       { args: ['note.txt'], command: 'cat' },
-      createToolContext({ commandAllowlist: ['cat'], workspaceRoot: rootDir }),
+      createToolServices({ workspaceRoot: rootDir }),
     );
 
     assert.equal(typeof result, 'object');
@@ -33,10 +33,10 @@ test('RunCommandTool normalizes duplicated zero-arg invocations like pwd + [pwd]
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
 
   try {
-    const tool = new RunCommandTool();
+    const tool = new RunCommandTool({ commandAllowlist: ['pwd'] });
     const result = await tool.execute(
       { args: ['pwd'], command: 'pwd' },
-      createToolContext({ commandAllowlist: ['pwd'], workspaceRoot: rootDir }),
+      createToolServices({ workspaceRoot: rootDir }),
     );
 
     assert.equal(typeof result, 'object');
@@ -49,11 +49,10 @@ test('RunCommandTool normalizes duplicated zero-arg invocations like pwd + [pwd]
 });
 
 test('RunCommandTool rejects commands outside the allowlist', async () => {
-  const tool = new RunCommandTool();
+  const tool = new RunCommandTool({ commandAllowlist: ['pwd'] });
 
   await assert.rejects(
-    () =>
-      tool.execute({ command: 'cat' }, createToolContext({ commandAllowlist: ['pwd'], workspaceRoot: process.cwd() })),
+    () => tool.execute({ command: 'cat' }, createToolServices({ workspaceRoot: process.cwd() })),
     /run_command command is not in the allowlist: cat/,
   );
 });
@@ -62,10 +61,10 @@ test('RunCommandTool marks non-zero exits as tool errors', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
 
   try {
-    const tool = new RunCommandTool();
+    const tool = new RunCommandTool({ commandAllowlist: ['cat'] });
     const result = await tool.execute(
       { args: ['missing-file.txt'], command: 'cat' },
-      createToolContext({ commandAllowlist: ['cat'], workspaceRoot: rootDir }),
+      createToolServices({ workspaceRoot: rootDir }),
     );
 
     assert.equal(typeof result, 'object');
@@ -80,10 +79,10 @@ test('RunCommandTool enforces command timeouts', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
 
   try {
-    const tool = new RunCommandTool();
+    const tool = new RunCommandTool({ commandAllowlist: ['sleep'] });
     const result = await tool.execute(
       { args: ['1'], command: 'sleep', timeoutMs: 10 },
-      createToolContext({ commandAllowlist: ['sleep'], workspaceRoot: rootDir }),
+      createToolServices({ workspaceRoot: rootDir }),
     );
 
     assert.equal(typeof result, 'object');
@@ -98,12 +97,10 @@ test('RunCommandTool truncates stdout and content separately through policy', as
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
 
   try {
-    const tool = new RunCommandTool();
+    const tool = new RunCommandTool({ commandAllowlist: ['printf'], maxOutputBytes: 4 });
     const result = await tool.execute(
       { args: ['abcdef'], command: 'printf' },
-      createToolContext({
-        commandAllowlist: ['printf'],
-        maxCommandOutputBytes: 4,
+      createToolServices({
         maxToolResultBytes: 80,
         workspaceRoot: rootDir,
       }),
@@ -122,7 +119,7 @@ test('RunCommandTool kills processes that ignore SIGTERM after the timeout grace
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
 
   try {
-    const tool = new RunCommandTool();
+    const tool = new RunCommandTool({ commandAllowlist: [process.execPath] });
     const startedAt = Date.now();
     const result = await tool.execute(
       {
@@ -130,7 +127,7 @@ test('RunCommandTool kills processes that ignore SIGTERM after the timeout grace
         command: process.execPath,
         timeoutMs: 25,
       },
-      createToolContext({ commandAllowlist: [process.execPath], workspaceRoot: rootDir }),
+      createToolServices({ workspaceRoot: rootDir }),
     );
 
     assert.equal(typeof result, 'object');

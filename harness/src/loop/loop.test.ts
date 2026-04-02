@@ -90,7 +90,7 @@ function createLoopInput(input: {
   sessionId: string;
   stream?: boolean;
   systemPrompt?: string;
-  toolPolicy: Parameters<typeof streamLoop>[0]['toolPolicy'];
+  toolExecutionPolicy: Parameters<typeof streamLoop>[0]['toolExecutionPolicy'];
   tools: Parameters<typeof streamLoop>[0]['tools'];
 }): Parameters<typeof streamLoop>[0] {
   return {
@@ -107,7 +107,7 @@ function createLoopInput(input: {
     provider: input.provider,
     stream: input.stream,
     systemPrompt: input.systemPrompt,
-    toolPolicy: input.toolPolicy,
+    toolExecutionPolicy: input.toolExecutionPolicy,
     tools: input.tools,
   };
 }
@@ -138,7 +138,7 @@ test('streamLoop forwards systemPrompt to provider on every generate call includ
       provider,
       sessionId: session.id,
       systemPrompt: 'You are a helpful assistant.',
-      toolPolicy: { workspaceRoot: process.cwd() },
+      toolExecutionPolicy: { workspaceRoot: process.cwd() },
       tools: [],
     }),
   );
@@ -159,7 +159,7 @@ test('streamLoop omits systemPrompt from provider request when not provided', as
       history: session.messages,
       provider,
       sessionId: session.id,
-      toolPolicy: { workspaceRoot: process.cwd() },
+      toolExecutionPolicy: { workspaceRoot: process.cwd() },
       tools: [],
     }),
   );
@@ -180,7 +180,7 @@ test('streamLoop normalizes empty-string systemPrompt to undefined', async () =>
       provider,
       sessionId: session.id,
       systemPrompt: '   ',
-      toolPolicy: { workspaceRoot: process.cwd() },
+      toolExecutionPolicy: { workspaceRoot: process.cwd() },
       tools: [],
     }),
   );
@@ -214,7 +214,7 @@ test('streamLoop does not persist assistant tool calls when the tool iteration c
             },
           }),
           sessionId: session.id,
-          toolPolicy: { workspaceRoot: process.cwd() },
+          toolExecutionPolicy: { workspaceRoot: process.cwd() },
           tools: [],
         }),
       ),
@@ -241,7 +241,7 @@ test('streamLoop swallows event sink failures', async () => {
       eventPublisher: publisher,
       provider,
       sessionId: session.id,
-      toolPolicy: { workspaceRoot: process.cwd() },
+      toolExecutionPolicy: { workspaceRoot: process.cwd() },
       tools: [],
     }),
   );
@@ -269,7 +269,7 @@ test('streamLoop owns fallback text when provider returns an empty non-tool repl
       history: session.messages,
       provider,
       sessionId: session.id,
-      toolPolicy: { workspaceRoot: process.cwd() },
+      toolExecutionPolicy: { workspaceRoot: process.cwd() },
       tools: [],
     }),
   );
@@ -316,7 +316,7 @@ test('streamLoop wires tool results back into the next provider request', async 
         history: [],
         provider,
         sessionId: 'tool-session',
-        toolPolicy: { workspaceRoot: rootDir },
+        toolExecutionPolicy: { workspaceRoot: rootDir },
         tools: [new ReadFileTool()],
       }),
     );
@@ -375,7 +375,7 @@ test('streamLoop degrades malformed tool input into a normal tool error', async 
       history: [],
       provider,
       sessionId: 'tool-error-session',
-      toolPolicy: { workspaceRoot: process.cwd() },
+      toolExecutionPolicy: { workspaceRoot: process.cwd() },
       tools: [new ReadFileTool()],
     }),
   );
@@ -419,7 +419,7 @@ test('streamLoop yields assistant deltas and final message while events stay coa
       provider,
       sessionId: session.id,
       stream: true,
-      toolPolicy: { workspaceRoot: process.cwd() },
+      toolExecutionPolicy: { workspaceRoot: process.cwd() },
       tools: [],
     }),
   );
@@ -496,7 +496,7 @@ test('streamLoop yields assistant_message_completed before tool execution after 
       provider,
       sessionId: session.id,
       stream: true,
-      toolPolicy: { workspaceRoot: process.cwd() },
+      toolExecutionPolicy: { workspaceRoot: process.cwd() },
       tools: [],
     }),
   );
@@ -545,7 +545,7 @@ test('streamLoop falls back to batch generation when streaming is enabled but un
       provider,
       sessionId: session.id,
       stream: true,
-      toolPolicy: { workspaceRoot: process.cwd() },
+      toolExecutionPolicy: { workspaceRoot: process.cwd() },
       tools: [],
     }),
   );
@@ -576,7 +576,7 @@ test('streamLoop falls back to batch generation when streaming fails before any 
       provider,
       sessionId: session.id,
       stream: true,
-      toolPolicy: { workspaceRoot: process.cwd() },
+      toolExecutionPolicy: { workspaceRoot: process.cwd() },
       tools: [],
     }),
   );
@@ -608,7 +608,7 @@ test('streamLoop falls back to batch generation when streaming emits only empty 
       provider,
       sessionId: session.id,
       stream: true,
-      toolPolicy: { workspaceRoot: process.cwd() },
+      toolExecutionPolicy: { workspaceRoot: process.cwd() },
       tools: [],
     }),
   );
@@ -640,7 +640,7 @@ test('streamLoop keeps a completed streamed response when stream teardown fails'
       provider,
       sessionId: session.id,
       stream: true,
-      toolPolicy: { workspaceRoot: process.cwd() },
+      toolExecutionPolicy: { workspaceRoot: process.cwd() },
       tools: [],
     }),
   );
