@@ -12,7 +12,7 @@ import {
 } from '../../../harness/index.js';
 import { createCliLoggers } from './logging.js';
 import { getProviderDefinition } from './provider-config.js';
-import { createSessionStore, formatSessionStore, getSessionStoreDefinition } from './session-store.js';
+import { createSession, formatSessionStore, getSessionStoreDefinition } from './session-store.js';
 
 function getProviderName(args: string[]): ProviderName {
   for (let index = 0; index < args.length; index += 1) {
@@ -98,14 +98,14 @@ async function main(): Promise<void> {
   const providerDefinition = getProviderDefinition(providerName);
   const sessionId = getSessionId(args) ?? 'local-session';
   const sessionStoreDefinition = getSessionStoreDefinition(args);
+  const session = createSession(sessionStoreDefinition, sessionId);
   const cli = createInterface({ input, output });
   const { logPaths, loggers } = await createCliLoggers(sessionId);
   const harness = createHarness({
     debug,
     loggers,
     provider: providerDefinition,
-    sessionId,
-    sessionStore: createSessionStore(sessionStoreDefinition),
+    session,
     stream,
     toolPolicy: {
       commandAllowlist: ['git', 'ls', 'pwd'],

@@ -1,17 +1,18 @@
 import { randomUUID } from 'node:crypto';
 
+import { snapshotEvent } from './events/snapshot.js';
 import type { HarnessEvent, HarnessEventListener } from './events/types.js';
+import { createAsyncQueue } from './async-queue.js';
 import { createFanoutLogger } from './logger/fanout.js';
 import { emitRuntimeTrace } from './logger/runtime-trace.js';
 import type { HarnessLogger } from './logger/types.js';
 import { streamLoop, type TurnChunk } from './loop/loop.js';
-import { createAsyncQueue } from './loop/queue.js';
+import { snapshotTurnChunk } from './loop/snapshot.js';
 import type { ModelProvider } from './models/provider.js';
 import { createProvider, type ProviderDefinition } from './providers/factory.js';
 import { MemorySessionStore } from './sessions/memory-store.js';
-import { ensureSession } from './sessions/session-init.js';
-import type { Message, Session } from './sessions/types.js';
-import type { SessionStore } from './sessions/store.js';
+import { Session } from './sessions/session.js';
+import type { Message } from './sessions/types.js';
 import type { Tool } from './tools/types.js';
 import type { ToolPolicy } from './tools/context.js';
 
@@ -27,30 +28,53 @@ export type CreateHarnessOptions = {
   loggers?: HarnessLogger[];
   providerInstance?: ModelProvider;
   provider?: ProviderDefinition;
-  sessionStore?: SessionStore;
-  sessionId?: string;
+  session?: Session;
   stream?: boolean;
   systemPrompt?: string;
   toolPolicy?: ToolPolicy;
   tools?: Tool[];
 };
 
-function deepFreeze<T>(value: T): T {
-  if (!value || typeof value !== 'object') {
-    return value;
+function emitHarnessEvent(
+  event: HarnessEvent,
+  listeners: Set<HarnessEventListener>,
+  runtimeLogger: HarnessLogger | undefined,
+): void {
+  emitRuntimeTrace(runtimeLogger, 'event_emitted', {
+    eventType: event.type,
+    sessionId: event.sessionId,
+    turnId: event.turnId,
+  });
+
+  if (listeners.size === 0) {
+    return;
   }
 
-  for (const nestedValue of Object.values(value)) {
-    deepFreeze(nestedValue);
-  }
+  const frozenEvent = snapshotEvent(event);
 
-  return Object.freeze(value);
+  for (const listener of listeners) {
+    try {
+      const result = listener(frozenEvent);
+
+      if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
+        void Promise.resolve(result).catch(() => {
+          emitRuntimeTrace(runtimeLogger, 'listener_failed', {
+            eventType: frozenEvent.type,
+          });
+        });
+      }
+    } catch {
+      emitRuntimeTrace(runtimeLogger, 'listener_failed', {
+        eventType: frozenEvent.type,
+      });
+    }
+  }
 }
 
 export function createHarness(options: CreateHarnessOptions = {}): Harness {
   const provider = options.providerInstance ?? (options.provider ? createProvider(options.provider) : null);
   const runtimeLogger = createFanoutLogger(options.loggers);
-  const sessionStore = options.sessionStore ?? new MemorySessionStore();
+  const session = options.session ?? new Session({ id: 'local-session', store: new MemorySessionStore() });
   const systemPrompt = options.systemPrompt;
   const toolPolicy = options.toolPolicy ?? { workspaceRoot: process.cwd() };
   const tools = options.tools ?? [];
@@ -62,12 +86,6 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
 
   const resolvedProvider = provider;
 
-  const session: Session = {
-    id: options.sessionId ?? 'local-session',
-    createdAt: new Date().toISOString(),
-    messages: [],
-  };
-
   emitRuntimeTrace(runtimeLogger, 'session_started', {
     debug: Boolean(options.debug),
     provider: provider.name,
@@ -76,11 +94,10 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
     stream: Boolean(options.stream),
   });
 
-  let sendQueue: Promise<void> = Promise.resolve();
-
   function enqueueStream(content: string): AsyncIterable<TurnChunk> & AsyncIterator<TurnChunk> {
     const queue = createAsyncQueue<TurnChunk>();
     const abortController = new AbortController();
+    let backgroundTask: Promise<void> | null = null;
     let started = false;
 
     const start = (): void => {
@@ -90,73 +107,48 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
 
       started = true;
 
-      const sessionReady = ensureSession({ session, sessionStore });
-      const waitForTurn = sendQueue;
-      let releaseTurn!: () => void;
-
-      sendQueue = new Promise((resolve) => {
-        releaseTurn = resolve;
-      });
-
-      void (async () => {
+      backgroundTask = session.runExclusive(async () => {
         try {
-          await sessionReady;
-          await waitForTurn;
+          await session.ensure();
 
-          for await (const chunk of streamLoop({
+          const iterator = streamLoop({
             content,
             debug: options.debug,
             emitEvent(event: HarnessEvent): void {
-              emitRuntimeTrace(runtimeLogger, 'event_emitted', {
-                eventType: event.type,
-                sessionId: event.sessionId,
-                turnId: event.turnId,
-              });
-
-              if (listeners.size === 0) {
-                return;
-              }
-
-              const frozenEvent = deepFreeze(structuredClone(event));
-
-              for (const listener of listeners) {
-                try {
-                  const result = listener(frozenEvent);
-
-                  if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
-                    void Promise.resolve(result).catch(() => {
-                      emitRuntimeTrace(runtimeLogger, 'listener_failed', {
-                        eventType: frozenEvent.type,
-                      });
-                    });
-                  }
-                } catch {
-                  emitRuntimeTrace(runtimeLogger, 'listener_failed', {
-                    eventType: frozenEvent.type,
-                  });
-                }
-              }
+              emitHarnessEvent(event, listeners, runtimeLogger);
             },
+            history: session.messages,
             logger: runtimeLogger,
             provider: resolvedProvider,
+            sessionId: session.id,
             signal: abortController.signal,
-            session,
-            sessionStore,
             stream: options.stream,
             systemPrompt,
             toolPolicy,
             tools,
-          })) {
-            queue.push(chunk);
+          });
+          let turnMessages: Message[] = [];
+
+          while (true) {
+            const result = await iterator.next();
+
+            if (result.done) {
+              turnMessages = result.value;
+              break;
+            }
+
+            queue.push(snapshotTurnChunk(result.value));
           }
 
+          await session.commit(turnMessages);
           queue.end();
         } catch (error: unknown) {
           queue.fail(error);
-        } finally {
-          releaseTurn();
+          throw error;
         }
-      })();
+      });
+
+      void backgroundTask.catch(() => {});
     };
 
     return {
@@ -173,7 +165,13 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
         }
 
         abortController.abort();
-        return queue.iterable.return?.() ?? Promise.resolve({ done: true, value: undefined });
+
+        return (async () => {
+          await (queue.iterable.return?.() ?? Promise.resolve({ done: true, value: undefined }));
+          await backgroundTask?.catch(() => {});
+
+          return { done: true, value: undefined };
+        })();
       },
     };
   }

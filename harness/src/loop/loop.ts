@@ -3,8 +3,7 @@ import type { HarnessLogger } from '../logger/types.js';
 import type { ModelProvider } from '../models/provider.js';
 import { supportsStreaming } from '../models/provider.js';
 import type { ModelMessage, ModelRequest, ModelResponse } from '../models/types.js';
-import type { SessionStore } from '../sessions/store.js';
-import type { Message, Session } from '../sessions/types.js';
+import type { Message } from '../sessions/types.js';
 import { createToolContext } from '../tools/context.js';
 import type { ToolPolicy } from '../tools/context.js';
 import { executeToolCall, getToolDefinitions, getToolMap } from '../tools/runtime.js';
@@ -19,12 +18,12 @@ export type LoopInput = {
   content: string;
   debug?: boolean;
   emitEvent?: (event: HarnessEvent) => void;
+  history: readonly Message[];
   logger?: HarnessLogger;
   options?: LoopOptions;
   provider: ModelProvider;
   signal?: AbortSignal;
-  session: Session;
-  sessionStore: SessionStore;
+  sessionId: string;
   stream?: boolean;
   systemPrompt?: string;
   toolPolicy: ToolPolicy;
@@ -62,7 +61,7 @@ function getFallbackAssistantContent(response: { text: string; toolCalls?: { len
   return 'I could not produce a response for that request.';
 }
 
-function toModelMessages(messages: Message[]): ModelMessage[] {
+function toModelMessages(messages: readonly Message[]): ModelMessage[] {
   return messages.map((message) => {
     if (message.role === 'tool') {
       return {
@@ -90,9 +89,8 @@ function toModelMessages(messages: Message[]): ModelMessage[] {
   });
 }
 
-async function appendMessage(session: Session, sessionStore: SessionStore, message: Message): Promise<void> {
-  await sessionStore.appendMessage(session.id, message);
-  session.messages.push(message);
+function appendMessage(messages: Message[], message: Message): void {
+  messages.push(message);
 }
 
 function getProviderResponse({
@@ -182,20 +180,21 @@ export async function* streamLoop({
   content,
   debug,
   emitEvent,
+  history,
   logger,
   options,
   provider,
   signal,
-  session,
-  sessionStore,
+  sessionId,
   stream,
   systemPrompt,
   toolPolicy,
   tools,
-}: LoopInput): AsyncIterable<TurnChunk> {
+}: LoopInput): AsyncGenerator<TurnChunk, Message[]> {
   let currentIteration = 0;
   let currentErrorType: 'provider' | 'tool' | 'runtime' = 'runtime';
   let totalToolCalls = 0;
+  const turnMessages: Message[] = [];
 
   const userMessage: Message = {
     role: 'user',
@@ -212,20 +211,23 @@ export async function* streamLoop({
     emitEvent,
     logger,
     provider,
-    sessionId: session.id,
+    sessionId,
     toolDefinitions,
   });
   observer.turnStarted(content.length);
   const resolvedSystemPrompt = systemPrompt?.trim() ? systemPrompt : undefined;
+  const getTranscript = (): Message[] => [...history, ...turnMessages];
 
   try {
     throwIfAborted(signal);
-    await appendMessage(session, sessionStore, userMessage);
+    appendMessage(turnMessages, userMessage);
 
     while (true) {
+      const transcript = getTranscript();
+
       currentIteration += 1;
-      observer.iterationStarted(currentIteration, session.messages.length);
-      observer.providerRequested(currentIteration, session.messages);
+      observer.iterationStarted(currentIteration, transcript.length);
+      observer.providerRequested(currentIteration, transcript);
 
       currentErrorType = 'provider';
       throwIfAborted(signal);
@@ -237,7 +239,7 @@ export async function* streamLoop({
         observer,
         provider,
         request: {
-          messages: toModelMessages(session.messages),
+          messages: toModelMessages(transcript),
           signal,
           systemPrompt: resolvedSystemPrompt,
           tools: toolDefinitions,
@@ -286,7 +288,7 @@ export async function* streamLoop({
         toolCalls: response.toolCalls,
       };
 
-      await appendMessage(session, sessionStore, assistantMessage);
+      appendMessage(turnMessages, assistantMessage);
 
       if (!response.toolCalls?.length) {
         observer.turnFinished(currentIteration, totalToolCalls, assistantMessage.content.length);
@@ -296,7 +298,7 @@ export async function* streamLoop({
           type: 'final_message',
         };
 
-        return;
+        return turnMessages;
       }
 
       if (streamedAssistantDelta) {
@@ -317,7 +319,7 @@ export async function* streamLoop({
         throwIfAborted(signal);
         observer.toolFinished(currentIteration, toolCall, toolResult, Date.now() - toolStartTime);
 
-        await appendMessage(session, sessionStore, {
+        appendMessage(turnMessages, {
           ...toolResult,
           createdAt: new Date().toISOString(),
           role: 'tool',

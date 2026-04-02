@@ -1,8 +1,8 @@
-import type { Message, Session } from './types.js';
+import type { Message, SessionState } from './types.js';
 
 export interface SessionStore {
   appendMessage(sessionId: string, message: Message): Promise<void>;
-  createSession(session: Session): Promise<Session>;
-  getSession(sessionId: string): Promise<Session | null>;
+  createSession(session: SessionState): Promise<SessionState>;
+  getSession(sessionId: string): Promise<SessionState | null>;
   listMessages(sessionId: string): Promise<Message[]>;
 }

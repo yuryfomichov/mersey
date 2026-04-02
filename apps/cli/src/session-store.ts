@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 
-import { FilesystemSessionStore, MemorySessionStore, type SessionStore } from '../../../harness/index.js';
+import { FilesystemSessionStore, MemorySessionStore, Session, type SessionStore } from '../../../harness/index.js';
 
 export type SessionStoreDefinition =
   | {
@@ -44,6 +44,13 @@ export function createSessionStore(definition: SessionStoreDefinition): SessionS
     default:
       throw new Error('Unsupported session store definition.');
   }
+}
+
+export function createSession(definition: SessionStoreDefinition, sessionId: string): Session {
+  return new Session({
+    id: sessionId,
+    store: createSessionStore(definition),
+  });
 }
 
 export function formatSessionStore(definition: SessionStoreDefinition): string {
