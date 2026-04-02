@@ -1,6 +1,6 @@
 import type { Message, SessionState } from './types.js';
 import type { SessionStore } from './store.js';
-import { freezeDeep } from '../utils/object.js';
+import { snapshotMessages, snapshotSessionState } from './snapshot.js';
 
 function cloneMessage<T extends Message>(message: T): T {
   return structuredClone(message);
@@ -12,14 +12,6 @@ function cloneState(state: SessionState): SessionState {
     id: state.id,
     messages: state.messages.map((message) => cloneMessage(message)),
   };
-}
-
-function freezeMessageSnapshot<T extends Message>(message: T): T {
-  return freezeDeep(cloneMessage(message));
-}
-
-function freezeStateSnapshot(state: SessionState): SessionState {
-  return freezeDeep(cloneState(state));
 }
 
 export type SessionOptions = {
@@ -55,7 +47,7 @@ export class Session {
 
   get messages(): readonly Message[] {
     if (!this.messagesSnapshot) {
-      this.messagesSnapshot = this.stateValue.messages.map((message) => freezeMessageSnapshot(message));
+      this.messagesSnapshot = snapshotMessages(this.stateValue.messages);
     }
 
     return this.messagesSnapshot;
@@ -63,7 +55,7 @@ export class Session {
 
   get state(): SessionState {
     if (!this.stateSnapshot) {
-      this.stateSnapshot = freezeStateSnapshot(this.stateValue);
+      this.stateSnapshot = snapshotSessionState(this.stateValue);
     }
 
     return this.stateSnapshot;

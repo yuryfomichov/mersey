@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 
+import { snapshotEvent } from './events/snapshot.js';
 import type { HarnessEvent, HarnessEventListener } from './events/types.js';
 import { createAsyncQueue } from './async-queue.js';
 import { createFanoutLogger } from './logger/fanout.js';
 import { emitRuntimeTrace } from './logger/runtime-trace.js';
 import type { HarnessLogger } from './logger/types.js';
 import { streamLoop, type TurnChunk } from './loop/loop.js';
+import { snapshotTurnChunk } from './loop/snapshot.js';
 import type { ModelProvider } from './models/provider.js';
 import { createProvider, type ProviderDefinition } from './providers/factory.js';
 import { MemorySessionStore } from './sessions/memory-store.js';
@@ -13,7 +15,6 @@ import { Session } from './sessions/session.js';
 import type { Message } from './sessions/types.js';
 import type { Tool } from './tools/types.js';
 import type { ToolPolicy } from './tools/context.js';
-import { freezeDeep } from './utils/object.js';
 
 export type Harness = {
   session: Session;
@@ -49,7 +50,7 @@ function emitHarnessEvent(
     return;
   }
 
-  const frozenEvent = freezeDeep(structuredClone(event));
+  const frozenEvent = snapshotEvent(event);
 
   for (const listener of listeners) {
     try {
@@ -68,10 +69,6 @@ function emitHarnessEvent(
       });
     }
   }
-}
-
-function snapshotChunk(chunk: TurnChunk): TurnChunk {
-  return freezeDeep(structuredClone(chunk));
 }
 
 export function createHarness(options: CreateHarnessOptions = {}): Harness {
@@ -140,7 +137,7 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
               break;
             }
 
-            queue.push(snapshotChunk(result.value));
+            queue.push(snapshotTurnChunk(result.value));
           }
 
           await session.commit(turnMessages);
