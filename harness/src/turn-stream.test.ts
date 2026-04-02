@@ -3,6 +3,7 @@ import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { HarnessObserver } from './events/observer.js';
+import type { ModelProvider } from './models/provider.js';
 import { FakeProvider } from './providers/fake.js';
 import { MemorySessionStore } from './sessions/memory-store.js';
 import { createTestSession, collectChunks } from './test-helpers.js';
@@ -66,6 +67,37 @@ test('createTurnStreamFactory starts on first pull and ignores pre-consumption r
     },
     type: 'final_message',
   });
+});
+
+test('createTurnStreamFactory rejects iteration when the background turn throws undefined', async () => {
+  const session = createTestSession(new MemorySessionStore());
+  const provider: ModelProvider = {
+    model: 'broken-model',
+    name: 'broken-provider',
+    async generate() {
+      throw undefined;
+    },
+  };
+  const streamTurn = createTurnStreamFactory({
+    observer: new HarnessObserver({
+      getSessionId: () => session.id,
+      logger: undefined,
+      providerName: provider.name,
+    }),
+    provider,
+    session,
+    toolPolicy: { workspaceRoot: process.cwd() },
+    tools: [],
+  });
+
+  await assert.rejects(
+    async () => {
+      for await (const _chunk of streamTurn('hello')) {
+        // No-op.
+      }
+    },
+    (error) => error === undefined,
+  );
 });
 
 test('createTurnStreamFactory return aborts an active turn, drops partial history, and frees the queue', async () => {
