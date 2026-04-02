@@ -6,8 +6,6 @@ import test from 'node:test';
 
 import { createToolContext } from './context.js';
 import { ReadFileTool } from './read-file.js';
-import { executeToolCall } from './runtime.js';
-import { getToolMap } from './runtime.js';
 
 test('ReadFileTool reads files relative to the workspace root', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
@@ -131,34 +129,4 @@ test('ReadFileTool rejects denylisted paths from shared policy', async () => {
   } finally {
     await rm(rootDir, { force: true, recursive: true });
   }
-});
-
-test('executeToolCall returns an error result for unknown tools', async () => {
-  const result = await executeToolCall(
-    {
-      id: 'call-1',
-      input: { path: 'note.txt' },
-      name: 'missing_tool',
-    },
-    getToolMap([new ReadFileTool()]),
-    createToolContext({ workspaceRoot: process.cwd() }),
-  );
-
-  assert.equal(result.isError, true);
-  assert.equal(result.content, 'Unknown tool: missing_tool');
-});
-
-test('executeToolCall wraps tool execution errors', async () => {
-  const result = await executeToolCall(
-    {
-      id: 'call-1',
-      input: {},
-      name: 'read_file',
-    },
-    getToolMap([new ReadFileTool()]),
-    createToolContext({ workspaceRoot: process.cwd() }),
-  );
-
-  assert.equal(result.isError, true);
-  assert.equal(result.content, 'read_file requires a string path.');
 });

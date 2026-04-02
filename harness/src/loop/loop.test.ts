@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { withTempDir, writeWorkspaceFiles } from '../../test/test-helpers.js';
 import { HarnessObserver } from '../events/observer.js';
 import type { HarnessEventSink } from '../events/publisher.js';
 import { HarnessEventPublisher } from '../events/publisher.js';
@@ -8,6 +9,7 @@ import type { HarnessEvent } from '../events/types.js';
 import type { ModelProvider } from '../models/provider.js';
 import { FakeProvider } from '../providers/fake.js';
 import type { Message, SessionState } from '../sessions/types.js';
+import { ReadFileTool } from '../tools/read-file.js';
 import { streamLoop } from './loop.js';
 
 function createSession(id: string): SessionState {
@@ -275,6 +277,121 @@ test('streamLoop owns fallback text when provider returns an empty non-tool repl
   assert.equal(reply.content, 'I could not produce a response for that request.');
 });
 
+test('streamLoop wires tool results back into the next provider request', async () => {
+  await withTempDir(async (rootDir) => {
+    await writeWorkspaceFiles(rootDir, { 'note.txt': 'hello from file' });
+
+    let callCount = 0;
+    const provider = new FakeProvider({
+      reply: (input) => {
+        callCount += 1;
+
+        if (callCount === 1) {
+          return {
+            text: '',
+            toolCalls: [
+              {
+                id: 'call-read-1',
+                input: { path: 'note.txt' },
+                name: 'read_file',
+              },
+            ],
+          };
+        }
+
+        const lastMessage = input.messages.at(-1);
+
+        assert.equal(lastMessage?.role, 'tool');
+        assert.equal(lastMessage?.content, 'hello from file');
+
+        return {
+          text: 'done:hello from file',
+        };
+      },
+    });
+
+    const { finalMessage, turnMessages } = await collectLoopResult(
+      createLoopInput({
+        content: 'read the note',
+        history: [],
+        provider,
+        sessionId: 'tool-session',
+        toolPolicy: { workspaceRoot: rootDir },
+        tools: [new ReadFileTool()],
+      }),
+    );
+
+    assert.equal(finalMessage.content, 'done:hello from file');
+    assert.equal(provider.requests.length, 2);
+    assert.deepEqual(
+      turnMessages.map((message) => message.role),
+      ['user', 'assistant', 'tool', 'assistant'],
+    );
+  });
+});
+
+test('streamLoop degrades malformed tool input into a normal tool error', async () => {
+  let callCount = 0;
+  const events: HarnessEvent[] = [];
+  const publisher = new HarnessEventPublisher();
+
+  publisher.subscribe((event) => {
+    events.push(event);
+  });
+
+  const provider = new FakeProvider({
+    reply: (input) => {
+      callCount += 1;
+
+      if (callCount === 1) {
+        return {
+          text: '',
+          toolCalls: [
+            {
+              id: 'call-bad-1',
+              input: null as unknown as Record<string, unknown>,
+              name: 'read_file',
+            },
+          ],
+        };
+      }
+
+      const lastMessage = input.messages.at(-1);
+
+      assert.equal(lastMessage?.role, 'tool');
+      assert.equal(lastMessage?.role === 'tool' ? lastMessage.isError : undefined, true);
+      assert.match(String(lastMessage?.content), /expected object|requires a string path/);
+
+      return {
+        text: 'recovered',
+      };
+    },
+  });
+
+  const { finalMessage, turnMessages } = await collectLoopResult(
+    createLoopInput({
+      content: 'trigger malformed tool call',
+      eventPublisher: publisher,
+      history: [],
+      provider,
+      sessionId: 'tool-error-session',
+      toolPolicy: { workspaceRoot: process.cwd() },
+      tools: [new ReadFileTool()],
+    }),
+  );
+
+  assert.equal(finalMessage.content, 'recovered');
+  assert.equal(turnMessages[2]?.role, 'tool');
+  assert.equal(turnMessages[2] && 'isError' in turnMessages[2] ? turnMessages[2].isError : undefined, true);
+  const toolRequestedEvent = events.find((event) => event.type === 'tool_requested');
+
+  assert.deepEqual(toolRequestedEvent?.type === 'tool_requested' ? toolRequestedEvent.safeArgs : undefined, {});
+  assert.equal(
+    events.some((event) => event.type === 'turn_failed'),
+    false,
+  );
+});
+
 test('streamLoop yields assistant deltas and final message while events stay coarse', async () => {
   const session = createSession('streaming-session');
 
@@ -338,6 +455,75 @@ test('streamLoop yields assistant deltas and final message while events stay coa
     events.map((event) => event.type),
     ['turn_started', 'provider_requested', 'provider_responded', 'turn_finished'],
   );
+});
+
+test('streamLoop yields assistant_message_completed before tool execution after streamed text', async () => {
+  const session = createSession('streaming-tool-session');
+
+  const chunks = [];
+  let callCount = 0;
+  const provider = new FakeProvider({
+    streamReply: () => {
+      callCount += 1;
+
+      if (callCount === 1) {
+        return [
+          { delta: 'thinking', type: 'text_delta' as const },
+          {
+            response: {
+              text: 'thinking',
+              toolCalls: [
+                {
+                  id: 'call-1',
+                  input: {},
+                  name: 'missing_tool',
+                },
+              ],
+            },
+            type: 'response_completed' as const,
+          },
+        ];
+      }
+
+      return [{ response: { text: 'done' }, type: 'response_completed' as const }];
+    },
+  });
+
+  const iterator = streamLoop(
+    createLoopInput({
+      content: 'hello',
+      history: session.messages,
+      provider,
+      sessionId: session.id,
+      stream: true,
+      toolPolicy: { workspaceRoot: process.cwd() },
+      tools: [],
+    }),
+  );
+
+  while (true) {
+    const result = await iterator.next();
+
+    if (result.done) {
+      break;
+    }
+
+    chunks.push(result.value);
+  }
+
+  assert.deepEqual(chunks, [
+    { delta: 'thinking', type: 'assistant_delta' },
+    { type: 'assistant_message_completed' },
+    {
+      message: {
+        content: 'done',
+        createdAt: chunks[2]?.type === 'final_message' ? chunks[2].message.createdAt : '',
+        role: 'assistant',
+        toolCalls: undefined,
+      },
+      type: 'final_message',
+    },
+  ]);
 });
 
 test('streamLoop falls back to batch generation when streaming is enabled but unsupported', async () => {
