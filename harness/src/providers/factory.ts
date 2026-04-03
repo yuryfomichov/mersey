@@ -1,4 +1,6 @@
 import type { ModelProvider } from '../models/provider.js';
+import { AnthropicProvider } from './anthropic.js';
+import type { AnthropicConfig } from './anthropic.js';
 import { FakeProvider } from './fake.js';
 import type { FakeProviderOptions } from './fake.js';
 import { MinimaxProvider } from './minimax.js';
@@ -6,9 +8,13 @@ import type { MinimaxConfig } from './minimax.js';
 import { OpenAIProvider } from './openai.js';
 import type { OpenAIConfig } from './openai.js';
 
-export type ProviderName = 'fake' | 'minimax' | 'openai';
+export type ProviderName = 'anthropic' | 'fake' | 'minimax' | 'openai';
 
 export type ProviderDefinition =
+  | {
+      config: AnthropicConfig;
+      name: 'anthropic';
+    }
   | {
       config?: FakeProviderOptions;
       name: 'fake';
@@ -28,6 +34,8 @@ function getUnsupportedProviderName(definition: ProviderDefinition): string {
 
 export function createProvider(definition: ProviderDefinition): ModelProvider {
   switch (definition.name) {
+    case 'anthropic':
+      return new AnthropicProvider(definition.config);
     case 'fake':
       return new FakeProvider(definition.config);
     case 'minimax':
@@ -40,7 +48,7 @@ export function createProvider(definition: ProviderDefinition): ModelProvider {
 }
 
 export function parseProviderName(value: string): ProviderName {
-  if (value === 'fake' || value === 'minimax' || value === 'openai') {
+  if (value === 'anthropic' || value === 'fake' || value === 'minimax' || value === 'openai') {
     return value;
   }
 

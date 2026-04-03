@@ -67,7 +67,6 @@ function createObserver(input: {
     getSessionId: () => input.sessionId,
     logger: undefined,
     providerName: input.provider.name,
-    stream: false,
   });
 
   observer.sessionStarted();
@@ -105,7 +104,7 @@ function createLoopInput(input: {
     }),
     options: input.options,
     provider: input.provider,
-    stream: input.stream,
+    stream: input.stream ?? false,
     systemPrompt: input.systemPrompt,
     toolRuntimeFactory: createToolRuntimeFactory({ policy: input.toolExecutionPolicy, tools: [...input.tools] }),
   };
@@ -525,109 +524,74 @@ test('streamLoop yields assistant_message_completed before tool execution after 
   ]);
 });
 
-test('streamLoop falls back to batch generation when streaming is enabled but unsupported', async () => {
-  const session = createSession('stream-fallback-session');
-
-  let callCount = 0;
-  const provider = {
-    model: 'no-stream-model',
-    name: 'no-stream',
-    async generate() {
-      callCount += 1;
-      return { text: 'batch reply' };
-    },
-  };
-  const reply = await collectFinalMessage(
-    createLoopInput({
-      content: 'hello',
-      history: session.messages,
-      provider,
-      sessionId: session.id,
-      stream: true,
-      toolExecutionPolicy: { workspaceRoot: process.cwd() },
-      tools: [],
-    }),
-  );
-
-  assert.equal(callCount, 1);
-  assert.equal(reply.content, 'batch reply');
-});
-
-test('streamLoop falls back to batch generation when streaming fails before any deltas', async () => {
+test('streamLoop fails when streamed generation throws before any response completes', async () => {
   const session = createSession('stream-runtime-fallback-session');
 
-  let batchCallCount = 0;
   const provider = {
     model: 'flaky-stream-model',
     name: 'flaky-stream',
-    async generate() {
-      batchCallCount += 1;
-      return { text: 'batch reply' };
-    },
-    stream() {
+    async *generate() {
+      yield* [];
       throw new Error('stream failed');
     },
   };
-  const reply = await collectFinalMessage(
-    createLoopInput({
-      content: 'hello',
-      history: session.messages,
-      provider,
-      sessionId: session.id,
-      stream: true,
-      toolExecutionPolicy: { workspaceRoot: process.cwd() },
-      tools: [],
-    }),
-  );
 
-  assert.equal(batchCallCount, 1);
-  assert.equal(reply.content, 'batch reply');
+  await assert.rejects(
+    collectFinalMessage(
+      createLoopInput({
+        content: 'hello',
+        history: session.messages,
+        provider,
+        sessionId: session.id,
+        stream: true,
+        toolExecutionPolicy: { workspaceRoot: process.cwd() },
+        tools: [],
+      }),
+    ),
+    /stream failed/,
+  );
 });
 
-test('streamLoop falls back to batch generation when streaming emits only empty deltas before failing', async () => {
-  const session = createSession('stream-empty-delta-fallback-session');
+test('streamLoop fails when streamed generation emits only empty deltas before failing', async () => {
+  const session = createSession('stream-empty-delta-failure-session');
 
-  let batchCallCount = 0;
   const provider = {
     model: 'empty-delta-stream-model',
     name: 'empty-delta-stream',
-    async generate() {
-      batchCallCount += 1;
-      return { text: 'batch reply' };
-    },
-    async *stream() {
+    async *generate() {
       yield { delta: '', type: 'text_delta' as const };
       throw new Error('stream failed');
     },
   };
-  const reply = await collectFinalMessage(
-    createLoopInput({
-      content: 'hello',
-      history: session.messages,
-      provider,
-      sessionId: session.id,
-      stream: true,
-      toolExecutionPolicy: { workspaceRoot: process.cwd() },
-      tools: [],
-    }),
-  );
 
-  assert.equal(batchCallCount, 1);
-  assert.equal(reply.content, 'batch reply');
+  await assert.rejects(
+    collectFinalMessage(
+      createLoopInput({
+        content: 'hello',
+        history: session.messages,
+        provider,
+        sessionId: session.id,
+        stream: true,
+        toolExecutionPolicy: { workspaceRoot: process.cwd() },
+        tools: [],
+      }),
+    ),
+    /stream failed/,
+  );
 });
 
-test('streamLoop keeps a completed streamed response when stream teardown fails', async () => {
+test('streamLoop keeps a completed streamed response when provider teardown fails', async () => {
   const session = createSession('stream-teardown-session');
 
   let batchCallCount = 0;
   const provider = {
     model: 'teardown-stream-model',
     name: 'teardown-stream',
-    async generate() {
-      batchCallCount += 1;
-      return { text: 'batch reply' };
-    },
-    async *stream() {
+    async *generate(input: { stream: boolean }) {
+      if (!input.stream) {
+        batchCallCount += 1;
+      }
+
       yield { response: { text: 'stream reply' }, type: 'response_completed' as const };
       throw new Error('stream teardown failed');
     },
@@ -646,4 +610,32 @@ test('streamLoop keeps a completed streamed response when stream teardown fails'
 
   assert.equal(batchCallCount, 0);
   assert.equal(reply.content, 'stream reply');
+});
+
+test('streamLoop rejects multiple completed responses from one provider turn', async () => {
+  const session = createSession('stream-duplicate-completion-session');
+
+  const provider = {
+    model: 'duplicate-completion-model',
+    name: 'duplicate-completion',
+    async *generate() {
+      yield { response: { text: 'first' }, type: 'response_completed' as const };
+      yield { response: { text: 'second' }, type: 'response_completed' as const };
+    },
+  };
+
+  await assert.rejects(
+    collectFinalMessage(
+      createLoopInput({
+        content: 'hello',
+        history: session.messages,
+        provider,
+        sessionId: session.id,
+        stream: true,
+        toolExecutionPolicy: { workspaceRoot: process.cwd() },
+        tools: [],
+      }),
+    ),
+    /Provider stream returned more than one completed response/,
+  );
 });

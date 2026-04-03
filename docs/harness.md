@@ -25,14 +25,10 @@ const harness = createHarness({
   provider: { name: 'fake' },
 });
 
-await harness.ready();
-
-const reply = await harness.sendUserMessage('hello');
+const reply = await harness.sendMessage('hello');
 
 console.log(reply.content);
 ```
-
-`ready()` ensures the session is loaded before the app starts using it.
 
 ## Main Concepts
 
@@ -129,10 +125,9 @@ Apps that want incremental text output should consume `TurnChunk`s.
 ```ts
 const harness = createHarness({
   provider: { name: 'fake' },
-  stream: true,
 });
 
-for await (const chunk of harness.streamUserMessage('hello')) {
+for await (const chunk of harness.streamMessage('hello')) {
   if (chunk.type === 'assistant_delta') {
     process.stdout.write(chunk.delta);
   }

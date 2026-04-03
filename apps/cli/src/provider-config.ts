@@ -1,5 +1,11 @@
 import type { ProviderDefinition, ProviderName } from '../../../harness/index.js';
 
+const ANTHROPIC_PROVIDER_CONFIG = {
+  baseUrl: 'https://api.anthropic.com',
+  maxTokens: 2048,
+  model: 'claude-sonnet-4-20250514',
+} as const;
+
 const MINIMAX_PROVIDER_CONFIG = {
   baseUrl: 'https://api.minimax.io/anthropic',
   maxTokens: 2048,
@@ -24,6 +30,14 @@ function getRequiredEnv(env: NodeJS.ProcessEnv, name: string, owner: string): st
 
 export function getProviderDefinition(name: ProviderName, env: NodeJS.ProcessEnv = process.env): ProviderDefinition {
   switch (name) {
+    case 'anthropic':
+      return {
+        name: 'anthropic',
+        config: {
+          apiKey: getRequiredEnv(env, 'ANTHROPIC_API_KEY', 'anthropic'),
+          ...ANTHROPIC_PROVIDER_CONFIG,
+        },
+      };
     case 'fake':
       return {
         name: 'fake',

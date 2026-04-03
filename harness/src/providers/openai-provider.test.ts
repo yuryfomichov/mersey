@@ -3,8 +3,8 @@ import test from 'node:test';
 
 import type OpenAI from 'openai';
 
-import type { ModelStreamEvent } from '../models/types.js';
-import { OpenAILikeProvider } from './openai.js';
+import { collectEvents, collectResponse } from '../../test/provider-test-helpers.js';
+import { OpenAIProvider } from './openai.js';
 
 function createResponse(overrides: Partial<OpenAI.Responses.Response>): OpenAI.Responses.Response {
   return {
@@ -25,9 +25,9 @@ function createResponse(overrides: Partial<OpenAI.Responses.Response>): OpenAI.R
   } as unknown as OpenAI.Responses.Response;
 }
 
-test('OpenAILikeProvider passes systemPrompt as instructions to responses.create', async () => {
+test('OpenAIProvider passes systemPrompt as instructions to responses.create', async () => {
   const capturedRequests: Array<{ instructions?: string | null }> = [];
-  const provider = new OpenAILikeProvider({
+  const provider = new OpenAIProvider({
     apiKey: 'test-key',
     baseUrl: 'https://example.com',
     maxTokens: 256,
@@ -47,45 +47,37 @@ test('OpenAILikeProvider passes systemPrompt as instructions to responses.create
       async create(request: { instructions?: string | null }): Promise<OpenAI.Responses.Response> {
         capturedRequests.push(request);
 
-        return {
-          created_at: 0,
-          error: null,
-          id: 'resp_789',
-          incomplete_details: null,
-          instructions: null,
-          metadata: null,
-          model: 'gpt-test-model',
-          object: 'response',
-          output: [],
-          output_text: 'ok',
-          parallel_tool_calls: false,
-          temperature: null,
-          tool_choice: 'auto',
-        } as unknown as OpenAI.Responses.Response;
+        return createResponse({ output_text: 'ok' });
       },
     },
   };
 
-  await provider.generate({
-    messages: [{ content: 'hello', role: 'user' }],
-    systemPrompt: 'You are a helpful assistant.',
-  });
+  await collectEvents(
+    provider.generate({
+      messages: [{ content: 'hello', role: 'user' }],
+      stream: false,
+      systemPrompt: 'You are a helpful assistant.',
+    }),
+  );
 
   assert.equal(capturedRequests.length, 1);
   assert.equal(capturedRequests[0].instructions, 'You are a helpful assistant.');
 
-  await provider.generate({
-    messages: [{ content: 'hello', role: 'user' }],
-  });
+  await collectEvents(
+    provider.generate({
+      messages: [{ content: 'hello', role: 'user' }],
+      stream: false,
+    }),
+  );
 
   assert.equal(capturedRequests.length, 2);
   assert.equal(capturedRequests[1].instructions, undefined);
 });
 
-test('OpenAILikeProvider forwards input.signal to create and stream SDK calls', async () => {
+test('OpenAIProvider forwards input.signal to create and stream SDK calls', async () => {
   const createSignals: Array<AbortSignal | null | undefined> = [];
   const streamSignals: Array<AbortSignal | null | undefined> = [];
-  const provider = new OpenAILikeProvider({
+  const provider = new OpenAIProvider({
     apiKey: 'test-key',
     baseUrl: 'https://example.com',
     maxTokens: 256,
@@ -137,25 +129,29 @@ test('OpenAILikeProvider forwards input.signal to create and stream SDK calls', 
     },
   };
 
-  await provider.generate({
-    messages: [{ content: 'hello', role: 'user' }],
-    signal: controller.signal,
-  });
+  await collectEvents(
+    provider.generate({
+      messages: [{ content: 'hello', role: 'user' }],
+      signal: controller.signal,
+      stream: false,
+    }),
+  );
 
-  for await (const _event of provider.stream({
-    messages: [{ content: 'hello', role: 'user' }],
-    signal: controller.signal,
-  })) {
-    // consume stream
-  }
+  await collectEvents(
+    provider.generate({
+      messages: [{ content: 'hello', role: 'user' }],
+      signal: controller.signal,
+      stream: true,
+    }),
+  );
 
   assert.deepEqual(createSignals, [controller.signal]);
   assert.deepEqual(streamSignals, [controller.signal]);
 });
 
-test('OpenAILikeProvider forwards codec-produced input and tools to responses.create', async () => {
+test('OpenAIProvider forwards codec-produced input and tools to responses.create', async () => {
   const capturedRequests: Array<Record<string, unknown>> = [];
-  const provider = new OpenAILikeProvider({
+  const provider = new OpenAIProvider({
     apiKey: 'test-key',
     baseUrl: 'https://example.com',
     maxTokens: 256,
@@ -190,31 +186,34 @@ test('OpenAILikeProvider forwards codec-produced input and tools to responses.cr
     },
   };
 
-  const response = await provider.generate({
-    messages: [
-      { content: 'where am i?', role: 'user' },
-      {
-        content: '',
-        role: 'assistant',
-        toolCalls: [{ id: 'call_1', input: { path: 'note.txt' }, name: 'read_file' }],
-      },
-      { content: 'hello from file', isError: false, name: 'read_file', role: 'tool', toolCallId: 'call_1' },
-    ],
-    tools: [
-      {
-        description: 'Run a command.',
-        inputSchema: {
-          properties: {
-            command: { type: 'string' },
-            cwd: { type: 'string' },
-          },
-          required: ['command'],
-          type: 'object',
+  const response = await collectResponse(
+    provider.generate({
+      messages: [
+        { content: 'where am i?', role: 'user' },
+        {
+          content: '',
+          role: 'assistant',
+          toolCalls: [{ id: 'call_1', input: { path: 'note.txt' }, name: 'read_file' }],
         },
-        name: 'run_command',
-      },
-    ],
-  });
+        { content: 'hello from file', isError: false, name: 'read_file', role: 'tool', toolCallId: 'call_1' },
+      ],
+      stream: false,
+      tools: [
+        {
+          description: 'Run a command.',
+          inputSchema: {
+            properties: {
+              command: { type: 'string' },
+              cwd: { type: 'string' },
+            },
+            required: ['command'],
+            type: 'object',
+          },
+          name: 'run_command',
+        },
+      ],
+    }),
+  );
 
   assert.deepEqual(capturedRequests[0]?.input, [
     { content: 'where am i?', role: 'user', type: 'message' },
@@ -253,9 +252,9 @@ test('OpenAILikeProvider forwards codec-produced input and tools to responses.cr
   });
 });
 
-test('OpenAILikeProvider streams text deltas and returns the final response', async () => {
+test('OpenAIProvider streams text deltas and returns the final response', async () => {
   const capturedRequests: Array<Record<string, unknown>> = [];
-  const provider = new OpenAILikeProvider({
+  const provider = new OpenAIProvider({
     apiKey: 'test-key',
     baseUrl: 'https://example.com',
     maxTokens: 256,
@@ -308,26 +307,25 @@ test('OpenAILikeProvider streams text deltas and returns the final response', as
     },
   };
 
-  const events: ModelStreamEvent[] = [];
-
-  for await (const event of provider.stream({
-    messages: [{ content: 'hello', role: 'user' }],
-    tools: [
-      {
-        description: 'Run a command.',
-        inputSchema: {
-          properties: {
-            command: { type: 'string' },
+  const events = await collectEvents(
+    provider.generate({
+      messages: [{ content: 'hello', role: 'user' }],
+      stream: true,
+      tools: [
+        {
+          description: 'Run a command.',
+          inputSchema: {
+            properties: {
+              command: { type: 'string' },
+            },
+            required: ['command'],
+            type: 'object',
           },
-          required: ['command'],
-          type: 'object',
+          name: 'run_command',
         },
-        name: 'run_command',
-      },
-    ],
-  })) {
-    events.push(event);
-  }
+      ],
+    }),
+  );
 
   assert.deepEqual(capturedRequests[0]?.tools, [
     {
@@ -359,8 +357,8 @@ test('OpenAILikeProvider streams text deltas and returns the final response', as
   ]);
 });
 
-test('OpenAILikeProvider derives streamed final text from output items when output_text is undefined', async () => {
-  const provider = new OpenAILikeProvider({
+test('OpenAIProvider derives streamed final text from output items when output_text is undefined', async () => {
+  const provider = new OpenAIProvider({
     apiKey: 'test-key',
     baseUrl: 'https://example.com',
     maxTokens: 256,
@@ -427,13 +425,12 @@ test('OpenAILikeProvider derives streamed final text from output items when outp
     },
   };
 
-  const events: ModelStreamEvent[] = [];
-
-  for await (const event of provider.stream({
-    messages: [{ content: 'hello', role: 'user' }],
-  })) {
-    events.push(event);
-  }
+  const events = await collectEvents(
+    provider.generate({
+      messages: [{ content: 'hello', role: 'user' }],
+      stream: true,
+    }),
+  );
 
   assert.deepEqual(events, [
     { delta: 'hello', type: 'text_delta' },

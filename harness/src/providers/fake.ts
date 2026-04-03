@@ -1,4 +1,4 @@
-import type { StreamingModelProvider } from '../models/provider.js';
+import type { ModelProvider } from '../models/provider.js';
 import type { ModelRequest, ModelResponse, ModelStreamEvent } from '../models/types.js';
 
 type FakeProviderReply = string | ModelResponse | ((input: ModelRequest) => string | ModelResponse);
@@ -24,7 +24,7 @@ async function* toAsyncIterable(
   yield* events;
 }
 
-export class FakeProvider implements StreamingModelProvider {
+export class FakeProvider implements ModelProvider {
   readonly model: string;
   readonly name: string = 'fake';
   readonly requests: ModelRequest[] = [];
@@ -44,30 +44,27 @@ export class FakeProvider implements StreamingModelProvider {
     return typeof reply === 'string' ? { text: reply } : reply;
   }
 
-  async generate(input: ModelRequest): Promise<ModelResponse> {
-    this.requests.push(input);
+  private getStreamReply(input: ModelRequest): AsyncIterable<ModelStreamEvent> | ModelStreamEvent[] | undefined {
+    if (!this.streamReply) {
+      return undefined;
+    }
 
-    return this.getResponse(input);
+    return typeof this.streamReply === 'function' ? this.streamReply(input) : this.streamReply;
   }
 
-  async *stream(input: ModelRequest): AsyncIterable<ModelStreamEvent> {
+  async *generate(input: ModelRequest): AsyncIterable<ModelStreamEvent> {
     this.requests.push(input);
 
-    if (this.streamReply) {
-      const streamReply = typeof this.streamReply === 'function' ? this.streamReply(input) : this.streamReply;
+    if (input.stream) {
+      const streamReply = this.getStreamReply(input);
 
-      yield* toAsyncIterable(streamReply);
-      return;
+      if (streamReply) {
+        yield* toAsyncIterable(streamReply);
+        return;
+      }
     }
 
     const response = this.getResponse(input);
-
-    if (response.text) {
-      yield {
-        delta: response.text,
-        type: 'text_delta',
-      };
-    }
 
     yield {
       response,

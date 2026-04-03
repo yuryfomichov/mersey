@@ -12,12 +12,12 @@ type TurnStreamOptions = {
   observer: HarnessObserver;
   provider: ModelProvider;
   session: Session;
-  stream?: boolean;
+  stream: boolean;
   systemPrompt?: string;
   toolRuntimeFactory: ToolRuntimeFactory;
 };
 
-export type TurnStreamFactoryOptions = Omit<TurnStreamOptions, 'content'>;
+export type TurnStreamFactoryOptions = Omit<TurnStreamOptions, 'content' | 'stream'>;
 
 function createTurnStream({
   content,
@@ -106,10 +106,11 @@ function createTurnStream({
 
 export function createTurnStreamFactory(
   options: TurnStreamFactoryOptions,
-): (content: string) => AsyncIterable<TurnChunk> & AsyncIterator<TurnChunk> {
-  return (content: string) =>
+): (content: string, stream: boolean) => AsyncIterable<TurnChunk> & AsyncIterator<TurnChunk> {
+  return (content: string, stream: boolean) =>
     createTurnStream({
       ...options,
       content,
+      stream,
     });
 }

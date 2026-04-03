@@ -15,7 +15,6 @@ export type HarnessObserverOptions = {
   getSessionId: () => string;
   logger?: HarnessLogger;
   providerName: string;
-  stream?: boolean;
 };
 
 type ErrorType = TurnFailedEvent['errorType'];
@@ -49,18 +48,16 @@ export class HarnessObserver {
   private readonly logger: HarnessLogger | undefined;
   private readonly providerName: string;
   private readonly runId = randomUUID();
-  private readonly stream: boolean;
   private readonly eventPublisher: HarnessEventPublisher;
   private hasStartedSession = false;
   private currentTurnId: string | null = null;
   private currentTurnStartTime: number | null = null;
 
-  constructor({ debug, getSessionId, logger, providerName, stream }: HarnessObserverOptions) {
+  constructor({ debug, getSessionId, logger, providerName }: HarnessObserverOptions) {
     this.debug = Boolean(debug);
     this.getSessionId = getSessionId;
     this.logger = logger;
     this.providerName = providerName;
-    this.stream = Boolean(stream);
     const publisherOptions = this.logger
       ? {
           onEventPublished: (event: HarnessEvent) => {
@@ -93,7 +90,6 @@ export class HarnessObserver {
       provider: this.providerName,
       runId: this.runId,
       sessionId: this.getSessionId(),
-      stream: this.stream,
     });
   }
 
@@ -165,10 +161,6 @@ export class HarnessObserver {
       turnId: this.getTurnId(),
       usedFallbackText,
     });
-  }
-
-  providerTextDelta(_iteration: number, _delta: string): void {
-    // Raw streamed text is exposed through streamUserMessage(), not the event bus.
   }
 
   toolFinished(iteration: number, toolCall: ModelToolCall, toolResult: ToolExecutionResult, durationMs: number): void {

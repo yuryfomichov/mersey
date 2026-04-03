@@ -25,7 +25,6 @@ test('HarnessObserver emits session_started and event delivery traces', async ()
       },
     },
     providerName: 'fake',
-    stream: true,
   });
   observer.sessionStarted();
 
