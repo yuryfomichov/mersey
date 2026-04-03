@@ -27,7 +27,8 @@ export type LoopInput = {
  *   are yielded as the model generates output token-by-token.
  *
  * - `assistant_message_completed`: Emitted after all deltas when the assistant
- *   message contains tool calls. Signals that tool execution is about to begin.
+ *   message contains tool calls and at least one delta was streamed. Signals
+ *   that tool execution is about to begin.
  *
  * - `final_message`: The turn is complete. This is the final {@link Message}
  *   produced by the loop, either because the model responded without tool calls
