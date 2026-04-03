@@ -14,10 +14,19 @@ export async function collectResponse(
   iterable: AsyncIterable<ModelStreamEvent>,
 ): Promise<Extract<ModelStreamEvent, { type: 'response_completed' }>['response']> {
   const events = await collectEvents(iterable);
-  const responseEvent = events.find((event) => event.type === 'response_completed');
+  const responseEvents = events.filter(
+    (event): event is Extract<ModelStreamEvent, { type: 'response_completed' }> => event.type === 'response_completed',
+  );
 
-  if (!responseEvent || responseEvent.type !== 'response_completed') {
-    throw new Error('Expected a response_completed event.');
+  if (responseEvents.length !== 1) {
+    throw new Error(`Expected exactly one response_completed event, got ${responseEvents.length}.`);
+  }
+
+  const responseEvent = responseEvents[0];
+  const lastEvent = events[events.length - 1];
+
+  if (lastEvent !== responseEvent) {
+    throw new Error('Expected response_completed to be the last event.');
   }
 
   return responseEvent.response;

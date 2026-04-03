@@ -98,6 +98,7 @@ async function* getProviderResponse({
 }): AsyncIterable<{ delta: string; type: 'text_delta' } | { response: ModelResponse; type: 'response_completed' }> {
   const providerStartTime = Date.now();
   let response: ModelResponse | null = null;
+  const protocolViolationError = 'Provider stream returned more than one completed response.';
 
   try {
     throwIfAborted(signal);
@@ -121,6 +122,10 @@ async function* getProviderResponse({
       response = event.response;
     }
   } catch (error: unknown) {
+    if (error instanceof Error && error.message === protocolViolationError) {
+      throw error;
+    }
+
     if (!response) {
       throw error;
     }

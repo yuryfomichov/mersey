@@ -611,3 +611,31 @@ test('streamLoop keeps a completed streamed response when provider teardown fail
   assert.equal(batchCallCount, 0);
   assert.equal(reply.content, 'stream reply');
 });
+
+test('streamLoop rejects multiple completed responses from one provider turn', async () => {
+  const session = createSession('stream-duplicate-completion-session');
+
+  const provider = {
+    model: 'duplicate-completion-model',
+    name: 'duplicate-completion',
+    async *generate() {
+      yield { response: { text: 'first' }, type: 'response_completed' as const };
+      yield { response: { text: 'second' }, type: 'response_completed' as const };
+    },
+  };
+
+  await assert.rejects(
+    collectFinalMessage(
+      createLoopInput({
+        content: 'hello',
+        history: session.messages,
+        provider,
+        sessionId: session.id,
+        stream: true,
+        toolExecutionPolicy: { workspaceRoot: process.cwd() },
+        tools: [],
+      }),
+    ),
+    /Provider stream returned more than one completed response/,
+  );
+});
