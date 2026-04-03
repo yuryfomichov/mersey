@@ -1,3 +1,33 @@
+/**
+ * A single-producer, single-consumer async queue that bridges synchronous pushes
+ * with asynchronous pulls. Values pushed via {@link push} are buffered until
+ * consumed via the {@link iterable} iterator. If a consumer calls {@link iterable.next()}
+ * when the queue is empty, the call suspends until a value is pushed.
+ *
+ * This is designed to connect a synchronous generator (which yields values as they
+ * arrive) with an async consumer (which needs to await each value). Without this
+ * buffer, the producer would block waiting for the consumer to process each value.
+ *
+ * State machine:
+ * - Running: values can be pushed and consumed
+ * - Ended: {@link end} called, remaining buffered values can be consumed, then iterator yields done
+ * - Failed: {@link fail} called, iterator rejects with the error
+ *
+ * @example
+ * const queue = createAsyncQueue<string>();
+ *
+ * // Consumer (async iteration)
+ * (async () => {
+ *   for await (const value of queue.iterable) {
+ *     console.log(value); // prints: "hello", then "world"
+ *   }
+ * })();
+ *
+ * // Producer (synchronous push)
+ * queue.push("hello");
+ * queue.push("world");
+ * queue.end();
+ */
 export type AsyncQueue<T> = {
   end(): void;
   fail(error: unknown): void;

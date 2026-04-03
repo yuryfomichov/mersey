@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import type OpenAI from 'openai';
 
-import { collectEvents, collectResponse } from '../../test/provider-test-helpers.js';
+import { collectEvents, collectResponse } from '../test/provider-test-helpers.js';
 import { OpenAIProvider } from './openai.js';
 
 function createResponse(overrides: Partial<OpenAI.Responses.Response>): OpenAI.Responses.Response {

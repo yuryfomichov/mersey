@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import Anthropic from '@anthropic-ai/sdk';
 
-import { collectEvents, collectResponse } from '../../test/provider-test-helpers.js';
+import { collectEvents, collectResponse } from '../test/provider-test-helpers.js';
 import { AnthropicProvider } from './anthropic.js';
 
 function createAnthropicMessage(content: Anthropic.Message['content']): Anthropic.Message {

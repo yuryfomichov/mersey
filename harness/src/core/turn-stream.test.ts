@@ -2,14 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { HarnessObserver } from './events/observer.js';
-import type { ModelProvider } from './models/provider.js';
-import { FakeProvider } from './providers/fake.js';
-import { MemorySessionStore } from './sessions/memory-store.js';
-import { Session } from './sessions/session.js';
-import type { SessionStore } from './sessions/store.js';
-import { createToolRuntimeFactory } from './tools/runtime/index.js';
-import type { Tool } from './tools/types.js';
+import { HarnessObserver } from '../events/observer.js';
+import type { ModelProvider } from '../models/provider.js';
+import { FakeProvider } from '../providers/fake.js';
+import { MemorySessionStore } from '../sessions/memory-store.js';
+import { Session } from '../sessions/session.js';
+import type { SessionStore } from '../sessions/store.js';
+import { createToolRuntimeFactory } from '../tools/runtime/index.js';
+import type { Tool } from '../tools/types.js';
 import { createTurnStreamFactory } from './turn-stream.js';
 
 function createTestSession(
