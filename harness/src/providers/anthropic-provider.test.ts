@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import Anthropic from '@anthropic-ai/sdk';
 
-import type { ModelStreamEvent } from '../models/types.js';
+import { collectEvents, collectResponse } from '../../test/provider-test-helpers.js';
 import { AnthropicProvider } from './anthropic.js';
 
 function createAnthropicMessage(content: Anthropic.Message['content']): Anthropic.Message {
@@ -27,29 +27,6 @@ function createAnthropicMessage(content: Anthropic.Message['content']): Anthropi
       service_tier: null,
     },
   };
-}
-
-async function collectEvents(iterable: AsyncIterable<ModelStreamEvent>): Promise<ModelStreamEvent[]> {
-  const events: ModelStreamEvent[] = [];
-
-  for await (const event of iterable) {
-    events.push(event);
-  }
-
-  return events;
-}
-
-async function collectResponse(
-  iterable: AsyncIterable<ModelStreamEvent>,
-): Promise<Extract<ModelStreamEvent, { type: 'response_completed' }>['response']> {
-  const events = await collectEvents(iterable);
-  const responseEvent = events.find((event) => event.type === 'response_completed');
-
-  if (!responseEvent || responseEvent.type !== 'response_completed') {
-    throw new Error('Expected a response_completed event.');
-  }
-
-  return responseEvent.response;
 }
 
 test('AnthropicProvider passes systemPrompt as system parameter', async () => {
