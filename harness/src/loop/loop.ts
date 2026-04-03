@@ -116,7 +116,7 @@ async function* getProviderResponse({
       }
 
       if (response) {
-        throw new Error('Provider stream returned more than one completed response.');
+        throw new Error(protocolViolationError);
       }
 
       response = event.response;
