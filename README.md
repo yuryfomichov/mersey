@@ -2,7 +2,7 @@
 
 Mersey is a local coding agent prototype.
 
-The repo is organized around a reusable `harness` package and thin apps that sit on top of it. Today the main app is `apps/cli`, which wires terminal input and approval prompts into the shared runtime.
+The repo is organized around a reusable `harness` package and thin apps that sit on top of it. Today the main app is `apps/cli`, which wires terminal input into the shared runtime.
 
 ## Goals
 
@@ -12,10 +12,10 @@ The repo is organized around a reusable `harness` package and thin apps that sit
 
 ## Repository Layout
 
-- `harness/`: reusable runtime for model turns, sessions, tools, approvals, and events
+- `harness/`: reusable runtime for model turns, sessions, tools, and events
 - `harness/index.ts`: public package entry point for apps consuming `harness`
 - `harness/src/harness.ts`: implementation behind `createHarness()`
-- `harness/src/loop/`: provider-agnostic turn loop and approval resume flow
+- `harness/src/loop/`: provider-agnostic turn loop and tool iteration flow
 - `harness/src/turn-stream.ts`: stream-oriented wrapper around a session turn
 - `harness/src/models/`: provider contracts and shared request/response types
 - `harness/src/providers/`: provider implementations, codecs, and factory
@@ -73,12 +73,12 @@ pnpm cli -- --provider fake --stream
 pnpm cli -- --provider openai --session-store filesystem --sessions-dir tmp/sessions
 ```
 
-The CLI registers a small set of tools from `harness` and asks the user to approve each tool call before execution.
+The CLI registers a small set of tools from `harness` for file and command access.
 
 ## Architecture Summary
 
 - Apps own interaction and presentation.
-- `harness` owns turn orchestration, approval pauses/resumes, tool execution, session state, and event emission.
+- `harness` owns turn orchestration, tool execution, session state, and event emission.
 - The turn loop depends on `ModelProvider`, not SDK-specific request or response types.
 - Provider-specific translation belongs in `harness/src/providers/` and `harness/src/providers/codecs/`.
 - Tool execution is routed through `harness/src/tools/runtime/`, which applies workspace and output policies.
@@ -90,7 +90,7 @@ See `docs/harness.md` for the main integration guide, including:
 
 - creating a harness
 - configuring providers and sessions
-- registering tools and approvals
+- registering tools
 - consuming streaming turn chunks
 - subscribing to events
 
