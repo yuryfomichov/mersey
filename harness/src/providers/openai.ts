@@ -1,8 +1,8 @@
 import OpenAI from 'openai';
 import type { FunctionTool, ResponseInputItem } from 'openai/resources/responses/responses';
 
-import type { StreamingModelProvider } from '../models/provider.js';
-import type { ModelRequest, ModelResponse, ModelStreamEvent } from '../models/types.js';
+import type { ModelProvider } from '../models/provider.js';
+import type { ModelRequest, ModelStreamEvent } from '../models/types.js';
 import { OpenAICodec } from './codecs/openai.js';
 
 export type OpenAILikeProviderConfig = {
@@ -14,20 +14,21 @@ export type OpenAILikeProviderConfig = {
 
 export type OpenAIConfig = OpenAILikeProviderConfig;
 
-export class OpenAILikeProvider implements StreamingModelProvider {
-  private readonly codec = new OpenAICodec();
+export abstract class OpenAILikeProvider implements ModelProvider {
+  protected readonly codec: OpenAICodec;
   protected readonly client: OpenAI;
   readonly maxTokens: number;
   readonly model: string;
   readonly name: string = 'openai-compatible';
 
-  constructor(config: OpenAILikeProviderConfig) {
+  constructor(config: OpenAILikeProviderConfig, codec: OpenAICodec) {
     this.client = new OpenAI({
       apiKey: config.apiKey,
       baseURL: config.baseUrl,
     });
     this.maxTokens = config.maxTokens;
     this.model = config.model;
+    this.codec = codec;
   }
 
   private getRequest(input: ModelRequest): {
@@ -46,18 +47,21 @@ export class OpenAILikeProvider implements StreamingModelProvider {
     };
   }
 
-  async generate(input: ModelRequest): Promise<ModelResponse> {
-    const response = await this.client.responses.create(this.getRequest(input), { signal: input.signal });
-    const toolCalls = this.codec.getToolCalls(response);
-    const text = this.codec.getResponseText(response);
+  async *generate(input: ModelRequest): AsyncIterable<ModelStreamEvent> {
+    if (!input.stream) {
+      const response = await this.client.responses.create(this.getRequest(input), { signal: input.signal });
 
-    return {
-      text,
-      toolCalls,
-    };
-  }
+      yield {
+        response: {
+          text: this.codec.getResponseText(response),
+          toolCalls: this.codec.getToolCalls(response),
+        },
+        type: 'response_completed',
+      };
 
-  async *stream(input: ModelRequest): AsyncIterable<ModelStreamEvent> {
+      return;
+    }
+
     const stream = this.client.responses.stream(this.getRequest(input), { signal: input.signal });
 
     for await (const event of stream) {
@@ -82,5 +86,9 @@ export class OpenAILikeProvider implements StreamingModelProvider {
 }
 
 export class OpenAIProvider extends OpenAILikeProvider {
+  constructor(config: OpenAIConfig) {
+    super(config, new OpenAICodec());
+  }
+
   readonly name = 'openai';
 }

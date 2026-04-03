@@ -106,7 +106,6 @@ async function main(): Promise<void> {
     loggers,
     provider: providerDefinition,
     session,
-    stream,
     toolExecutionPolicy: {
       maxToolResultBytes: 16 * 1024,
       workspaceRoot: process.cwd(),
@@ -163,35 +162,42 @@ async function main(): Promise<void> {
 
       let streamedAssistant = false;
 
-      for await (const chunk of harness.streamUserMessage(message)) {
-        if (chunk.type === 'assistant_delta') {
-          if (!streamedAssistant) {
-            output.write('assistant: ');
-            streamedAssistant = true;
+      if (stream) {
+        for await (const chunk of harness.streamMessage(message)) {
+          if (chunk.type === 'assistant_delta') {
+            if (!streamedAssistant) {
+              output.write('assistant: ');
+              streamedAssistant = true;
+            }
+
+            output.write(chunk.delta);
+            continue;
           }
 
-          output.write(chunk.delta);
-          continue;
-        }
+          if (chunk.type === 'assistant_message_completed') {
+            if (streamedAssistant) {
+              output.write('\n');
+              streamedAssistant = false;
+            }
 
-        if (chunk.type === 'assistant_message_completed') {
-          if (streamedAssistant) {
-            output.write('\n');
-            streamedAssistant = false;
+            continue;
           }
 
-          continue;
-        }
-
-        if (chunk.type === 'final_message') {
-          if (streamedAssistant) {
-            output.write('\n');
-            streamedAssistant = false;
-          } else {
-            output.write(`assistant: ${chunk.message.content}\n`);
+          if (chunk.type === 'final_message') {
+            if (streamedAssistant) {
+              output.write('\n');
+              streamedAssistant = false;
+            } else {
+              output.write(`assistant: ${chunk.message.content}\n`);
+            }
           }
         }
+
+        continue;
       }
+
+      const reply = await harness.sendMessage(message);
+      output.write(`assistant: ${reply.content}\n`);
     }
   } finally {
     cli.close();

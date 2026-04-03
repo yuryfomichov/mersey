@@ -15,8 +15,8 @@ import { createTurnStreamFactory } from './turn-stream.js';
 
 export type Harness = {
   session: Session;
-  sendUserMessage(content: string): Promise<Message>;
-  streamUserMessage(content: string): AsyncIterable<TurnChunk>;
+  sendMessage(content: string): Promise<Message>;
+  streamMessage(content: string): AsyncIterable<TurnChunk>;
   subscribe(listener: HarnessEventListener): () => void;
 };
 
@@ -26,7 +26,6 @@ export type CreateHarnessOptions = {
   providerInstance?: ModelProvider;
   provider?: ProviderDefinition;
   session?: Session;
-  stream?: boolean;
   systemPrompt?: string;
   toolExecutionPolicy?: ToolExecutionPolicy;
   tools?: Tool[];
@@ -55,23 +54,21 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
     getSessionId: () => session.id,
     logger: createFanoutLogger(options.loggers),
     providerName: resolvedProvider.name,
-    stream: options.stream,
   });
   const streamTurn = createTurnStreamFactory({
     observer,
     provider: resolvedProvider,
     session,
-    stream: options.stream,
     systemPrompt: options.systemPrompt,
     toolRuntimeFactory,
   });
 
   return {
     session,
-    async sendUserMessage(content: string): Promise<Message> {
+    async sendMessage(content: string): Promise<Message> {
       let finalMessage: Message | null = null;
 
-      for await (const chunk of streamTurn(content)) {
+      for await (const chunk of streamTurn(content, false)) {
         if (chunk.type === 'final_message') {
           finalMessage = chunk.message;
         }
@@ -83,8 +80,8 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
 
       return finalMessage;
     },
-    streamUserMessage(content: string): AsyncIterable<TurnChunk> {
-      return streamTurn(content);
+    streamMessage(content: string): AsyncIterable<TurnChunk> {
+      return streamTurn(content, true);
     },
     subscribe(listener: HarnessEventListener): () => void {
       return observer.subscribe(listener);

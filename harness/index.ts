@@ -9,7 +9,7 @@ export type { HarnessLogger } from './src/logger/types.js';
 
 export type { TurnChunk } from './src/loop/loop.js';
 
-export type { ModelProvider, StreamingModelProvider } from './src/models/provider.js';
+export type { ModelProvider } from './src/models/provider.js';
 
 export { parseProviderName } from './src/providers/factory.js';
 export type { ProviderDefinition, ProviderName } from './src/providers/factory.js';

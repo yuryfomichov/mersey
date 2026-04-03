@@ -1,8 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { MessageParam, Tool } from '@anthropic-ai/sdk/resources/messages/messages';
 
-import type { StreamingModelProvider } from '../models/provider.js';
-import type { ModelRequest, ModelResponse, ModelStreamEvent } from '../models/types.js';
+import type { ModelProvider } from '../models/provider.js';
+import type { ModelRequest, ModelStreamEvent } from '../models/types.js';
 import { AnthropicCodec } from './codecs/anthropic.js';
 
 export type AnthropicLikeProviderConfig = {
@@ -12,20 +12,23 @@ export type AnthropicLikeProviderConfig = {
   maxTokens: number;
 };
 
-export class AnthropicLikeProvider implements StreamingModelProvider {
-  private readonly codec = new AnthropicCodec();
+export type AnthropicConfig = AnthropicLikeProviderConfig;
+
+export abstract class AnthropicLikeProvider implements ModelProvider {
+  protected readonly codec: AnthropicCodec;
   protected readonly client: Anthropic;
   readonly maxTokens: number;
   readonly model: string;
   readonly name: string = 'anthropic-compatible';
 
-  constructor(config: AnthropicLikeProviderConfig) {
+  constructor(config: AnthropicLikeProviderConfig, codec: AnthropicCodec) {
     this.client = new Anthropic({
       apiKey: config.apiKey,
       baseURL: config.baseUrl,
     });
     this.maxTokens = config.maxTokens;
     this.model = config.model;
+    this.codec = codec;
   }
 
   private getRequest(input: ModelRequest): {
@@ -44,18 +47,21 @@ export class AnthropicLikeProvider implements StreamingModelProvider {
     };
   }
 
-  async generate(input: ModelRequest): Promise<ModelResponse> {
-    const response = await this.client.messages.create(this.getRequest(input), { signal: input.signal });
-    const toolCalls = this.codec.getToolCalls(response);
-    const text = this.codec.getResponseText(response);
+  async *generate(input: ModelRequest): AsyncIterable<ModelStreamEvent> {
+    if (!input.stream) {
+      const response = await this.client.messages.create(this.getRequest(input), { signal: input.signal });
 
-    return {
-      text,
-      toolCalls,
-    };
-  }
+      yield {
+        response: {
+          text: this.codec.getResponseText(response),
+          toolCalls: this.codec.getToolCalls(response),
+        },
+        type: 'response_completed',
+      };
 
-  async *stream(input: ModelRequest): AsyncIterable<ModelStreamEvent> {
+      return;
+    }
+
     const stream = this.client.messages.stream(this.getRequest(input), { signal: input.signal });
 
     for await (const event of stream) {
@@ -77,4 +83,12 @@ export class AnthropicLikeProvider implements StreamingModelProvider {
       type: 'response_completed',
     };
   }
+}
+
+export class AnthropicProvider extends AnthropicLikeProvider {
+  constructor(config: AnthropicConfig) {
+    super(config, new AnthropicCodec());
+  }
+
+  readonly name = 'anthropic';
 }

@@ -1,6 +1,5 @@
 import { HarnessObserver } from '../events/observer.js';
 import type { ModelProvider } from '../models/provider.js';
-import { supportsStreaming } from '../models/provider.js';
 import type { ModelMessage, ModelRequest, ModelResponse } from '../models/types.js';
 import type { Message } from '../sessions/types.js';
 import type { ToolRuntimeFactory } from '../tools/runtime/index.js';
@@ -16,7 +15,7 @@ export type LoopInput = {
   options?: LoopOptions;
   provider: ModelProvider;
   signal?: AbortSignal;
-  stream?: boolean;
+  stream: boolean;
   systemPrompt?: string;
   toolRuntimeFactory: ToolRuntimeFactory;
 };
@@ -84,87 +83,59 @@ function appendMessage(messages: Message[], message: Message): void {
   messages.push(message);
 }
 
-function getProviderResponse({
+async function* getProviderResponse({
   observer,
   provider,
   request,
   iteration,
   signal,
-  stream,
 }: {
   observer: HarnessObserver;
   provider: ModelProvider;
   request: ModelRequest;
   iteration: number;
   signal: AbortSignal | undefined;
-  stream: boolean | undefined;
 }): AsyncIterable<{ delta: string; type: 'text_delta' } | { response: ModelResponse; type: 'response_completed' }> {
   const providerStartTime = Date.now();
+  let response: ModelResponse | null = null;
 
-  if (!stream || !supportsStreaming(provider)) {
-    return (async function* () {
+  try {
+    throwIfAborted(signal);
+
+    for await (const event of provider.generate(request)) {
       throwIfAborted(signal);
-      const response = await provider.generate(request);
 
-      observer.providerResponded(iteration, provider, response, Date.now() - providerStartTime);
+      if (event.type === 'text_delta') {
+        yield {
+          delta: event.delta,
+          type: 'text_delta',
+        };
 
-      yield {
-        response,
-        type: 'response_completed' as const,
-      };
-    })();
+        continue;
+      }
+
+      if (response) {
+        throw new Error('Provider stream returned more than one completed response.');
+      }
+
+      response = event.response;
+    }
+  } catch (error: unknown) {
+    if (!response) {
+      throw error;
+    }
   }
 
-  return (async function* () {
-    let response: ModelResponse | null = null;
-    let sawTextDelta = false;
+  if (!response) {
+    throw new Error('Provider stream ended without a completed response.');
+  }
 
-    try {
-      throwIfAborted(signal);
+  observer.providerResponded(iteration, provider, response, Date.now() - providerStartTime);
 
-      for await (const event of provider.stream(request)) {
-        throwIfAborted(signal);
-
-        if (event.type === 'text_delta') {
-          sawTextDelta ||= event.delta.length > 0;
-          observer.providerTextDelta(iteration, event.delta);
-
-          yield {
-            delta: event.delta,
-            type: 'text_delta',
-          };
-
-          continue;
-        }
-
-        if (response) {
-          throw new Error('Provider stream returned more than one completed response.');
-        }
-
-        response = event.response;
-      }
-    } catch (error: unknown) {
-      if (response) {
-        // Preserve a completed streamed response if teardown fails afterward.
-      } else if (sawTextDelta) {
-        throw error;
-      } else {
-        throwIfAborted(signal);
-        response = await provider.generate(request);
-      }
-    }
-
-    if (!response) {
-      throw new Error('Provider stream ended without a completed response.');
-    }
-
-    observer.providerResponded(iteration, provider, response, Date.now() - providerStartTime);
-
-    yield {
-      response,
-      type: 'response_completed',
-    };
-  })();
+  yield {
+    response,
+    type: 'response_completed',
+  };
 }
 
 export async function* streamLoop({
@@ -218,11 +189,11 @@ export async function* streamLoop({
         request: {
           messages: toModelMessages(transcript),
           signal,
+          stream,
           systemPrompt: resolvedSystemPrompt,
           tools: toolRuntime.toolDefinitions,
         },
         signal,
-        stream,
       })) {
         throwIfAborted(signal);
 

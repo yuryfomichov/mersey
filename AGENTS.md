@@ -55,8 +55,7 @@ Main goals:
 ## Providers
 
 - Provider selection is string-based through `harness/src/providers/factory.ts`.
-- Public providers wired through the factory today: `minimax`, `openai`, `fake`.
-- `harness/src/providers/anthropic.ts` is currently a shared anthropic-compatible provider implementation used as a building block, not a public factory option.
+- Public providers wired through the factory today: `anthropic`, `minimax`, `openai`, `fake`.
 
 ## Commands
 
@@ -64,6 +63,7 @@ Main goals:
 - `pnpm test`
 - `pnpm lint`
 - `pnpm format`
+- `pnpm cli -- --provider anthropic`
 - `pnpm cli -- --provider minimax`
 - `pnpm cli -- --provider openai`
 - `pnpm cli -- --provider fake`
@@ -76,3 +76,4 @@ Main goals:
 - Add or update tests with behavior changes.
 - Prefer `FakeProvider` for non-network tests.
 - Do not use `git` or `gh` without explicit user permission.
+- Every change should keep all documentation files (AGENTS.md, README.md, etc.) in sync; verify docs reflect the current state after any refactoring.

@@ -7,7 +7,7 @@ import type { HarnessEvent } from './events/types.js';
 import { createHarness, type CreateHarnessOptions } from './harness.js';
 import type { HarnessRuntimeTrace } from './logger/types.js';
 import type { ModelProvider } from './models/provider.js';
-import type { ModelRequest, ModelResponse } from './models/types.js';
+import type { ModelRequest, ModelStreamEvent } from './models/types.js';
 import { FakeProvider } from './providers/fake.js';
 import { MemorySessionStore } from './sessions/memory-store.js';
 import { Session } from './sessions/session.js';
@@ -50,7 +50,7 @@ test('createHarness uses the injected provider and appends session history', asy
   const sessionStore = new MemorySessionStore();
 
   const harness = createTestHarness({ providerInstance: provider, sessionId: 'test-session', sessionStore });
-  const reply = await harness.sendUserMessage('hello');
+  const reply = await harness.sendMessage('hello');
 
   assert.equal(reply.role, 'assistant');
   assert.equal(reply.content, 'reply:hello');
@@ -103,7 +103,7 @@ test('createHarness emits events and traces with the canonical session id after 
     recordedEvents.push(event);
   });
 
-  await harness.sendUserMessage('hello');
+  await harness.sendMessage('hello');
 
   assert.equal(harness.session.id, 'canonical-session');
   assert.ok(
@@ -114,7 +114,7 @@ test('createHarness emits events and traces with the canonical session id after 
   assert.ok(recordedEvents.every((event) => event.sessionId === 'canonical-session'));
 });
 
-test('createHarness serializes concurrent sendUserMessage calls for one session', async () => {
+test('createHarness serializes concurrent sendMessage calls for one session', async () => {
   let releaseFirstRequest!: () => void;
   let firstRequestStarted!: () => void;
 
@@ -129,7 +129,7 @@ test('createHarness serializes concurrent sendUserMessage calls for one session'
   const provider: ModelProvider = {
     model: 'fake-model',
     name: 'fake',
-    async generate(input: ModelRequest): Promise<ModelResponse> {
+    async *generate(input: ModelRequest): AsyncIterable<ModelStreamEvent> {
       requests.push(input);
 
       const lastMessage = input.messages.at(-1);
@@ -143,7 +143,7 @@ test('createHarness serializes concurrent sendUserMessage calls for one session'
         await releaseFirstRequestPromise;
       }
 
-      return { text: `reply:${lastMessage.content}` };
+      yield { response: { text: `reply:${lastMessage.content}` }, type: 'response_completed' };
     },
   };
   const harness = createTestHarness({
@@ -152,11 +152,11 @@ test('createHarness serializes concurrent sendUserMessage calls for one session'
     sessionStore: new MemorySessionStore(),
   });
 
-  const firstReplyPromise = harness.sendUserMessage('first');
+  const firstReplyPromise = harness.sendMessage('first');
 
   await firstRequestStartedPromise;
 
-  const secondReplyPromise = harness.sendUserMessage('second');
+  const secondReplyPromise = harness.sendMessage('second');
 
   await delay(0);
   assert.equal(requests.length, 1);
@@ -211,7 +211,7 @@ test('createHarness emits live events in stable order without leaking raw conten
       events.push(event);
     });
 
-    await harness.sendUserMessage('read the secret note');
+    await harness.sendMessage('read the secret note');
 
     assert.deepEqual(
       events.map((event) => event.type),

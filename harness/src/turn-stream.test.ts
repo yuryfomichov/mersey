@@ -36,7 +36,6 @@ function createStreamTurnFactory(input: {
   provider?: FakeProvider;
   sessionId?: string;
   sessionStore?: MemorySessionStore;
-  stream?: boolean;
   tools?: Tool[];
 }) {
   const provider = input.provider ?? new FakeProvider();
@@ -45,7 +44,6 @@ function createStreamTurnFactory(input: {
     getSessionId: () => session.id,
     logger: undefined,
     providerName: provider.name,
-    stream: input.stream,
   });
 
   return {
@@ -55,7 +53,6 @@ function createStreamTurnFactory(input: {
       observer,
       provider,
       session,
-      stream: input.stream,
       toolRuntimeFactory: createToolRuntimeFactory({
         policy: { workspaceRoot: process.cwd() },
         tools: input.tools ?? [],
@@ -67,13 +64,13 @@ function createStreamTurnFactory(input: {
 test('createTurnStreamFactory starts on first pull and ignores pre-consumption return', async () => {
   const { provider, streamTurn } = createStreamTurnFactory({});
 
-  const abandonedIterator = streamTurn('abandoned')[Symbol.asyncIterator]();
+  const abandonedIterator = streamTurn('abandoned', false)[Symbol.asyncIterator]();
 
   assert.equal(provider.requests.length, 0);
   await abandonedIterator.return?.();
   assert.equal(provider.requests.length, 0);
 
-  const iterator = streamTurn('hello')[Symbol.asyncIterator]();
+  const iterator = streamTurn('hello', false)[Symbol.asyncIterator]();
 
   assert.equal(provider.requests.length, 0);
 
@@ -98,7 +95,8 @@ test('createTurnStreamFactory rejects iteration when the background turn throws 
   const provider: ModelProvider = {
     model: 'broken-model',
     name: 'broken-provider',
-    async generate() {
+    async *generate() {
+      yield* [];
       throw undefined;
     },
   };
@@ -115,7 +113,7 @@ test('createTurnStreamFactory rejects iteration when the background turn throws 
 
   await assert.rejects(
     async () => {
-      for await (const _chunk of streamTurn('hello')) {
+      for await (const _chunk of streamTurn('hello', false)) {
         // No-op.
       }
     },
@@ -148,10 +146,9 @@ test('createTurnStreamFactory return aborts an active turn, drops partial histor
     }),
     sessionId: 'cancelled-stream-session',
     sessionStore,
-    stream: true,
   });
 
-  const iterator = streamTurn('first')[Symbol.asyncIterator]();
+  const iterator = streamTurn('first', true)[Symbol.asyncIterator]();
   const firstChunk = await iterator.next();
 
   assert.equal(firstChunk.done, false);
@@ -163,7 +160,7 @@ test('createTurnStreamFactory return aborts an active turn, drops partial histor
   assert.equal((await sessionStore.listMessages('cancelled-stream-session')).length, 0);
 
   const reply = await Promise.race([
-    collectChunks(streamTurn('second')).then((chunks) => chunks.at(-1)),
+    collectChunks(streamTurn('second', true)).then((chunks) => chunks.at(-1)),
     delay(1_000).then(() => {
       throw new Error('second turn stayed blocked after stream cancellation');
     }),
@@ -212,10 +209,9 @@ test('createTurnStreamFactory return waits for abort cleanup', async () => {
         });
       },
     }),
-    stream: true,
   });
 
-  const iterator = streamTurn('first')[Symbol.asyncIterator]();
+  const iterator = streamTurn('first', true)[Symbol.asyncIterator]();
 
   await iterator.next();
 
@@ -247,10 +243,9 @@ test('createTurnStreamFactory yields only final_message when streaming is disabl
         { response: { text: 'hello' }, type: 'response_completed' },
       ],
     }),
-    stream: false,
   });
 
-  const chunks = await collectChunks(streamTurn('hello'));
+  const chunks = await collectChunks(streamTurn('hello', false));
 
   assert.deepEqual(chunks, [
     {
@@ -274,9 +269,8 @@ test('createTurnStreamFactory snapshots final_message chunks before exposing the
         { response: { text: 'hello' }, type: 'response_completed' },
       ],
     }),
-    stream: true,
   });
-  const iterator = streamTurn('hello')[Symbol.asyncIterator]();
+  const iterator = streamTurn('hello', true)[Symbol.asyncIterator]();
 
   const firstChunk = await iterator.next();
   const secondChunk = await iterator.next();

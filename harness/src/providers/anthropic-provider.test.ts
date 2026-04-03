@@ -4,7 +4,7 @@ import test from 'node:test';
 import Anthropic from '@anthropic-ai/sdk';
 
 import type { ModelStreamEvent } from '../models/types.js';
-import { AnthropicLikeProvider } from './anthropic.js';
+import { AnthropicProvider } from './anthropic.js';
 
 function createAnthropicMessage(content: Anthropic.Message['content']): Anthropic.Message {
   return {
@@ -29,9 +29,32 @@ function createAnthropicMessage(content: Anthropic.Message['content']): Anthropi
   };
 }
 
-test('AnthropicLikeProvider passes systemPrompt as system parameter', async () => {
+async function collectEvents(iterable: AsyncIterable<ModelStreamEvent>): Promise<ModelStreamEvent[]> {
+  const events: ModelStreamEvent[] = [];
+
+  for await (const event of iterable) {
+    events.push(event);
+  }
+
+  return events;
+}
+
+async function collectResponse(
+  iterable: AsyncIterable<ModelStreamEvent>,
+): Promise<Extract<ModelStreamEvent, { type: 'response_completed' }>['response']> {
+  const events = await collectEvents(iterable);
+  const responseEvent = events.find((event) => event.type === 'response_completed');
+
+  if (!responseEvent || responseEvent.type !== 'response_completed') {
+    throw new Error('Expected a response_completed event.');
+  }
+
+  return responseEvent.response;
+}
+
+test('AnthropicProvider passes systemPrompt as system parameter', async () => {
   const capturedRequests: Array<{ system?: string }> = [];
-  const provider = new AnthropicLikeProvider({
+  const provider = new AnthropicProvider({
     apiKey: 'test-key',
     baseUrl: 'https://example.com',
     maxTokens: 256,
@@ -56,26 +79,32 @@ test('AnthropicLikeProvider passes systemPrompt as system parameter', async () =
     },
   };
 
-  await provider.generate({
-    messages: [{ content: 'hello', role: 'user' }],
-    systemPrompt: 'You are a helpful assistant.',
-  });
+  await collectEvents(
+    provider.generate({
+      messages: [{ content: 'hello', role: 'user' }],
+      stream: false,
+      systemPrompt: 'You are a helpful assistant.',
+    }),
+  );
 
   assert.equal(capturedRequests.length, 1);
   assert.equal(capturedRequests[0].system, 'You are a helpful assistant.');
 
-  await provider.generate({
-    messages: [{ content: 'hello', role: 'user' }],
-  });
+  await collectEvents(
+    provider.generate({
+      messages: [{ content: 'hello', role: 'user' }],
+      stream: false,
+    }),
+  );
 
   assert.equal(capturedRequests.length, 2);
   assert.equal(capturedRequests[1].system, undefined);
 });
 
-test('AnthropicLikeProvider forwards input.signal to create and stream SDK calls', async () => {
+test('AnthropicProvider forwards input.signal to create and stream SDK calls', async () => {
   const createSignals: Array<AbortSignal | null | undefined> = [];
   const streamSignals: Array<AbortSignal | null | undefined> = [];
-  const provider = new AnthropicLikeProvider({
+  const provider = new AnthropicProvider({
     apiKey: 'test-key',
     baseUrl: 'https://example.com',
     maxTokens: 256,
@@ -141,25 +170,29 @@ test('AnthropicLikeProvider forwards input.signal to create and stream SDK calls
     },
   };
 
-  await provider.generate({
-    messages: [{ content: 'hello', role: 'user' }],
-    signal: controller.signal,
-  });
+  await collectEvents(
+    provider.generate({
+      messages: [{ content: 'hello', role: 'user' }],
+      signal: controller.signal,
+      stream: false,
+    }),
+  );
 
-  for await (const _event of provider.stream({
-    messages: [{ content: 'hello', role: 'user' }],
-    signal: controller.signal,
-  })) {
-    // consume stream
-  }
+  await collectEvents(
+    provider.generate({
+      messages: [{ content: 'hello', role: 'user' }],
+      signal: controller.signal,
+      stream: true,
+    }),
+  );
 
   assert.deepEqual(createSignals, [controller.signal]);
   assert.deepEqual(streamSignals, [controller.signal]);
 });
 
-test('AnthropicLikeProvider forwards codec-produced messages and tools to messages.create', async () => {
+test('AnthropicProvider forwards codec-produced messages and tools to messages.create', async () => {
   const capturedRequests: Array<Record<string, unknown>> = [];
-  const provider = new AnthropicLikeProvider({
+  const provider = new AnthropicProvider({
     apiKey: 'test-key',
     baseUrl: 'https://example.com',
     maxTokens: 256,
@@ -192,31 +225,34 @@ test('AnthropicLikeProvider forwards codec-produced messages and tools to messag
     },
   };
 
-  const response = await provider.generate({
-    messages: [
-      { content: 'where am i?', role: 'user' },
-      {
-        content: '',
-        role: 'assistant',
-        toolCalls: [{ id: 'toolu_1', input: { path: 'note.txt' }, name: 'read_file' }],
-      },
-      { content: 'hello from file', name: 'read_file', role: 'tool', toolCallId: 'toolu_1' },
-    ],
-    tools: [
-      {
-        description: 'Run a command.',
-        inputSchema: {
-          properties: {
-            command: { type: 'string' },
-            cwd: { type: 'string' },
-          },
-          required: ['command'],
-          type: 'object',
+  const response = await collectResponse(
+    provider.generate({
+      messages: [
+        { content: 'where am i?', role: 'user' },
+        {
+          content: '',
+          role: 'assistant',
+          toolCalls: [{ id: 'toolu_1', input: { path: 'note.txt' }, name: 'read_file' }],
         },
-        name: 'run_command',
-      },
-    ],
-  });
+        { content: 'hello from file', name: 'read_file', role: 'tool', toolCallId: 'toolu_1' },
+      ],
+      stream: false,
+      tools: [
+        {
+          description: 'Run a command.',
+          inputSchema: {
+            properties: {
+              command: { type: 'string' },
+              cwd: { type: 'string' },
+            },
+            required: ['command'],
+            type: 'object',
+          },
+          name: 'run_command',
+        },
+      ],
+    }),
+  );
 
   assert.deepEqual(capturedRequests[0]?.messages, [
     { content: 'where am i?', role: 'user' },
@@ -262,9 +298,9 @@ test('AnthropicLikeProvider forwards codec-produced messages and tools to messag
   });
 });
 
-test('AnthropicLikeProvider streams text deltas and returns the final response', async () => {
+test('AnthropicProvider streams text deltas and returns the final response', async () => {
   const capturedRequests: Array<Record<string, unknown>> = [];
-  const provider = new AnthropicLikeProvider({
+  const provider = new AnthropicProvider({
     apiKey: 'test-key',
     baseUrl: 'https://example.com',
     maxTokens: 256,
@@ -336,26 +372,25 @@ test('AnthropicLikeProvider streams text deltas and returns the final response',
     },
   };
 
-  const events: ModelStreamEvent[] = [];
-
-  for await (const event of provider.stream({
-    messages: [{ content: 'hello', role: 'user' }],
-    tools: [
-      {
-        description: 'Run a command.',
-        inputSchema: {
-          properties: {
-            command: { type: 'string' },
+  const events = await collectEvents(
+    provider.generate({
+      messages: [{ content: 'hello', role: 'user' }],
+      stream: true,
+      tools: [
+        {
+          description: 'Run a command.',
+          inputSchema: {
+            properties: {
+              command: { type: 'string' },
+            },
+            required: ['command'],
+            type: 'object',
           },
-          required: ['command'],
-          type: 'object',
+          name: 'run_command',
         },
-        name: 'run_command',
-      },
-    ],
-  })) {
-    events.push(event);
-  }
+      ],
+    }),
+  );
 
   assert.deepEqual(capturedRequests[0]?.tools, [
     {
