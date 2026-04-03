@@ -1,4 +1,4 @@
-import type { ModelStreamEvent } from '../src/models/types.js';
+import type { ModelStreamEvent } from '../models/types.js';
 
 export async function collectEvents(iterable: AsyncIterable<ModelStreamEvent>): Promise<ModelStreamEvent[]> {
   const events: ModelStreamEvent[] = [];

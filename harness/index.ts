@@ -7,7 +7,7 @@ export { createJsonlFileLogger } from './src/logger/jsonl.js';
 export { createTextFileLogger } from './src/logger/text.js';
 export type { HarnessLogger } from './src/logger/types.js';
 
-export type { TurnChunk } from './src/loop/loop.js';
+export type { TurnChunk } from './src/core/loop.js';
 
 export type { ModelProvider } from './src/models/provider.js';
 

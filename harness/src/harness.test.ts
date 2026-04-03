@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { withTempDir, writeWorkspaceFiles } from '../test/test-helpers.js';
 import type { HarnessEvent } from './events/types.js';
 import { createHarness, type CreateHarnessOptions } from './harness.js';
 import type { HarnessRuntimeTrace } from './logger/types.js';
@@ -13,6 +12,7 @@ import { MemorySessionStore } from './sessions/memory-store.js';
 import { Session } from './sessions/session.js';
 import type { SessionStore } from './sessions/store.js';
 import type { SessionState } from './sessions/types.js';
+import { withTempDir, writeWorkspaceFiles } from './test/test-helpers.js';
 import { ReadFileTool } from './tools/read-file.js';
 
 type TestHarnessOptions = Omit<CreateHarnessOptions, 'session'> & {

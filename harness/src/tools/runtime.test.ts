@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { withTempDir, writeWorkspaceFiles } from '../../test/test-helpers.js';
+import { withTempDir, writeWorkspaceFiles } from '../test/test-helpers.js';
 import { ReadFileTool } from './read-file.js';
 import { createToolRuntime } from './runtime/index.js';
 

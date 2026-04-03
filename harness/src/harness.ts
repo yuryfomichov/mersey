@@ -1,8 +1,9 @@
+import type { TurnChunk } from './core/loop.js';
+import { asFinalMessage, createTurnStreamFactory } from './core/turn-stream.js';
 import { HarnessObserver } from './events/observer.js';
 import type { HarnessEventListener } from './events/types.js';
 import { createFanoutLogger } from './logger/fanout.js';
 import type { HarnessLogger } from './logger/types.js';
-import type { TurnChunk } from './loop/loop.js';
 import type { ModelProvider } from './models/provider.js';
 import { createProvider, type ProviderDefinition } from './providers/factory.js';
 import { MemorySessionStore } from './sessions/memory-store.js';
@@ -11,7 +12,6 @@ import type { Message } from './sessions/types.js';
 import { createToolRuntimeFactory } from './tools/runtime/index.js';
 import type { ToolExecutionPolicy } from './tools/runtime/index.js';
 import type { Tool } from './tools/types.js';
-import { createTurnStreamFactory } from './turn-stream.js';
 
 export type Harness = {
   session: Session;
@@ -65,23 +65,9 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
 
   return {
     session,
-    async sendMessage(content: string): Promise<Message> {
-      let finalMessage: Message | null = null;
-
-      for await (const chunk of streamTurn(content, false)) {
-        if (chunk.type === 'final_message') {
-          finalMessage = chunk.message;
-        }
-      }
-
-      if (!finalMessage) {
-        throw new Error('Turn completed without a final assistant message.');
-      }
-
-      return finalMessage;
-    },
+    sendMessage: asFinalMessage(streamTurn),
     streamMessage(content: string): AsyncIterable<TurnChunk> {
-      return streamTurn(content, true);
+      return streamTurn(content);
     },
     subscribe(listener: HarnessEventListener): () => void {
       return observer.subscribe(listener);
