@@ -22,8 +22,6 @@ type AppState = {
   messages: Message[];
   streamingContent: string;
   isThinking: boolean;
-  currentTool: string | null;
-  turnCount: number;
   input: string;
 };
 
@@ -117,18 +115,18 @@ const MessageItem = ({ msg }: { msg: Message }) => {
   return null;
 };
 
-function getMessageKey(message: Message, index: number): string {
+function getMessageKey(message: Message): string {
   if (message.role === 'tool') {
-    return `${message.role}:${message.createdAt}:${message.toolCallId}:${index}`;
+    return `${message.role}:${message.createdAt}:${message.toolCallId}`;
   }
 
-  return `${message.role}:${message.createdAt}:${index}`;
+  return `${message.role}:${message.createdAt}:${message.content}`;
 }
 
 const MessageList = ({ messages }: { messages: Message[] }) => (
   <Box flexDirection='column' gap={0}>
-    {messages.map((msg, i) => (
-      <Box key={getMessageKey(msg, i)} flexDirection='column' marginY={0}>
+    {messages.map((msg) => (
+      <Box key={getMessageKey(msg)} flexDirection='column' marginY={0}>
         <MessageItem msg={msg} />
       </Box>
     ))}
@@ -145,16 +143,16 @@ const StreamingOutput = ({ content }: { content: string }) =>
     </Text>
   ) : null;
 
-const ThinkingIndicator = ({ tool }: { tool: string | null }) => (
+const ThinkingIndicator = () => (
   <Box flexDirection='row' gap={1}>
     <Text dimColor>● </Text>
-    <Text dimColor>{tool ? `executing ${tool}...` : 'thinking...'}</Text>
+    <Text dimColor>thinking...</Text>
   </Box>
 );
 
-const StatusBar = ({ turnCount }: { turnCount: number }) => (
+const StatusBar = () => (
   <Box>
-    <Text dimColor>turn: {turnCount} | q to quit</Text>
+    <Text dimColor>q to quit</Text>
   </Box>
 );
 
@@ -163,13 +161,11 @@ function compactMessageText(content: string): string {
 }
 
 const ChatPanel = ({
-  currentTool,
   hasMoreMessages,
   isThinking,
   messages,
   streamingContent,
 }: {
-  currentTool: string | null;
   hasMoreMessages: boolean;
   isThinking: boolean;
   messages: Message[];
@@ -189,7 +185,7 @@ const ChatPanel = ({
     <Box flexDirection='column' flexGrow={1} flexShrink={1} minHeight={0} overflow='hidden'>
       <MessageList messages={messages.slice(-10)} />
       {streamingContent ? <StreamingOutput content={streamingContent} /> : null}
-      {isThinking ? <ThinkingIndicator tool={currentTool} /> : null}
+      {isThinking ? <ThinkingIndicator /> : null}
     </Box>
   </Box>
 );
@@ -226,8 +222,6 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
     messages: [],
     streamingContent: '',
     isThinking: false,
-    currentTool: null,
-    turnCount: 0,
     input: '',
   });
 
@@ -257,8 +251,6 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
     setHarness(h);
     setProviderModel(getProviderModel(providerDef));
 
-    let disposed = false;
-
     const hydrateMessages = () => {
       setState((s) => ({
         ...s,
@@ -268,10 +260,6 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
 
     const updateUsage = async () => {
       const [usageSnapshot, contextSize] = await Promise.all([h.session.getUsage(), h.session.getContextSize()]);
-
-      if (disposed) {
-        return;
-      }
 
       setUsage({
         cachedInputTokens: usageSnapshot.cachedInputTokens,
@@ -285,18 +273,10 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
     void h.session
       .ensure()
       .then(() => {
-        if (disposed) {
-          return;
-        }
-
         hydrateMessages();
         return updateUsage();
       })
       .catch((error: unknown) => {
-        if (disposed) {
-          return;
-        }
-
         setState((s) => ({
           ...s,
           isThinking: false,
@@ -304,9 +284,7 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
         }));
       })
       .finally(() => {
-        if (!disposed) {
-          setReady(true);
-        }
+        setReady(true);
       });
 
     const unsubscribe = h.subscribe((event: HarnessEvent) => {
@@ -318,19 +296,13 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
             streamingContent: '',
           }));
           break;
-        case 'tool_started':
-          setState((s) => ({ ...s, currentTool: event.toolName }));
-          break;
-        case 'tool_finished':
-          setState((s) => ({ ...s, currentTool: null }));
-          break;
         case 'turn_finished':
           setState((s) => ({
             ...s,
             isThinking: false,
             streamingContent: '',
-            turnCount: s.turnCount + 1,
           }));
+          hydrateMessages();
           void updateUsage();
           break;
         case 'turn_failed':
@@ -345,14 +317,18 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
     });
 
     return () => {
-      disposed = true;
+      void h.cancelActiveTurn();
       unsubscribe();
     };
   }, [cache, debug, providerName, sessionId, sessionStoreDefinition]);
 
   useInput((input, key) => {
     if (input === 'q' || input === 'Q') {
+      if (harness) {
+        void harness.cancelActiveTurn();
+      }
       exit();
+      return;
     }
 
     if (key.return && ready && state.input.trim() && !state.isThinking && harness) {
@@ -365,8 +341,10 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
       }));
 
       (async () => {
+        const stream = harness.streamMessage(msg);
+
         try {
-          for await (const chunk of harness.streamMessage(msg)) {
+          for await (const chunk of stream) {
             switch (chunk.type) {
               case 'assistant_delta':
                 setState((s) => ({
@@ -420,7 +398,6 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
       </Box>
 
       <ChatPanel
-        currentTool={state.currentTool}
         hasMoreMessages={hasMoreMessages}
         isThinking={state.isThinking}
         messages={state.messages}
@@ -428,7 +405,7 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
       />
 
       <Box flexDirection='column' flexShrink={0} marginTop={1}>
-        <StatusBar turnCount={state.turnCount} />
+        <StatusBar />
         <InputPanel input={state.input} isThinking={state.isThinking} ready={ready} />
       </Box>
     </Box>
