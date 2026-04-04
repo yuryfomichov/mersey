@@ -68,7 +68,7 @@ const HeaderRow = ({
   const left3 = `session: ${sessionId} | store: ${storeLabel}`;
 
   const right1 = `usage: ${totalInput} in / ${usage.outputTokens} out`;
-  const right2 = `uncached ${usage.uncachedInputTokens} | cached ${usage.cachedInputTokens} | cw ${usage.cacheWriteInputTokens}`;
+  const right2 = `cache: no ${usage.uncachedInputTokens} | read ${usage.cachedInputTokens} | write ${usage.cacheWriteInputTokens}`;
   const right3 = `context: ${usage.contextSize} tokens`;
 
   return (
@@ -90,16 +90,26 @@ const HeaderRow = ({
 };
 
 const MessageItem = ({ msg }: { msg: Message }) => {
+  const content = compactMessageText(msg.content);
+
   if (msg.role === 'user') {
-    return <Text color='green'>you: {msg.content}</Text>;
+    return (
+      <Text color='green' wrap='truncate-end'>
+        you: {content}
+      </Text>
+    );
   }
   if (msg.role === 'assistant') {
-    return <Text color='cyan'>{msg.content}</Text>;
+    return (
+      <Text color='cyan' wrap='truncate-end'>
+        {content}
+      </Text>
+    );
   }
   if (msg.role === 'tool') {
-    const preview = msg.content.length > 80 ? msg.content.slice(0, 80) + '...' : msg.content;
+    const preview = content.length > 80 ? content.slice(0, 80) + '...' : content;
     return (
-      <Text dimColor>
+      <Text dimColor wrap='truncate-end'>
         tool [{msg.name}]: {preview}
       </Text>
     );
@@ -119,8 +129,8 @@ const MessageList = ({ messages }: { messages: Message[] }) => (
 
 const StreamingOutput = ({ content }: { content: string }) =>
   content ? (
-    <Text color='cyan'>
-      {content}
+    <Text color='cyan' wrap='truncate-end'>
+      {compactMessageText(content)}
       <Text color='cyan' dimColor>
         ▌
       </Text>
@@ -140,24 +150,35 @@ const StatusBar = ({ turnCount }: { turnCount: number }) => (
   </Box>
 );
 
+function compactMessageText(content: string): string {
+  return content.replace(/\s+/g, ' ').trim();
+}
+
 const ChatPanel = ({
-  contentHeight,
   currentTool,
   hasMoreMessages,
   isThinking,
   messages,
   streamingContent,
 }: {
-  contentHeight: number;
   currentTool: string | null;
   hasMoreMessages: boolean;
   isThinking: boolean;
   messages: Message[];
   streamingContent: string;
 }) => (
-  <Box borderColor='cyan' borderStyle='round' flexDirection='column' height={contentHeight} paddingX={1}>
+  <Box
+    borderColor='cyan'
+    borderStyle='round'
+    flexDirection='column'
+    flexGrow={1}
+    flexShrink={1}
+    minHeight={0}
+    overflow='hidden'
+    paddingX={1}
+  >
     {hasMoreMessages ? <Text dimColor>... {messages.length - 10} earlier messages</Text> : null}
-    <Box flexDirection='column' flexGrow={1} overflow='hidden'>
+    <Box flexDirection='column' flexGrow={1} flexShrink={1} minHeight={0} overflow='hidden'>
       <MessageList messages={messages.slice(-10)} />
       {streamingContent ? <StreamingOutput content={streamingContent} /> : null}
       {isThinking ? <ThinkingIndicator tool={currentTool} /> : null}
@@ -169,17 +190,14 @@ const InputPanel = ({ input, isThinking, ready }: { input: string; isThinking: b
   <Box borderColor='green' borderStyle='round' flexDirection='column' paddingX={1}>
     <Box>
       <Text color='green'>&gt; </Text>
-      <Text>{input || ' '}</Text>
+      <Text wrap='truncate-end'>{input || ' '}</Text>
       <Text dimColor>_</Text>
+      {!ready ? <Text dimColor> initializing...</Text> : null}
+      {ready && !isThinking && !input ? <Text dimColor> type your vibes and press Enter...</Text> : null}
+      {ready && isThinking ? <Text dimColor> received vibes, thinking...</Text> : null}
     </Box>
-    {!ready ? <Text dimColor>initializing...</Text> : null}
-    {ready && !isThinking && !input ? <Text dimColor>type your vibes and press Enter...</Text> : null}
-    {ready && isThinking ? <Text dimColor>received vibes, thinking...</Text> : null}
   </Box>
 );
-
-const HEADER_HEIGHT = 7;
-const FOOTER_HEIGHT = 5;
 
 interface TuiAppProps {
   cache: boolean;
@@ -215,8 +233,6 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
     uncachedInputTokens: 0,
   });
 
-  const chatHeight = Math.max(8, rows - HEADER_HEIGHT - FOOTER_HEIGHT);
-
   useEffect(() => {
     const session = createSession(sessionStoreDefinition, sessionId);
     const providerDef = getProviderDefinition(providerName, process.env, cache);
@@ -234,6 +250,13 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
 
     let disposed = false;
 
+    const hydrateMessages = () => {
+      setState((s) => ({
+        ...s,
+        messages: [...session.messages],
+      }));
+    };
+
     const updateUsage = async () => {
       const [usageSnapshot, contextSize] = await Promise.all([h.session.getUsage(), h.session.getContextSize()]);
 
@@ -250,7 +273,32 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
       });
     };
 
-    void h.session.ensure().then(updateUsage);
+    void h.session
+      .ensure()
+      .then(() => {
+        if (disposed) {
+          return;
+        }
+
+        hydrateMessages();
+        return updateUsage();
+      })
+      .catch((error: unknown) => {
+        if (disposed) {
+          return;
+        }
+
+        setState((s) => ({
+          ...s,
+          isThinking: false,
+          streamingContent: `Error: ${error instanceof Error ? error.message : String(error)}`,
+        }));
+      })
+      .finally(() => {
+        if (!disposed) {
+          setReady(true);
+        }
+      });
 
     const unsubscribe = h.subscribe((event: HarnessEvent) => {
       switch (event.type) {
@@ -287,8 +335,6 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
       }
     });
 
-    setReady(true);
-
     return () => {
       disposed = true;
       unsubscribe();
@@ -300,7 +346,7 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
       process.exit(0);
     }
 
-    if (key.return && state.input.trim() && !state.isThinking && harness) {
+    if (key.return && ready && state.input.trim() && !state.isThinking && harness) {
       const msg = state.input;
       setState((s) => ({
         ...s,
@@ -351,7 +397,7 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
 
   return (
     <Box flexDirection='column' height={rows}>
-      <Box flexDirection='column' marginBottom={1}>
+      <Box flexDirection='column' flexShrink={0} marginBottom={1}>
         <Logo />
         <HeaderRow
           cache={cache}
@@ -365,7 +411,6 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
       </Box>
 
       <ChatPanel
-        contentHeight={chatHeight}
         currentTool={state.currentTool}
         hasMoreMessages={hasMoreMessages}
         isThinking={state.isThinking}
@@ -373,7 +418,7 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
         streamingContent={state.streamingContent}
       />
 
-      <Box flexDirection='column' marginTop={1}>
+      <Box flexDirection='column' flexShrink={0} marginTop={1}>
         <StatusBar turnCount={state.turnCount} />
         <InputPanel input={state.input} isThinking={state.isThinking} ready={ready} />
       </Box>
