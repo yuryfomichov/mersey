@@ -178,4 +178,4 @@ Keep the boundary between app code and `harness` sharp:
 - `harness` should own the turn loop, pause/resume semantics, tool execution, and session updates
 - provider-specific codecs should stay in `harness/src/providers/codecs/`
 
-In practice, `apps/cli/src/index.ts` is the best reference integration in this repo.
+In practice, `apps/cli/src/index.ts` is the best reference for a minimal terminal integration, while `apps/ftv/src/index.tsx` shows the same `harness` contract driving an Ink UI. Shared app-side setup lives in `apps/helpers/cli/`.

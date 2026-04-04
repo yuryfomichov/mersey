@@ -2,7 +2,7 @@
 
 Mersey is a local coding agent prototype.
 
-The repo is organized around a reusable `harness` package and thin apps that sit on top of it. Today the main app is `apps/cli`, which wires terminal input into the shared runtime.
+The repo is organized around a reusable `harness` package and thin apps that sit on top of it. The current apps are `apps/cli` for the readline terminal flow and `apps/ftv` for the Ink-based TUI prototype.
 
 ## Goals
 
@@ -22,7 +22,9 @@ The repo is organized around a reusable `harness` package and thin apps that sit
 - `harness/src/tools/`: built-in tools and runtime services
 - `harness/src/sessions/`: session state and storage implementations
 - `harness/src/events/`: event publishing and safe telemetry
+- `apps/helpers/cli/`: shared app-side wiring for provider, session, tool, and logging setup
 - `apps/cli/`: thin terminal app over `harness`
+- `apps/ftv/`: thin Ink TUI app over `harness`
 - `docs/`: additional project documentation
 
 ## Quick Start
@@ -45,6 +47,7 @@ pnpm build
 pnpm cli -- --provider fake
 pnpm cli -- --provider minimax
 pnpm cli -- --provider openai
+pnpm ftv -- --provider openai
 ```
 
 ## Provider Setup
@@ -55,7 +58,7 @@ pnpm cli -- --provider openai
 
 The CLI reads environment variables through Node's `--env-file=.env` support in the `pnpm cli` script, so a local `.env` file is enough for provider-backed runs.
 
-## CLI Notes
+## App Notes
 
 Useful flags:
 
@@ -73,14 +76,16 @@ Examples:
 pnpm cli -- --provider fake --stream
 pnpm cli -- --provider openai --session-store filesystem --sessions-dir tmp/sessions
 pnpm cli -- --provider openai --cache
+pnpm ftv -- --provider openai --session-store filesystem --sessions-dir tmp/sessions
 ```
 
-The CLI registers a small set of tools from `harness` for file and command access.
+`apps/cli` and `apps/ftv` both register a small set of tools from `harness` for file and command access, with app-side setup shared through `apps/helpers/cli/`.
 
 ## Architecture Summary
 
 - Apps own interaction and presentation.
 - `harness` owns turn orchestration, tool execution, session state, and event emission.
+- Shared app-side provider, session, tool, and logging wiring lives under `apps/helpers/cli/` so apps do not depend on each other.
 - The turn loop depends on `ModelProvider`, not SDK-specific request or response types.
 - Provider-specific translation belongs in `harness/src/providers/` and `harness/src/providers/codecs/`.
 - Tool execution is routed through `harness/src/tools/runtime/`, which applies workspace and output policies.
