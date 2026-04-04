@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import type OpenAI from 'openai';
 
+import { createEmptyModelUsage } from '../models/types.js';
 import { collectEvents, collectResponse } from '../test/provider-test-helpers.js';
 import { OpenAIProvider } from './openai.js';
 
@@ -21,6 +22,12 @@ function createResponse(overrides: Partial<OpenAI.Responses.Response>): OpenAI.R
     parallel_tool_calls: false,
     temperature: null,
     tool_choice: 'auto',
+    usage: {
+      input_tokens: 0,
+      input_tokens_details: { cached_tokens: 0 },
+      output_tokens: 0,
+      total_tokens: 0,
+    },
     ...overrides,
   } as unknown as OpenAI.Responses.Response;
 }
@@ -249,6 +256,7 @@ test('OpenAIProvider forwards codec-produced input and tools to responses.create
   assert.deepEqual(response, {
     text: '',
     toolCalls: [{ id: 'call_2', input: { command: 'pwd' }, name: 'run_command' }],
+    usage: createEmptyModelUsage(),
   });
 });
 
@@ -351,6 +359,7 @@ test('OpenAIProvider streams text deltas and returns the final response', async 
       response: {
         text: 'hello',
         toolCalls: [{ id: 'call_1', input: { command: 'pwd' }, name: 'run_command' }],
+        usage: createEmptyModelUsage(),
       },
       type: 'response_completed',
     },
@@ -434,6 +443,43 @@ test('OpenAIProvider derives streamed final text from output items when output_t
 
   assert.deepEqual(events, [
     { delta: 'hello', type: 'text_delta' },
-    { response: { text: 'hello', toolCalls: [] }, type: 'response_completed' },
+    {
+      response: { text: 'hello', toolCalls: [], usage: createEmptyModelUsage() },
+      type: 'response_completed',
+    },
   ]);
+});
+
+test('OpenAIProvider requests 24h prompt retention when cache is enabled', async () => {
+  const requests: Array<Record<string, unknown>> = [];
+
+  const provider = new OpenAIProvider({
+    apiKey: 'test-key',
+    baseUrl: 'https://example.com',
+    cache: true,
+    maxTokens: 256,
+    model: 'gpt-5.4-mini',
+  });
+
+  (
+    provider as unknown as {
+      client: { responses: { create(request: Record<string, unknown>): Promise<OpenAI.Responses.Response> } };
+    }
+  ).client = {
+    responses: {
+      async create(request: Record<string, unknown>): Promise<OpenAI.Responses.Response> {
+        requests.push(request);
+        return createResponse({ output_text: 'ok' });
+      },
+    },
+  };
+
+  await collectEvents(
+    provider.generate({
+      messages: [{ content: 'hello', role: 'user' }],
+      stream: false,
+    }),
+  );
+
+  assert.equal(requests[0]?.prompt_cache_retention, '24h');
 });

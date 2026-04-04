@@ -1,5 +1,4 @@
 import OpenAI from 'openai';
-import type { FunctionTool, ResponseInputItem } from 'openai/resources/responses/responses';
 
 import type { ModelProvider } from '../models/provider.js';
 import type { ModelRequest, ModelStreamEvent } from '../models/types.js';
@@ -10,6 +9,7 @@ export type OpenAILikeProviderConfig = {
   baseUrl: string;
   model: string;
   maxTokens: number;
+  cache?: boolean;
 };
 
 export type OpenAIConfig = OpenAILikeProviderConfig;
@@ -20,6 +20,7 @@ export abstract class OpenAILikeProvider implements ModelProvider {
   readonly maxTokens: number;
   readonly model: string;
   readonly name: string = 'openai-compatible';
+  readonly cache: boolean;
 
   constructor(config: OpenAILikeProviderConfig, codec: OpenAICodec) {
     this.client = new OpenAI({
@@ -29,22 +30,24 @@ export abstract class OpenAILikeProvider implements ModelProvider {
     this.maxTokens = config.maxTokens;
     this.model = config.model;
     this.codec = codec;
+    this.cache = config.cache ?? false;
   }
 
-  private getRequest(input: ModelRequest): {
-    input: ResponseInputItem[];
-    instructions: ModelRequest['systemPrompt'];
-    max_output_tokens: number;
-    model: string;
-    tools: FunctionTool[] | undefined;
-  } {
-    return {
+  private getRequest(input: ModelRequest) {
+    const request = {
       input: this.codec.getInputItems(input),
       instructions: input.systemPrompt,
       max_output_tokens: this.maxTokens,
       model: this.model,
       tools: this.codec.getTools(input),
     };
+
+    if (this.cache) {
+      // TODO: Some OpenAI models reject 24h prompt cache retention; handle unsupported models without failing requests.
+      return { ...request, prompt_cache_retention: '24h' as const };
+    }
+
+    return request;
   }
 
   async *generate(input: ModelRequest): AsyncIterable<ModelStreamEvent> {
@@ -55,6 +58,7 @@ export abstract class OpenAILikeProvider implements ModelProvider {
         response: {
           text: this.codec.getResponseText(response),
           toolCalls: this.codec.getToolCalls(response),
+          usage: this.codec.getUsage(response),
         },
         type: 'response_completed',
       };
@@ -79,6 +83,7 @@ export abstract class OpenAILikeProvider implements ModelProvider {
       response: {
         text: this.codec.getResponseText(response),
         toolCalls: this.codec.getToolCalls(response),
+        usage: this.codec.getUsage(response),
       },
       type: 'response_completed',
     };

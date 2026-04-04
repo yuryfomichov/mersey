@@ -19,6 +19,22 @@ export type ModelToolCall = {
   name: string;
 };
 
+export type ModelUsage = {
+  uncachedInputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteInputTokens: number;
+  outputTokens: number;
+};
+
+export function createEmptyModelUsage(): ModelUsage {
+  return {
+    cacheWriteInputTokens: 0,
+    cachedInputTokens: 0,
+    outputTokens: 0,
+    uncachedInputTokens: 0,
+  };
+}
+
 export type ModelUserMessage = {
   role: 'user';
   content: string;
@@ -52,6 +68,7 @@ export type ModelRequest = {
 export type ModelResponse = {
   text: string;
   toolCalls?: ModelToolCall[];
+  usage: ModelUsage;
 };
 
 export type ModelStreamEvent =

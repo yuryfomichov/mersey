@@ -4,6 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import { HarnessObserver } from '../events/observer.js';
 import type { ModelProvider } from '../models/provider.js';
+import { createEmptyModelUsage } from '../models/types.js';
 import { FakeProvider } from '../providers/fake.js';
 import { MemorySessionStore } from '../sessions/memory-store.js';
 import { Session } from '../sessions/session.js';
@@ -85,6 +86,7 @@ test('createTurnStreamFactory starts on first pull and ignores pre-consumption r
       createdAt: firstChunk.value.type === 'final_message' ? firstChunk.value.message.createdAt : '',
       role: 'assistant',
       toolCalls: undefined,
+      usage: createEmptyModelUsage(),
     },
     type: 'final_message',
   });
@@ -127,7 +129,10 @@ test('createTurnStreamFactory return aborts an active turn, drops partial histor
     provider: new FakeProvider({
       streamReply: async function* (input) {
         if (input.messages.at(-1)?.role === 'user' && input.messages.at(-1)?.content === 'second') {
-          yield { response: { text: 'reply:second' }, type: 'response_completed' };
+          yield {
+            response: { text: 'reply:second', usage: createEmptyModelUsage() },
+            type: 'response_completed',
+          };
           return;
         }
 
@@ -240,7 +245,10 @@ test('createTurnStreamFactory yields only final_message when streaming is disabl
       streamReply: [
         { delta: 'hel', type: 'text_delta' },
         { delta: 'lo', type: 'text_delta' },
-        { response: { text: 'hello' }, type: 'response_completed' },
+        {
+          response: { text: 'hello', usage: createEmptyModelUsage() },
+          type: 'response_completed',
+        },
       ],
     }),
   });
@@ -254,6 +262,7 @@ test('createTurnStreamFactory yields only final_message when streaming is disabl
         createdAt: chunks[0]?.type === 'final_message' ? chunks[0].message.createdAt : '',
         role: 'assistant',
         toolCalls: undefined,
+        usage: createEmptyModelUsage(),
       },
       type: 'final_message',
     },
@@ -266,7 +275,10 @@ test('createTurnStreamFactory snapshots final_message chunks before exposing the
       streamReply: [
         { delta: 'hel', type: 'text_delta' },
         { delta: 'lo', type: 'text_delta' },
-        { response: { text: 'hello' }, type: 'response_completed' },
+        {
+          response: { text: 'hello', usage: createEmptyModelUsage() },
+          type: 'response_completed',
+        },
       ],
     }),
   });

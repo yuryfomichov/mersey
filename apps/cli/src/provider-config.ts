@@ -28,7 +28,11 @@ function getRequiredEnv(env: NodeJS.ProcessEnv, name: string, owner: string): st
   return value;
 }
 
-export function getProviderDefinition(name: ProviderName, env: NodeJS.ProcessEnv = process.env): ProviderDefinition {
+export function getProviderDefinition(
+  name: ProviderName,
+  env: NodeJS.ProcessEnv = process.env,
+  cache?: boolean,
+): ProviderDefinition {
   switch (name) {
     case 'anthropic':
       return {
@@ -36,6 +40,7 @@ export function getProviderDefinition(name: ProviderName, env: NodeJS.ProcessEnv
         config: {
           apiKey: getRequiredEnv(env, 'ANTHROPIC_API_KEY', 'anthropic'),
           ...ANTHROPIC_PROVIDER_CONFIG,
+          ...(cache && { cache }),
         },
       };
     case 'fake':
@@ -48,6 +53,7 @@ export function getProviderDefinition(name: ProviderName, env: NodeJS.ProcessEnv
         config: {
           apiKey: getRequiredEnv(env, 'MINIMAX_API_KEY', 'minimax'),
           ...MINIMAX_PROVIDER_CONFIG,
+          ...(cache && { cache }),
         },
       };
     case 'openai':
@@ -56,6 +62,7 @@ export function getProviderDefinition(name: ProviderName, env: NodeJS.ProcessEnv
         config: {
           apiKey: getRequiredEnv(env, 'OPENAI_API_KEY', 'openai'),
           ...OPENAI_PROVIDER_CONFIG,
+          ...(cache && { cache }),
         },
       };
     default:

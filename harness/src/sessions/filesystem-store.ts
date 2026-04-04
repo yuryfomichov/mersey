@@ -1,15 +1,16 @@
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { createEmptyModelUsage } from '../models/types.js';
 import type { SessionStore } from './store.js';
-import type { Message, SessionState } from './types.js';
+import type { Message, SessionState, StoredSessionState } from './types.js';
 import { assertValidSessionId } from './utils.js';
 
 export type FilesystemSessionStoreOptions = {
   rootDir?: string;
 };
 
-type SessionMetadata = Omit<SessionState, 'messages'>;
+type SessionMetadata = Omit<StoredSessionState, 'messages'>;
 
 function isErrnoCode(error: unknown, code: string): boolean {
   return error instanceof Error && 'code' in error && error.code === code;
@@ -27,7 +28,7 @@ export class FilesystemSessionStore implements SessionStore {
     await appendFile(this.getMessagesPath(sessionId), `${JSON.stringify(message)}\n`, 'utf8');
   }
 
-  async createSession(session: SessionState): Promise<SessionState> {
+  async createSession(session: SessionState): Promise<StoredSessionState> {
     const existingSession = await this.getSession(session.id);
 
     if (existingSession) {
@@ -40,8 +41,15 @@ export class FilesystemSessionStore implements SessionStore {
 
     await mkdir(sessionDir, { recursive: true });
 
+    const metadata: SessionMetadata = {
+      contextSize: 0,
+      id: session.id,
+      createdAt: session.createdAt,
+      usage: createEmptyModelUsage(),
+    };
+
     try {
-      await writeFile(sessionPath, `${JSON.stringify(this.toSessionMetadata(session), null, 2)}\n`, {
+      await writeFile(sessionPath, `${JSON.stringify(metadata, null, 2)}\n`, {
         encoding: 'utf8',
         flag: 'wx',
       });
@@ -69,19 +77,24 @@ export class FilesystemSessionStore implements SessionStore {
     }
 
     return {
-      ...session,
-      messages: await this.listMessages(session.id),
+      contextSize: 0,
+      id: session.id,
+      createdAt: session.createdAt,
+      messages: [],
+      usage: createEmptyModelUsage(),
     };
   }
 
-  async getSession(sessionId: string): Promise<SessionState | null> {
+  async getSession(sessionId: string): Promise<StoredSessionState | null> {
     try {
-      const contents = await readFile(this.getSessionPath(sessionId), 'utf8');
-      const session = JSON.parse(contents) as SessionMetadata;
+      const metadata = await this.readMetadata(sessionId);
 
       return {
-        ...session,
+        contextSize: metadata.contextSize,
+        id: metadata.id,
+        createdAt: metadata.createdAt,
         messages: await this.listMessages(sessionId),
+        usage: metadata.usage,
       };
     } catch (error: unknown) {
       if (isErrnoCode(error, 'ENOENT')) {
@@ -126,10 +139,18 @@ export class FilesystemSessionStore implements SessionStore {
     return join(this.getSessionDir(sessionId), 'session.json');
   }
 
-  private toSessionMetadata(session: SessionState): SessionMetadata {
-    return {
-      createdAt: session.createdAt,
-      id: session.id,
-    };
+  private async readMetadata(sessionId: string): Promise<SessionMetadata> {
+    const contents = await readFile(this.getSessionPath(sessionId), 'utf8');
+    return JSON.parse(contents) as SessionMetadata;
+  }
+
+  private async writeMetadata(sessionId: string, metadata: SessionMetadata): Promise<void> {
+    await writeFile(this.getSessionPath(sessionId), `${JSON.stringify(metadata, null, 2)}\n`, {
+      encoding: 'utf8',
+    });
+  }
+
+  async writeState(sessionId: string, state: Omit<StoredSessionState, 'messages'>): Promise<void> {
+    await this.writeMetadata(sessionId, state);
   }
 }

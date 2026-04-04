@@ -67,6 +67,8 @@ Each harness instance uses a `Session` to store:
 
 - message history
 - turn status
+- aggregated usage metrics
+- the last turn's token footprint
 
 The default session uses in-memory storage. Apps can inject a persistent store when they need history to survive process restarts.
 
@@ -82,6 +84,9 @@ const harness = createHarness({
   provider: { name: 'fake' },
   session,
 });
+
+const usage = await harness.session.getUsage();
+const lastTurnTokens = await harness.session.getContextSize();
 ```
 
 ### Tools

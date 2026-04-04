@@ -303,6 +303,7 @@ export async function* streamLoop({
         createdAt: new Date().toISOString(),
         role: 'assistant',
         toolCalls: response.toolCalls,
+        usage: response.usage,
       };
 
       appendMessage(turnMessages, assistantMessage);
