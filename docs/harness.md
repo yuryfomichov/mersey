@@ -143,13 +143,38 @@ for await (const chunk of harness.streamMessage('hello')) {
 }
 ```
 
+`streamMessage()` returns a cancellable stream. Apps with explicit lifecycle boundaries (Ink/TUI teardown, HTTP disconnects, route changes) should call `cancel()` to abort in-flight provider/tool work.
+
+```ts
+const stream = harness.streamMessage('hello');
+
+try {
+  for await (const chunk of stream) {
+    // render chunk
+  }
+} finally {
+  // safe to call even after completion
+  await stream.cancel();
+}
+```
+
+If app code does not retain the current stream handle, `harness.cancelActiveTurn()` provides an app-level escape hatch that cancels the latest active turn (from either `streamMessage()` or `sendMessage()`).
+
+```ts
+const harness = createHarness({
+  provider: { name: 'fake' },
+});
+
+void harness.cancelActiveTurn();
+```
+
 Chunk types come from `harness/src/loop/loop.ts`:
 
 - `assistant_delta`
 - `assistant_message_completed`
 - `final_message`
 
-`harness/src/turn-stream.ts` handles session locking, abort behavior, loop execution, and persisting the resulting turn.
+`harness/src/core/turn-stream.ts` handles session locking, abort behavior, loop execution, and persisting the resulting turn.
 
 ## Events And Logging
 

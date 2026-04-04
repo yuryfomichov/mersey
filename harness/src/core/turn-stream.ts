@@ -1,7 +1,6 @@
 import { HarnessObserver } from '../events/observer.js';
 import type { ModelProvider } from '../models/provider.js';
 import { Session } from '../sessions/session.js';
-import type { Message } from '../sessions/types.js';
 import type { ToolRuntimeFactory } from '../tools/runtime/index.js';
 import { snapshot } from '../utils/object.js';
 import { createAsyncQueue } from './async-queue.js';
@@ -22,7 +21,10 @@ type TurnStreamOptions = {
 
 export type TurnStreamFactoryOptions = Omit<TurnStreamOptions, 'content' | 'stream'>;
 
-export type TurnStream = AsyncIterable<TurnChunk> & AsyncIterator<TurnChunk>;
+export type TurnStream = AsyncIterable<TurnChunk> &
+  AsyncIterator<TurnChunk> & {
+    cancel(): Promise<void>;
+  };
 
 export type TurnStreamFactory = (content: string, stream?: boolean) => TurnStream;
 
@@ -60,7 +62,7 @@ function createTurnStream({
   stream,
   systemPrompt,
   toolRuntimeFactory,
-}: TurnStreamOptions): AsyncIterable<TurnChunk> & AsyncIterator<TurnChunk> {
+}: TurnStreamOptions): TurnStream {
   const queue = createAsyncQueue<TurnChunk>();
   const abortController = new AbortController();
   let backgroundTask: Promise<void> | null = null;
@@ -112,6 +114,16 @@ function createTurnStream({
     void backgroundTask.catch(() => {});
   };
 
+  const abortAndWait = async (): Promise<void> => {
+    if (!started) {
+      return;
+    }
+
+    abortController.abort();
+    await (queue.iterable.return?.() ?? Promise.resolve({ done: true, value: undefined }));
+    await backgroundTask?.catch(() => {});
+  };
+
   return {
     [Symbol.asyncIterator](): AsyncIterator<TurnChunk> {
       return this;
@@ -125,14 +137,13 @@ function createTurnStream({
         return Promise.resolve({ done: true, value: undefined });
       }
 
-      abortController.abort();
-
       return (async () => {
-        await (queue.iterable.return?.() ?? Promise.resolve({ done: true, value: undefined }));
-        await backgroundTask?.catch(() => {});
-
+        await abortAndWait();
         return { done: true, value: undefined };
       })();
+    },
+    cancel(): Promise<void> {
+      return abortAndWait();
     },
   };
 }
@@ -144,22 +155,4 @@ export function createTurnStreamFactory(options: TurnStreamFactoryOptions): Turn
       content,
       stream,
     });
-}
-
-export function asFinalMessage(factory: TurnStreamFactory): (content: string) => Promise<Message> {
-  return async (content: string): Promise<Message> => {
-    let finalMessage: Message | null = null;
-
-    for await (const chunk of factory(content, false)) {
-      if (chunk.type === 'final_message') {
-        finalMessage = chunk.message;
-      }
-    }
-
-    if (!finalMessage) {
-      throw new Error('Turn completed without a final assistant message.');
-    }
-
-    return finalMessage;
-  };
 }

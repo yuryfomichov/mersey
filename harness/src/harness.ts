@@ -1,5 +1,5 @@
-import type { TurnChunk } from './core/loop.js';
-import { asFinalMessage, createTurnStreamFactory } from './core/turn-stream.js';
+import { createTurnStreamFactory } from './core/turn-stream.js';
+import type { TurnStream } from './core/turn-stream.js';
 import { HarnessObserver } from './events/observer.js';
 import type { HarnessEventListener } from './events/types.js';
 import { createFanoutLogger } from './logger/fanout.js';
@@ -15,8 +15,9 @@ import type { Tool } from './tools/types.js';
 
 export type Harness = {
   session: Session;
+  cancelActiveTurn(): Promise<void>;
   sendMessage(content: string): Promise<Message>;
-  streamMessage(content: string): AsyncIterable<TurnChunk>;
+  streamMessage(content: string): TurnStream;
   subscribe(listener: HarnessEventListener): () => void;
 };
 
@@ -55,19 +56,57 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
     logger: createFanoutLogger(options.loggers),
     providerName: resolvedProvider.name,
   });
-  const streamTurn = createTurnStreamFactory({
+  const streamTurnFactory = createTurnStreamFactory({
     observer,
     provider: resolvedProvider,
     session,
     systemPrompt: options.systemPrompt,
     toolRuntimeFactory,
   });
+  let activeTurn: TurnStream | null = null;
+
+  const readFinalMessage = async (turn: TurnStream): Promise<Message> => {
+    let finalMessage: Message | null = null;
+
+    for await (const chunk of turn) {
+      if (chunk.type === 'final_message') {
+        finalMessage = chunk.message;
+      }
+    }
+
+    if (!finalMessage) {
+      throw new Error('Turn completed without a final assistant message.');
+    }
+
+    return finalMessage;
+  };
 
   return {
     session,
-    sendMessage: asFinalMessage(streamTurn),
-    streamMessage(content: string): AsyncIterable<TurnChunk> {
-      return streamTurn(content);
+    async cancelActiveTurn(): Promise<void> {
+      if (!activeTurn) {
+        return;
+      }
+
+      const turn = activeTurn;
+      activeTurn = null;
+      await turn.cancel();
+    },
+    async sendMessage(content: string): Promise<Message> {
+      const turn = streamTurnFactory(content, false);
+      activeTurn = turn;
+
+      try {
+        return await readFinalMessage(turn);
+      } finally {
+        if (activeTurn === turn) {
+          activeTurn = null;
+        }
+      }
+    },
+    streamMessage(content: string): TurnStream {
+      activeTurn = streamTurnFactory(content);
+      return activeTurn;
     },
     subscribe(listener: HarnessEventListener): () => void {
       return observer.subscribe(listener);

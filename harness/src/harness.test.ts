@@ -179,6 +179,158 @@ test('createHarness serializes concurrent sendMessage calls for one session', as
   ]);
 });
 
+test('createHarness streamMessage returns a cancellable stream', async () => {
+  const harness = createTestHarness({
+    providerInstance: new FakeProvider({
+      streamReply: async function* (input) {
+        if (input.messages.at(-1)?.role === 'user' && input.messages.at(-1)?.content === 'second') {
+          yield {
+            response: { text: 'reply:second', usage: createEmptyModelUsage() },
+            type: 'response_completed',
+          };
+          return;
+        }
+
+        yield { delta: 'partial', type: 'text_delta' };
+
+        await new Promise((_, reject) => {
+          input.signal?.addEventListener(
+            'abort',
+            () => {
+              reject(input.signal?.reason);
+            },
+            { once: true },
+          );
+        });
+      },
+    }),
+    sessionId: 'cancel-stream-session',
+    sessionStore: new MemorySessionStore(),
+  });
+
+  const stream = harness.streamMessage('first');
+  const iterator = stream[Symbol.asyncIterator]();
+  const firstChunk = await iterator.next();
+
+  assert.equal(firstChunk.done, false);
+  assert.equal(firstChunk.value.type, 'assistant_delta');
+
+  await stream.cancel();
+
+  assert.equal(harness.session.messages.length, 0);
+
+  const reply = await Promise.race([
+    harness.sendMessage('second'),
+    delay(1_000).then(() => {
+      throw new Error('second turn stayed blocked after stream cancellation');
+    }),
+  ]);
+
+  assert.equal(reply.content, 'reply:second');
+});
+
+test('createHarness cancelActiveTurn cancels the in-flight stream', async () => {
+  const harness = createTestHarness({
+    providerInstance: new FakeProvider({
+      streamReply: async function* (input) {
+        if (input.messages.at(-1)?.role === 'user' && input.messages.at(-1)?.content === 'second') {
+          yield {
+            response: { text: 'reply:second', usage: createEmptyModelUsage() },
+            type: 'response_completed',
+          };
+          return;
+        }
+
+        yield { delta: 'partial', type: 'text_delta' };
+
+        await new Promise((_, reject) => {
+          input.signal?.addEventListener(
+            'abort',
+            () => {
+              reject(input.signal?.reason);
+            },
+            { once: true },
+          );
+        });
+      },
+    }),
+    sessionId: 'cancel-active-turn-session',
+    sessionStore: new MemorySessionStore(),
+  });
+
+  const stream = harness.streamMessage('first');
+  const iterator = stream[Symbol.asyncIterator]();
+  const firstChunk = await iterator.next();
+
+  assert.equal(firstChunk.done, false);
+  assert.equal(firstChunk.value.type, 'assistant_delta');
+
+  await harness.cancelActiveTurn();
+
+  assert.equal(harness.session.messages.length, 0);
+
+  const reply = await Promise.race([
+    harness.sendMessage('second'),
+    delay(1_000).then(() => {
+      throw new Error('second turn stayed blocked after active turn cancellation');
+    }),
+  ]);
+
+  assert.equal(reply.content, 'reply:second');
+});
+
+test('createHarness cancelActiveTurn cancels an in-flight sendMessage', async () => {
+  let markFirstRequestStarted!: () => void;
+
+  const firstRequestStarted = new Promise<void>((resolve) => {
+    markFirstRequestStarted = resolve;
+  });
+
+  const provider: ModelProvider = {
+    model: 'fake-model',
+    name: 'fake',
+    async *generate(input: ModelRequest): AsyncIterable<ModelStreamEvent> {
+      if (input.messages.at(-1)?.role === 'user' && input.messages.at(-1)?.content === 'second') {
+        yield {
+          response: { text: 'reply:second', usage: createEmptyModelUsage() },
+          type: 'response_completed',
+        };
+        return;
+      }
+
+      markFirstRequestStarted();
+
+      await new Promise((_, reject) => {
+        input.signal?.addEventListener(
+          'abort',
+          () => {
+            reject(input.signal?.reason);
+          },
+          { once: true },
+        );
+      });
+    },
+  };
+
+  const harness = createTestHarness({
+    providerInstance: provider,
+    sessionId: 'cancel-send-message-session',
+    sessionStore: new MemorySessionStore(),
+  });
+
+  const firstReplyPromise = harness.sendMessage('first');
+  await firstRequestStarted;
+
+  await harness.cancelActiveTurn();
+
+  await assert.rejects(firstReplyPromise);
+  assert.equal(harness.session.messages.length, 0);
+
+  const reply = await harness.sendMessage('second');
+
+  assert.equal(reply.content, 'reply:second');
+});
+
 test('createHarness emits live events in stable order without leaking raw content', async () => {
   await withTempDir(async (rootDir) => {
     await writeWorkspaceFiles(rootDir, { 'note.txt': 'secret file body' });
