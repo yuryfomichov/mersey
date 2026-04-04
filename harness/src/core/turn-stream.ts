@@ -29,6 +29,16 @@ export type TurnStream = AsyncIterable<TurnChunk> &
 
 export type TurnStreamFactory = (content: string, stream?: boolean) => TurnStream;
 
+function createTurnCancellationError(): Error {
+  const error = new Error('Turn was cancelled.');
+  error.name = 'AbortError';
+  return error;
+}
+
+function getAbortReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : createTurnCancellationError();
+}
+
 /**
  * Executes a single turn (user message → model response → optional tool calls)
  * within a session. This is the core turn execution wrapper that handles:
@@ -74,6 +84,11 @@ function createTurnStream({
       return;
     }
 
+    if (abortController.signal.aborted) {
+      queue.fail(getAbortReason(abortController.signal));
+      return;
+    }
+
     started = true;
 
     backgroundTask = session.runExclusive(async () => {
@@ -115,13 +130,18 @@ function createTurnStream({
     void backgroundTask.catch(() => {});
   };
 
-  const abortAndWait = async (): Promise<void> => {
-    if (!started) {
+  const cancelTurn = (): void => {
+    if (abortController.signal.aborted) {
       return;
     }
 
-    abortController.abort();
-    await (queue.iterable.return?.() ?? Promise.resolve({ done: true, value: undefined }));
+    const cancellationError = createTurnCancellationError();
+    abortController.abort(cancellationError);
+    queue.fail(cancellationError);
+  };
+
+  const abortAndWait = async (): Promise<void> => {
+    cancelTurn();
     await backgroundTask?.catch(() => {});
   };
 

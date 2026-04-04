@@ -1,3 +1,4 @@
+import type { TurnChunk } from './core/loop.js';
 import { createTurnStreamFactory, readFinalMessage } from './core/turn-stream.js';
 import type { TurnStream } from './core/turn-stream.js';
 import { HarnessObserver } from './events/observer.js';
@@ -65,6 +66,50 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
   });
   let activeTurn: TurnStream | null = null;
 
+  const clearActiveTurn = (turn: TurnStream): void => {
+    if (activeTurn === turn) {
+      activeTurn = null;
+    }
+  };
+
+  const trackTurn = (turn: TurnStream): TurnStream => {
+    const trackedTurn: TurnStream = {
+      [Symbol.asyncIterator](): AsyncIterator<TurnChunk> {
+        return this;
+      },
+      async next() {
+        try {
+          const result = await turn.next();
+
+          if (result.done) {
+            clearActiveTurn(trackedTurn);
+          }
+
+          return result;
+        } catch (error: unknown) {
+          clearActiveTurn(trackedTurn);
+          throw error;
+        }
+      },
+      async return() {
+        try {
+          return await (turn.return?.() ?? Promise.resolve({ done: true, value: undefined }));
+        } finally {
+          clearActiveTurn(trackedTurn);
+        }
+      },
+      async cancel() {
+        try {
+          await turn.cancel();
+        } finally {
+          clearActiveTurn(trackedTurn);
+        }
+      },
+    };
+
+    return trackedTurn;
+  };
+
   return {
     session,
     async cancelActiveTurn(): Promise<void> {
@@ -77,19 +122,12 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
       await turn.cancel();
     },
     async sendMessage(content: string): Promise<Message> {
-      const turn = streamTurnFactory(content, false);
+      const turn = trackTurn(streamTurnFactory(content, false));
       activeTurn = turn;
-
-      try {
-        return await readFinalMessage(turn);
-      } finally {
-        if (activeTurn === turn) {
-          activeTurn = null;
-        }
-      }
+      return readFinalMessage(turn);
     },
     streamMessage(content: string): TurnStream {
-      activeTurn = streamTurnFactory(content);
+      activeTurn = trackTurn(streamTurnFactory(content));
       return activeTurn;
     },
     subscribe(listener: HarnessEventListener): () => void {

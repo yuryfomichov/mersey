@@ -145,7 +145,7 @@ for await (const chunk of harness.streamMessage('hello')) {
 
 `streamMessage()` returns a cancellable stream, so apps can abort in-flight work with `await stream.cancel()`. If the app does not keep the stream handle, use `harness.cancelActiveTurn()` to cancel the latest active turn from `streamMessage()` or `sendMessage()`.
 
-Chunk types come from `harness/src/loop/loop.ts`:
+Chunk types come from `harness/src/core/loop.ts`:
 
 - `assistant_delta`
 - `assistant_message_completed`

@@ -323,7 +323,10 @@ test('createHarness cancelActiveTurn cancels an in-flight sendMessage', async ()
 
   await harness.cancelActiveTurn();
 
-  await assert.rejects(firstReplyPromise);
+  await assert.rejects(
+    firstReplyPromise,
+    (error) => error instanceof Error && error.name === 'AbortError' && error.message === 'Turn was cancelled.',
+  );
   assert.equal(harness.session.messages.length, 0);
 
   const reply = await harness.sendMessage('second');

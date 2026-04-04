@@ -92,6 +92,25 @@ test('createTurnStreamFactory starts on first pull and ignores pre-consumption r
   });
 });
 
+test('createTurnStreamFactory cancel before first pull prevents turn start', async () => {
+  const { provider, streamTurn } = createStreamTurnFactory({});
+
+  const turn = streamTurn('hello', false);
+
+  await turn.cancel();
+  assert.equal(provider.requests.length, 0);
+
+  await assert.rejects(
+    async () => {
+      for await (const _chunk of turn) {
+        // No-op.
+      }
+    },
+    (error) => error instanceof Error && error.name === 'AbortError' && error.message === 'Turn was cancelled.',
+  );
+  assert.equal(provider.requests.length, 0);
+});
+
 test('createTurnStreamFactory rejects iteration when the background turn throws undefined', async () => {
   const session = createTestSession(new MemorySessionStore());
   const provider: ModelProvider = {
