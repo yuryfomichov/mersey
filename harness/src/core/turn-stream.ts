@@ -1,6 +1,7 @@
 import { HarnessObserver } from '../events/observer.js';
 import type { ModelProvider } from '../models/provider.js';
 import { Session } from '../sessions/session.js';
+import type { Message } from '../sessions/types.js';
 import type { ToolRuntimeFactory } from '../tools/runtime/index.js';
 import { snapshot } from '../utils/object.js';
 import { createAsyncQueue } from './async-queue.js';
@@ -155,4 +156,20 @@ export function createTurnStreamFactory(options: TurnStreamFactoryOptions): Turn
       content,
       stream,
     });
+}
+
+export async function readFinalMessage(turn: AsyncIterable<TurnChunk>): Promise<Message> {
+  let finalMessage: Message | null = null;
+
+  for await (const chunk of turn) {
+    if (chunk.type === 'final_message') {
+      finalMessage = chunk.message;
+    }
+  }
+
+  if (!finalMessage) {
+    throw new Error('Turn completed without a final assistant message.');
+  }
+
+  return finalMessage;
 }

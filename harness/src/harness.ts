@@ -1,4 +1,4 @@
-import { createTurnStreamFactory } from './core/turn-stream.js';
+import { createTurnStreamFactory, readFinalMessage } from './core/turn-stream.js';
 import type { TurnStream } from './core/turn-stream.js';
 import { HarnessObserver } from './events/observer.js';
 import type { HarnessEventListener } from './events/types.js';
@@ -64,22 +64,6 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
     toolRuntimeFactory,
   });
   let activeTurn: TurnStream | null = null;
-
-  const readFinalMessage = async (turn: TurnStream): Promise<Message> => {
-    let finalMessage: Message | null = null;
-
-    for await (const chunk of turn) {
-      if (chunk.type === 'final_message') {
-        finalMessage = chunk.message;
-      }
-    }
-
-    if (!finalMessage) {
-      throw new Error('Turn completed without a final assistant message.');
-    }
-
-    return finalMessage;
-  };
 
   return {
     session,
