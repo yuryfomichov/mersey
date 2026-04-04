@@ -32,8 +32,12 @@ Main goals:
   - session types and storage implementations
 - `harness/src/events/`
   - event publishing and safe telemetry
+- `apps/helpers/cli/`
+  - shared app-side wiring for provider, session, tool, and logging setup
 - `apps/cli/`
   - thin terminal app over `harness`
+- `apps/ftv/`
+  - thin Ink TUI app over `harness`
 
 ## Architecture
 

@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.json",
-  "include": ["harness/src/**/*.ts", "apps/**/*.ts"],
+  "include": ["harness/src/**/*.ts", "apps/**/*.ts", "apps/**/*.tsx"],
   "exclude": ["**/*.test.ts", "harness/src/test/**/*.ts", "harness/test/**/*.ts"]
 }
