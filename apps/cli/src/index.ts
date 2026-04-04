@@ -158,7 +158,7 @@ async function main(): Promise<void> {
     const totalInputTokens = u.uncachedInputTokens + u.cachedInputTokens + u.cacheWriteInputTokens;
 
     output.write(
-      `[usage: ${totalInputTokens} in = ${u.uncachedInputTokens} uncached + ${u.cachedInputTokens} cached + ${u.cacheWriteInputTokens}cache-write / ${u.outputTokens}out] [context size: ${contextSize} tokens]\n`,
+      `[usage: ${totalInputTokens} in = ${u.uncachedInputTokens} uncached + ${u.cachedInputTokens} cached + ${u.cacheWriteInputTokens} cache-write / ${u.outputTokens} out] [context size: ${contextSize} tokens]\n`,
     );
   };
 
