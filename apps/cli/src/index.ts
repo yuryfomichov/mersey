@@ -1,114 +1,18 @@
 import { argv, stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
 
-import {
-  createHarness,
-  EditFileTool,
-  parseProviderName,
-  ReadFileTool,
-  RunCommandTool,
-  type ProviderName,
-  WriteFileTool,
-} from '../../../harness/index.js';
-import { createCliLoggers } from './logging.js';
-import { getProviderDefinition } from './provider-config.js';
-import { createSession, formatSessionStore, getSessionStoreDefinition } from './session-store.js';
-
-function getProviderName(args: string[]): ProviderName {
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-
-    if (arg === '--provider') {
-      const value = args[index + 1];
-
-      if (!value) {
-        throw new Error('Missing value for --provider.');
-      }
-
-      return parseProviderName(value);
-    }
-
-    if (arg.startsWith('--provider=')) {
-      return parseProviderName(arg.slice('--provider='.length));
-    }
-  }
-
-  return 'minimax';
-}
-
-function getSessionId(args: string[]): string | undefined {
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-
-    if (arg === '--session-id') {
-      const value = args[index + 1];
-
-      if (!value) {
-        throw new Error('Missing value for --session-id.');
-      }
-
-      return value;
-    }
-
-    if (arg.startsWith('--session-id=')) {
-      return arg.slice('--session-id='.length);
-    }
-  }
-
-  return undefined;
-}
-
-function getDebugMode(args: string[]): boolean {
-  for (const arg of args) {
-    if (arg === '--debug' || arg === '--debug=true') {
-      return true;
-    }
-
-    if (arg === '--debug=false') {
-      return false;
-    }
-  }
-
-  return false;
-}
-
-function getStreamMode(args: string[]): boolean {
-  for (const arg of args) {
-    if (arg === '--stream' || arg === '--stream=true') {
-      return true;
-    }
-
-    if (arg === '--stream=false') {
-      return false;
-    }
-  }
-
-  return false;
-}
-
-function getCacheMode(args: string[]): boolean {
-  for (const arg of args) {
-    if (arg === '--cache' || arg === '--cache=true') {
-      return true;
-    }
-
-    if (arg === '--cache=false') {
-      return false;
-    }
-  }
-
-  return false;
-}
-
-function getProviderModel(provider: ReturnType<typeof getProviderDefinition>): string | null {
-  return 'config' in provider && provider.config?.model ? provider.config.model : null;
-}
+import { createHarness } from '../../../harness/index.js';
+import { getBooleanFlag, getProviderName, getSessionId } from '../../helpers/cli/args.js';
+import { createDefaultTools, getProviderModel, getToolExecutionPolicy } from '../../helpers/cli/harness-config.js';
+import { createCliLoggers } from '../../helpers/cli/logging.js';
+import { getProviderDefinition } from '../../helpers/cli/provider-config.js';
+import { createSession, formatSessionStore, getSessionStoreDefinition } from '../../helpers/cli/session-store.js';
 
 async function main(): Promise<void> {
   const args = argv.slice(2);
-  const debug = getDebugMode(args);
-  const stream = getStreamMode(args);
-  const cache = getCacheMode(args);
+  const debug = getBooleanFlag(args, '--debug');
+  const stream = getBooleanFlag(args, '--stream');
+  const cache = getBooleanFlag(args, '--cache');
   const providerName = getProviderName(args);
   const providerDefinition = getProviderDefinition(providerName, process.env, cache);
   const sessionId = getSessionId(args) ?? 'local-session';
@@ -122,21 +26,8 @@ async function main(): Promise<void> {
     provider: providerDefinition,
     session,
     systemPrompt: 'You are a helpful assistant.',
-    toolExecutionPolicy: {
-      maxToolResultBytes: 16 * 1024,
-      workspaceRoot: process.cwd(),
-    },
-    tools: [
-      new ReadFileTool(),
-      new WriteFileTool(),
-      new EditFileTool(),
-      new RunCommandTool({
-        commandAllowlist: ['git', 'ls', 'pwd'],
-        defaultTimeoutMs: 5_000,
-        maxOutputBytes: 16 * 1024,
-        maxTimeoutMs: 15_000,
-      }),
-    ],
+    toolExecutionPolicy: getToolExecutionPolicy(),
+    tools: createDefaultTools(),
   });
   const providerModel = getProviderModel(providerDefinition);
 

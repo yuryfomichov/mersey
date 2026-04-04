@@ -11,14 +11,19 @@
     "format:check": "oxfmt --check .",
     "lint": "oxlint harness apps",
     "lint:fix": "oxlint --fix harness apps",
-    "cli": "node --env-file=.env dist/apps/cli/src/index.js"
+    "cli": "node --env-file=.env dist/apps/cli/src/index.js",
+    "ftv": "node --env-file=.env dist/apps/ftv/src/index.js"
   },
   "dependencies": {
+    "@inkjs/ui": "^2.0.0",
     "@anthropic-ai/sdk": "0.80.0",
+    "ink": "^6.0.0",
     "openai": "6.33.0",
+    "react": "^19.0.0",
     "zod": "4.3.6"
   },
   "devDependencies": {
+    "@types/react": "^19.0.0",
     "@types/node": "25.5.0",
     "oxfmt": "0.42.0",
     "oxlint": "1.57.0",
