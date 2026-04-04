@@ -1,4 +1,4 @@
-import { Box, render, Text, useInput, useStdout } from 'ink';
+import { Box, render, Text, useApp, useInput, useStdout } from 'ink';
 import React, { useEffect, useState } from 'react';
 
 import {
@@ -117,10 +117,18 @@ const MessageItem = ({ msg }: { msg: Message }) => {
   return null;
 };
 
+function getMessageKey(message: Message, index: number): string {
+  if (message.role === 'tool') {
+    return `${message.role}:${message.createdAt}:${message.toolCallId}:${index}`;
+  }
+
+  return `${message.role}:${message.createdAt}:${index}`;
+}
+
 const MessageList = ({ messages }: { messages: Message[] }) => (
   <Box flexDirection='column' gap={0}>
     {messages.map((msg, i) => (
-      <Box key={i} flexDirection='column' marginY={0}>
+      <Box key={getMessageKey(msg, i)} flexDirection='column' marginY={0}>
         <MessageItem msg={msg} />
       </Box>
     ))}
@@ -211,6 +219,7 @@ interface TuiAppProps {
 const FTV_COMMAND_ALLOWLIST = ['git', 'ls', 'pwd', 'cat', 'head', 'grep', 'find', 'wc', 'sort', 'uniq'] as const;
 
 const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition, sessionStoreLabel }: TuiAppProps) => {
+  const { exit } = useApp();
   const { stdout } = useStdout();
   const rows = stdout.rows ?? 24;
   const [state, setState] = useState<AppState>({
@@ -343,7 +352,7 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
 
   useInput((input, key) => {
     if (input === 'q' || input === 'Q') {
-      process.exit(0);
+      exit();
     }
 
     if (key.return && ready && state.input.trim() && !state.isThinking && harness) {
