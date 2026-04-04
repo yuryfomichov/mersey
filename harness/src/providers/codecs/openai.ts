@@ -7,7 +7,7 @@ import type {
   ResponseInputItem,
 } from 'openai/resources/responses/responses';
 
-import type { ModelRequest, ModelResponse, ModelUsage } from '../../models/types.js';
+import { createEmptyModelUsage, type ModelRequest, type ModelResponse, type ModelUsage } from '../../models/types.js';
 
 export class OpenAICodec {
   getInputItems(input: ModelRequest): ResponseInputItem[] {
@@ -171,12 +171,16 @@ export class OpenAICodec {
   getUsage(response: Response): ModelUsage {
     const usage = response.usage;
     if (!usage) {
-      return { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
+      return createEmptyModelUsage();
     }
+
+    const cachedInputTokens = usage.input_tokens_details?.cached_tokens ?? 0;
+
     return {
-      inputTokens: usage.input_tokens,
+      cacheWriteInputTokens: 0,
+      cachedInputTokens,
       outputTokens: usage.output_tokens,
-      cachedTokens: usage.input_tokens_details?.cached_tokens ?? 0,
+      uncachedInputTokens: usage.input_tokens - cachedInputTokens,
     };
   }
 }

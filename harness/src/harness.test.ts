@@ -6,12 +6,12 @@ import type { HarnessEvent } from './events/types.js';
 import { createHarness, type CreateHarnessOptions } from './harness.js';
 import type { HarnessRuntimeTrace } from './logger/types.js';
 import type { ModelProvider } from './models/provider.js';
-import type { ModelRequest, ModelStreamEvent } from './models/types.js';
+import { createEmptyModelUsage, type ModelRequest, type ModelStreamEvent } from './models/types.js';
 import { FakeProvider } from './providers/fake.js';
 import { MemorySessionStore } from './sessions/memory-store.js';
 import { Session } from './sessions/session.js';
 import type { SessionStore } from './sessions/store.js';
-import type { SessionState } from './sessions/types.js';
+import type { SessionState, StoredSessionState } from './sessions/types.js';
 import { withTempDir, writeWorkspaceFiles } from './test/test-helpers.js';
 import { ReadFileTool } from './tools/read-file.js';
 
@@ -74,15 +74,17 @@ test('createHarness emits events and traces with the canonical session id after 
   const recordedEvents: HarnessEvent[] = [];
 
   class CanonicalSessionStore extends MemorySessionStore {
-    override async getSession(_sessionId: string): Promise<SessionState | null> {
+    override async getSession(_sessionId: string): Promise<StoredSessionState | null> {
       return null;
     }
 
-    override async createSession(session: SessionState): Promise<SessionState> {
+    override async createSession(session: SessionState): Promise<StoredSessionState> {
       return {
         ...session,
+        contextSize: 0,
         id: 'canonical-session',
         messages: [],
+        usage: createEmptyModelUsage(),
       };
     }
   }
@@ -143,7 +145,10 @@ test('createHarness serializes concurrent sendMessage calls for one session', as
         await releaseFirstRequestPromise;
       }
 
-      yield { response: { text: `reply:${lastMessage.content}` }, type: 'response_completed' };
+      yield {
+        response: { text: `reply:${lastMessage.content}`, usage: createEmptyModelUsage() },
+        type: 'response_completed',
+      };
     },
   };
   const harness = createTestHarness({
@@ -195,10 +200,11 @@ test('createHarness emits live events in stable order without leaking raw conten
                   name: 'read_file',
                 },
               ],
+              usage: createEmptyModelUsage(),
             };
           }
 
-          return { text: 'done' };
+          return { text: 'done', usage: createEmptyModelUsage() };
         },
       }),
       sessionId: 'events-session',

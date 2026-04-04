@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import Anthropic from '@anthropic-ai/sdk';
 
+import { createEmptyModelUsage } from '../../models/types.js';
 import { AnthropicCodec } from './anthropic.js';
 
 const codec = new AnthropicCodec();
@@ -52,6 +53,7 @@ test('getMessages replays tool-only assistant responses without fake text', () =
         toolCallId: 'toolu_123',
       },
     ],
+    stream: false,
   });
 
   assert.deepEqual(messages[1], {
@@ -100,6 +102,7 @@ test('getMessages groups consecutive tool results into one user message', () => 
         toolCallId: 'toolu_2',
       },
     ],
+    stream: false,
   });
 
   assert.deepEqual(messages[2], {
@@ -144,4 +147,24 @@ test('getToolCalls extracts tool calls from tool-only responses', () => {
       },
     ],
   );
+});
+
+test('getUsage preserves uncached, cached, and cache-write Anthropic input tokens', () => {
+  const message = createAnthropicMessage([{ citations: null, text: 'hello', type: 'text' }]);
+
+  message.usage = {
+    ...message.usage,
+    cache_creation_input_tokens: 7,
+    cache_read_input_tokens: 11,
+    input_tokens: 13,
+    output_tokens: 17,
+  };
+
+  assert.deepEqual(codec.getUsage(message), {
+    ...createEmptyModelUsage(),
+    cacheWriteInputTokens: 7,
+    cachedInputTokens: 11,
+    outputTokens: 17,
+    uncachedInputTokens: 13,
+  });
 });

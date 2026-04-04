@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import Anthropic from '@anthropic-ai/sdk';
 
+import { createEmptyModelUsage } from '../models/types.js';
 import { collectEvents, collectResponse } from '../test/provider-test-helpers.js';
 import { AnthropicProvider } from './anthropic.js';
 
@@ -272,7 +273,11 @@ test('AnthropicProvider forwards codec-produced messages and tools to messages.c
   assert.deepEqual(response, {
     text: '',
     toolCalls: [{ id: 'toolu_2', input: { command: 'pwd' }, name: 'run_command' }],
-    usage: { cachedTokens: 0, inputTokens: 1, outputTokens: 1 },
+    usage: {
+      ...createEmptyModelUsage(),
+      outputTokens: 1,
+      uncachedInputTokens: 1,
+    },
   });
 });
 
@@ -391,7 +396,11 @@ test('AnthropicProvider streams text deltas and returns the final response', asy
       response: {
         text: 'hello',
         toolCalls: [{ id: 'toolu_1', input: { command: 'pwd' }, name: 'run_command' }],
-        usage: { cachedTokens: 0, inputTokens: 1, outputTokens: 1 },
+        usage: {
+          ...createEmptyModelUsage(),
+          outputTokens: 1,
+          uncachedInputTokens: 1,
+        },
       },
       type: 'response_completed',
     },

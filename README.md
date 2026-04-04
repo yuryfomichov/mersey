@@ -63,6 +63,7 @@ Useful flags:
 - `--session-id <id>`
 - `--session-store <memory|filesystem>`
 - `--sessions-dir <path>` when using filesystem sessions
+- `--cache` enables provider prompt caching where supported
 - `--stream`
 - `--debug`
 
@@ -71,6 +72,7 @@ Examples:
 ```bash
 pnpm cli -- --provider fake --stream
 pnpm cli -- --provider openai --session-store filesystem --sessions-dir tmp/sessions
+pnpm cli -- --provider openai --cache
 ```
 
 The CLI registers a small set of tools from `harness` for file and command access.

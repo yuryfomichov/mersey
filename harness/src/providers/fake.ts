@@ -1,5 +1,10 @@
 import type { ModelProvider } from '../models/provider.js';
-import type { ModelRequest, ModelResponse, ModelStreamEvent } from '../models/types.js';
+import {
+  createEmptyModelUsage,
+  type ModelRequest,
+  type ModelResponse,
+  type ModelStreamEvent,
+} from '../models/types.js';
 
 type FakeProviderReply = string | ModelResponse | ((input: ModelRequest) => string | ModelResponse);
 type FakeProviderStreamReply =
@@ -42,10 +47,10 @@ export class FakeProvider implements ModelProvider {
     const reply = typeof this.reply === 'function' ? this.reply(input) : this.reply;
 
     if (typeof reply === 'string') {
-      return { text: reply, usage: { inputTokens: 0, outputTokens: 0, cachedTokens: 0 } };
+      return { text: reply, usage: createEmptyModelUsage() };
     }
 
-    return { ...reply, usage: reply.usage ?? { inputTokens: 0, outputTokens: 0, cachedTokens: 0 } };
+    return { ...reply, usage: reply.usage ?? createEmptyModelUsage() };
   }
 
   private getStreamReply(input: ModelRequest): AsyncIterable<ModelStreamEvent> | ModelStreamEvent[] | undefined {

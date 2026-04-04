@@ -31,3 +31,8 @@ export type SessionState = {
   createdAt: string;
   messages: Message[];
 };
+
+export type StoredSessionState = SessionState & {
+  usage: ModelUsage;
+  contextSize: number;
+};

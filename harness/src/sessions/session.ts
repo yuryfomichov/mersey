@@ -1,7 +1,7 @@
-import type { ModelUsage } from '../models/types.js';
+import { createEmptyModelUsage, type ModelUsage } from '../models/types.js';
 import { snapshot } from '../utils/object.js';
 import type { SessionStore } from './store.js';
-import type { Message, SessionState } from './types.js';
+import type { Message, SessionState, StoredSessionState } from './types.js';
 
 function cloneMessage<T extends Message>(message: T): T {
   return structuredClone(message);
@@ -15,6 +15,27 @@ function cloneState(state: SessionState): SessionState {
   };
 }
 
+function cloneUsage(usage: ModelUsage): ModelUsage {
+  return structuredClone(usage);
+}
+
+function getMessageUsage(message: Message): ModelUsage {
+  return message.role === 'assistant' && message.usage ? message.usage : createEmptyModelUsage();
+}
+
+function getUsageTotalTokens(usage: ModelUsage): number {
+  return usage.uncachedInputTokens + usage.cachedInputTokens + usage.cacheWriteInputTokens + usage.outputTokens;
+}
+
+function addUsage(left: ModelUsage, right: ModelUsage): ModelUsage {
+  return {
+    cacheWriteInputTokens: left.cacheWriteInputTokens + right.cacheWriteInputTokens,
+    cachedInputTokens: left.cachedInputTokens + right.cachedInputTokens,
+    outputTokens: left.outputTokens + right.outputTokens,
+    uncachedInputTokens: left.uncachedInputTokens + right.uncachedInputTokens,
+  };
+}
+
 export type SessionOptions = {
   createdAt?: string;
   id: string;
@@ -24,6 +45,8 @@ export type SessionOptions = {
 export class Session {
   private readonly store: SessionStore;
   private stateValue: SessionState;
+  private usageValue: ModelUsage = createEmptyModelUsage();
+  private contextSizeValue = 0;
   private messagesSnapshot: readonly Message[] | null = null;
   private stateSnapshot: SessionState | null = null;
   private initialized: Promise<void> | null = null;
@@ -63,11 +86,13 @@ export class Session {
   }
 
   async getUsage(): Promise<ModelUsage> {
-    return this.store.getUsage(this.id);
+    await this.ensure();
+    return cloneUsage(this.usageValue);
   }
 
   async getContextSize(): Promise<number> {
-    return this.store.getContextSize(this.id);
+    await this.ensure();
+    return this.contextSizeValue;
   }
 
   async commit(messages: Message[]): Promise<void> {
@@ -83,7 +108,10 @@ export class Session {
 
       await this.store.appendMessage(this.id, storedMessage);
       this.stateValue.messages.push(stateMessage);
+      this.updateMetrics(stateMessage);
     }
+
+    await this.store.writeState(this.id, this.getStoredState());
 
     this.invalidateSnapshots();
   }
@@ -98,7 +126,7 @@ export class Session {
         const existingSession = await this.store.getSession(this.id);
         const resolvedSession = existingSession ?? (await this.store.createSession(this.state));
 
-        this.stateValue = cloneState(resolvedSession);
+        this.hydrate(resolvedSession);
         this.invalidateSnapshots();
       } catch (error: unknown) {
         this.initialized = null;
@@ -129,5 +157,29 @@ export class Session {
   private invalidateSnapshots(): void {
     this.messagesSnapshot = null;
     this.stateSnapshot = null;
+  }
+
+  private getStoredState(): Omit<StoredSessionState, 'messages'> {
+    return {
+      contextSize: this.contextSizeValue,
+      createdAt: this.createdAt,
+      id: this.id,
+      usage: cloneUsage(this.usageValue),
+    };
+  }
+
+  private hydrate(state: StoredSessionState): void {
+    this.stateValue = cloneState(state);
+    this.usageValue = cloneUsage(state.usage);
+    this.contextSizeValue = state.contextSize;
+  }
+
+  private updateMetrics(message: Message): void {
+    const usage = getMessageUsage(message);
+    this.usageValue = addUsage(this.usageValue, usage);
+
+    if (message.role === 'assistant' && message.usage) {
+      this.contextSizeValue = getUsageTotalTokens(message.usage);
+    }
   }
 }

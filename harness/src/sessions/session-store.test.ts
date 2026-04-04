@@ -4,15 +4,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
+import { createEmptyModelUsage } from '../models/types.js';
 import { FilesystemSessionStore } from './filesystem-store.js';
 import { MemorySessionStore } from './memory-store.js';
-import type { Message, SessionState } from './types.js';
+import type { Message, SessionState, StoredSessionState } from './types.js';
 
 async function verifyStoreRoundTrip(store: {
   appendMessage(sessionId: string, message: Message): Promise<void>;
-  createSession(session: SessionState): Promise<SessionState>;
-  getSession(sessionId: string): Promise<SessionState | null>;
+  createSession(session: SessionState): Promise<StoredSessionState>;
+  getSession(sessionId: string): Promise<StoredSessionState | null>;
   listMessages(sessionId: string): Promise<Message[]>;
+  writeState(sessionId: string, state: Omit<StoredSessionState, 'messages'>): Promise<void>;
 }): Promise<void> {
   const session: SessionState = {
     id: 'session-1',
@@ -20,7 +22,22 @@ async function verifyStoreRoundTrip(store: {
     messages: [],
   };
 
-  await store.createSession(session);
+  const createdSession = await store.createSession(session);
+  assert.deepEqual(createdSession.usage, createEmptyModelUsage());
+  assert.equal(createdSession.contextSize, 0);
+
+  await store.writeState(session.id, {
+    contextSize: 9,
+    createdAt: session.createdAt,
+    id: session.id,
+    usage: {
+      ...createEmptyModelUsage(),
+      cachedInputTokens: 2,
+      outputTokens: 3,
+      uncachedInputTokens: 4,
+    },
+  });
+
   await store.appendMessage(session.id, {
     role: 'user',
     content: 'hello',
@@ -54,6 +71,13 @@ async function verifyStoreRoundTrip(store: {
     (await store.getSession(session.id))?.messages.map((message) => message.content),
     ['hello', 'hi', 'file contents'],
   );
+  assert.deepEqual((await store.getSession(session.id))?.usage, {
+    ...createEmptyModelUsage(),
+    cachedInputTokens: 2,
+    outputTokens: 3,
+    uncachedInputTokens: 4,
+  });
+  assert.equal((await store.getSession(session.id))?.contextSize, 9);
 
   const storedMessages = await store.listMessages(session.id);
 

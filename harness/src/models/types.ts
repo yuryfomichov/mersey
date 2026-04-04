@@ -20,10 +20,20 @@ export type ModelToolCall = {
 };
 
 export type ModelUsage = {
-  inputTokens: number;
+  uncachedInputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteInputTokens: number;
   outputTokens: number;
-  cachedTokens: number;
 };
+
+export function createEmptyModelUsage(): ModelUsage {
+  return {
+    cacheWriteInputTokens: 0,
+    cachedInputTokens: 0,
+    outputTokens: 0,
+    uncachedInputTokens: 0,
+  };
+}
 
 export type ModelUserMessage = {
   role: 'user';

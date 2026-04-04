@@ -6,6 +6,7 @@ import type { HarnessEventSink } from '../events/publisher.js';
 import { HarnessEventPublisher } from '../events/publisher.js';
 import type { HarnessEvent } from '../events/types.js';
 import type { ModelProvider } from '../models/provider.js';
+import { createEmptyModelUsage } from '../models/types.js';
 import { FakeProvider } from '../providers/fake.js';
 import type { Message, SessionState } from '../sessions/types.js';
 import { withTempDir, writeWorkspaceFiles } from '../test/test-helpers.js';
@@ -122,6 +123,7 @@ test('streamLoop forwards systemPrompt to provider on every generate call includ
         return {
           text: '',
           toolCalls: [{ id: 'call-1', input: {}, name: 'missing_tool' }],
+          usage: createEmptyModelUsage(),
         };
       }
 
@@ -209,6 +211,7 @@ test('streamLoop does not persist assistant tool calls when the tool iteration c
                   name: 'missing_tool',
                 },
               ],
+              usage: createEmptyModelUsage(),
             },
           }),
           sessionId: session.id,
@@ -258,6 +261,7 @@ test('streamLoop owns fallback text when provider returns an empty non-tool repl
   const provider = new FakeProvider({
     reply: {
       text: '',
+      usage: createEmptyModelUsage(),
     },
   });
 
@@ -294,6 +298,7 @@ test('streamLoop wires tool results back into the next provider request', async 
                 name: 'read_file',
               },
             ],
+            usage: createEmptyModelUsage(),
           };
         }
 
@@ -304,6 +309,7 @@ test('streamLoop wires tool results back into the next provider request', async 
 
         return {
           text: 'done:hello from file',
+          usage: createEmptyModelUsage(),
         };
       },
     });
@@ -351,6 +357,7 @@ test('streamLoop degrades malformed tool input into a normal tool error', async 
               name: 'read_file',
             },
           ],
+          usage: createEmptyModelUsage(),
         };
       }
 
@@ -362,6 +369,7 @@ test('streamLoop degrades malformed tool input into a normal tool error', async 
 
       return {
         text: 'recovered',
+        usage: createEmptyModelUsage(),
       };
     },
   });
@@ -405,7 +413,7 @@ test('streamLoop yields assistant deltas and final message while events stay coa
     streamReply: [
       { delta: 'hel', type: 'text_delta' },
       { delta: 'lo', type: 'text_delta' },
-      { response: { text: 'hello' }, type: 'response_completed' },
+      { response: { text: 'hello', usage: createEmptyModelUsage() }, type: 'response_completed' },
     ],
   });
 
@@ -445,7 +453,7 @@ test('streamLoop yields assistant deltas and final message while events stay coa
         createdAt: chunks[2]?.type === 'final_message' ? chunks[2].message.createdAt : '',
         role: 'assistant',
         toolCalls: undefined,
-        usage: undefined,
+        usage: createEmptyModelUsage(),
       },
       type: 'final_message',
     },
@@ -471,6 +479,7 @@ test('streamLoop yields assistant_message_completed before tool execution after 
           {
             response: {
               text: 'thinking',
+              usage: createEmptyModelUsage(),
               toolCalls: [
                 {
                   id: 'call-1',
@@ -484,7 +493,7 @@ test('streamLoop yields assistant_message_completed before tool execution after 
         ];
       }
 
-      return [{ response: { text: 'done' }, type: 'response_completed' as const }];
+      return [{ response: { text: 'done', usage: createEmptyModelUsage() }, type: 'response_completed' as const }];
     },
   });
 
@@ -519,7 +528,7 @@ test('streamLoop yields assistant_message_completed before tool execution after 
         createdAt: chunks[2]?.type === 'final_message' ? chunks[2].message.createdAt : '',
         role: 'assistant',
         toolCalls: undefined,
-        usage: undefined,
+        usage: createEmptyModelUsage(),
       },
       type: 'final_message',
     },
@@ -594,7 +603,7 @@ test('streamLoop keeps a completed streamed response when provider teardown fail
         batchCallCount += 1;
       }
 
-      yield { response: { text: 'stream reply' }, type: 'response_completed' as const };
+      yield { response: { text: 'stream reply', usage: createEmptyModelUsage() }, type: 'response_completed' as const };
       throw new Error('stream teardown failed');
     },
   };
@@ -621,8 +630,8 @@ test('streamLoop rejects multiple completed responses from one provider turn', a
     model: 'duplicate-completion-model',
     name: 'duplicate-completion',
     async *generate() {
-      yield { response: { text: 'first' }, type: 'response_completed' as const };
-      yield { response: { text: 'second' }, type: 'response_completed' as const };
+      yield { response: { text: 'first', usage: createEmptyModelUsage() }, type: 'response_completed' as const };
+      yield { response: { text: 'second', usage: createEmptyModelUsage() }, type: 'response_completed' as const };
     },
   };
 

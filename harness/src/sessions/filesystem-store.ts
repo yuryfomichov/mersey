@@ -1,31 +1,20 @@
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import type { ModelUsage } from '../models/types.js';
+import { createEmptyModelUsage } from '../models/types.js';
 import type { SessionStore } from './store.js';
-import type { AssistantMessage, Message, SessionState } from './types.js';
+import type { Message, SessionState, StoredSessionState } from './types.js';
 import { assertValidSessionId } from './utils.js';
 
 export type FilesystemSessionStoreOptions = {
   rootDir?: string;
 };
 
-type SessionMetadata = {
-  id: string;
-  createdAt: string;
-  usage: ModelUsage;
-  contextSize: number;
-};
+type SessionMetadata = Omit<StoredSessionState, 'messages'>;
 
 function isErrnoCode(error: unknown, code: string): boolean {
   return error instanceof Error && 'code' in error && error.code === code;
 }
-
-const ZERO_USAGE: ModelUsage = {
-  inputTokens: 0,
-  outputTokens: 0,
-  cachedTokens: 0,
-};
 
 export class FilesystemSessionStore implements SessionStore {
   private readonly rootDir: string;
@@ -37,23 +26,9 @@ export class FilesystemSessionStore implements SessionStore {
   async appendMessage(sessionId: string, message: Message): Promise<void> {
     await mkdir(this.getSessionDir(sessionId), { recursive: true });
     await appendFile(this.getMessagesPath(sessionId), `${JSON.stringify(message)}\n`, 'utf8');
-
-    if (message.role === 'assistant') {
-      const assistantMessage = message as AssistantMessage;
-      const metadata = await this.readMetadata(sessionId);
-
-      if (assistantMessage.usage) {
-        metadata.usage.inputTokens += assistantMessage.usage.inputTokens;
-        metadata.usage.outputTokens += assistantMessage.usage.outputTokens;
-        metadata.usage.cachedTokens += assistantMessage.usage.cachedTokens;
-        metadata.contextSize = assistantMessage.usage.inputTokens + assistantMessage.usage.outputTokens;
-      }
-
-      await this.writeMetadata(sessionId, metadata);
-    }
   }
 
-  async createSession(session: SessionState): Promise<SessionState> {
+  async createSession(session: SessionState): Promise<StoredSessionState> {
     const existingSession = await this.getSession(session.id);
 
     if (existingSession) {
@@ -67,10 +42,10 @@ export class FilesystemSessionStore implements SessionStore {
     await mkdir(sessionDir, { recursive: true });
 
     const metadata: SessionMetadata = {
+      contextSize: 0,
       id: session.id,
       createdAt: session.createdAt,
-      usage: { ...ZERO_USAGE },
-      contextSize: 0,
+      usage: createEmptyModelUsage(),
     };
 
     try {
@@ -102,20 +77,24 @@ export class FilesystemSessionStore implements SessionStore {
     }
 
     return {
+      contextSize: 0,
       id: session.id,
       createdAt: session.createdAt,
       messages: [],
+      usage: createEmptyModelUsage(),
     };
   }
 
-  async getSession(sessionId: string): Promise<SessionState | null> {
+  async getSession(sessionId: string): Promise<StoredSessionState | null> {
     try {
       const metadata = await this.readMetadata(sessionId);
 
       return {
+        contextSize: metadata.contextSize,
         id: metadata.id,
         createdAt: metadata.createdAt,
         messages: await this.listMessages(sessionId),
+        usage: metadata.usage,
       };
     } catch (error: unknown) {
       if (isErrnoCode(error, 'ENOENT')) {
@@ -124,16 +103,6 @@ export class FilesystemSessionStore implements SessionStore {
 
       throw error;
     }
-  }
-
-  async getUsage(sessionId: string): Promise<ModelUsage> {
-    const metadata = await this.readMetadata(sessionId);
-    return metadata.usage;
-  }
-
-  async getContextSize(sessionId: string): Promise<number> {
-    const metadata = await this.readMetadata(sessionId);
-    return metadata.contextSize;
   }
 
   async listMessages(sessionId: string): Promise<Message[]> {
@@ -179,5 +148,9 @@ export class FilesystemSessionStore implements SessionStore {
     await writeFile(this.getSessionPath(sessionId), `${JSON.stringify(metadata, null, 2)}\n`, {
       encoding: 'utf8',
     });
+  }
+
+  async writeState(sessionId: string, state: Omit<StoredSessionState, 'messages'>): Promise<void> {
+    await this.writeMetadata(sessionId, state);
   }
 }

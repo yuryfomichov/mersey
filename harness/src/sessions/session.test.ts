@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 
+import { createEmptyModelUsage } from '../models/types.js';
 import { MemorySessionStore } from './memory-store.js';
 import { Session } from './session.js';
-import type { Message, SessionState } from './types.js';
+import type { Message, SessionState, StoredSessionState } from './types.js';
 
 test('Session snapshots tolerate cyclic message data', async () => {
   const cycle: Record<string, unknown> = {};
@@ -12,8 +13,9 @@ test('Session snapshots tolerate cyclic message data', async () => {
   cycle.self = cycle;
 
   class CyclicStore extends MemorySessionStore {
-    override async getSession(_sessionId: string): Promise<SessionState | null> {
+    override async getSession(_sessionId: string): Promise<StoredSessionState | null> {
       return {
+        contextSize: 0,
         createdAt: '2026-03-29T00:00:00.000Z',
         id: 'cyclic-session',
         messages: [
@@ -26,6 +28,7 @@ test('Session snapshots tolerate cyclic message data', async () => {
             toolCallId: 'call-1',
           },
         ],
+        usage: createEmptyModelUsage(),
       };
     }
   }
@@ -83,7 +86,7 @@ test('Session.ensure retries after a transient store failure', async () => {
   class FlakyStore extends MemorySessionStore {
     private failed = false;
 
-    override async getSession(_sessionId: string): Promise<SessionState | null> {
+    override async getSession(_sessionId: string): Promise<StoredSessionState | null> {
       if (!this.failed) {
         this.failed = true;
         throw new Error('temporary failure');
@@ -104,13 +107,14 @@ test('Session.ensure retries after a transient store failure', async () => {
 
 test('Session.ensure adopts the canonical session returned by the store', async () => {
   class CanonicalStore extends MemorySessionStore {
-    override async getSession(_sessionId: string): Promise<SessionState | null> {
+    override async getSession(_sessionId: string): Promise<StoredSessionState | null> {
       return null;
     }
 
-    override async createSession(session: SessionState): Promise<SessionState> {
+    override async createSession(session: SessionState): Promise<StoredSessionState> {
       return {
         ...session,
+        contextSize: 3,
         createdAt: '2026-03-29T00:00:00.000Z',
         id: 'canonical-session',
         messages: [
@@ -120,6 +124,11 @@ test('Session.ensure adopts the canonical session returned by the store', async 
             role: 'assistant',
           },
         ],
+        usage: {
+          ...createEmptyModelUsage(),
+          outputTokens: 1,
+          uncachedInputTokens: 2,
+        },
       };
     }
   }
@@ -134,6 +143,12 @@ test('Session.ensure adopts the canonical session returned by the store', async 
   assert.equal(session.id, 'canonical-session');
   assert.equal(session.createdAt, '2026-03-29T00:00:00.000Z');
   assert.equal(session.messages[0]?.content, 'from-store');
+  assert.deepEqual(await session.getUsage(), {
+    ...createEmptyModelUsage(),
+    outputTokens: 1,
+    uncachedInputTokens: 2,
+  });
+  assert.equal(await session.getContextSize(), 3);
 });
 
 test('Session.ensure initializes the session once across concurrent first use', async () => {
@@ -141,12 +156,12 @@ test('Session.ensure initializes the session once across concurrent first use', 
     createSessionCalls = 0;
     getSessionCalls = 0;
 
-    override async createSession(session: SessionState): Promise<SessionState> {
+    override async createSession(session: SessionState): Promise<StoredSessionState> {
       this.createSessionCalls += 1;
       return super.createSession(session);
     }
 
-    override async getSession(sessionId: string): Promise<SessionState | null> {
+    override async getSession(sessionId: string): Promise<StoredSessionState | null> {
       this.getSessionCalls += 1;
       await delay(5);
       return super.getSession(sessionId);
@@ -163,4 +178,86 @@ test('Session.ensure initializes the session once across concurrent first use', 
 
   assert.equal(store.getSessionCalls, 1);
   assert.equal(store.createSessionCalls, 1);
+});
+
+test('Session caches hydrated usage and context values in memory', async () => {
+  class CountingStore extends MemorySessionStore {
+    getSessionCalls = 0;
+
+    override async getSession(sessionId: string): Promise<StoredSessionState | null> {
+      this.getSessionCalls += 1;
+      return super.getSession(sessionId);
+    }
+  }
+
+  const store = new CountingStore();
+  await store.createSession({
+    createdAt: '2026-03-29T00:00:00.000Z',
+    id: 'metrics-session',
+    messages: [],
+  });
+  await store.writeState('metrics-session', {
+    contextSize: 15,
+    createdAt: '2026-03-29T00:00:00.000Z',
+    id: 'metrics-session',
+    usage: {
+      ...createEmptyModelUsage(),
+      cachedInputTokens: 4,
+      outputTokens: 5,
+      uncachedInputTokens: 6,
+    },
+  });
+
+  const session = new Session({
+    id: 'metrics-session',
+    store,
+  });
+
+  assert.deepEqual(await session.getUsage(), {
+    ...createEmptyModelUsage(),
+    cachedInputTokens: 4,
+    outputTokens: 5,
+    uncachedInputTokens: 6,
+  });
+  assert.equal(await session.getContextSize(), 15);
+  assert.equal(store.getSessionCalls, 1);
+});
+
+test('Session.commit updates cached usage and context metrics', async () => {
+  const store = new MemorySessionStore();
+  const session = new Session({
+    id: 'commit-metrics-session',
+    store,
+  });
+
+  await session.commit([
+    {
+      content: 'hello',
+      createdAt: '2026-03-29T00:00:01.000Z',
+      role: 'assistant',
+      usage: {
+        ...createEmptyModelUsage(),
+        cacheWriteInputTokens: 2,
+        cachedInputTokens: 3,
+        outputTokens: 7,
+        uncachedInputTokens: 5,
+      },
+    },
+  ]);
+
+  assert.deepEqual(await session.getUsage(), {
+    ...createEmptyModelUsage(),
+    cacheWriteInputTokens: 2,
+    cachedInputTokens: 3,
+    outputTokens: 7,
+    uncachedInputTokens: 5,
+  });
+  assert.equal(await session.getContextSize(), 17);
+  assert.deepEqual((await store.getSession(session.id))?.usage, {
+    ...createEmptyModelUsage(),
+    cacheWriteInputTokens: 2,
+    cachedInputTokens: 3,
+    outputTokens: 7,
+    uncachedInputTokens: 5,
+  });
 });

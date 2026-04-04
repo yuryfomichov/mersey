@@ -7,7 +7,7 @@ import type {
   ToolUseBlock,
 } from '@anthropic-ai/sdk/resources/messages/messages';
 
-import type { ModelRequest, ModelResponse, ModelUsage } from '../../models/types.js';
+import { createEmptyModelUsage, type ModelRequest, type ModelResponse, type ModelUsage } from '../../models/types.js';
 
 export class AnthropicCodec {
   getMessages(input: ModelRequest): MessageParam[] {
@@ -113,12 +113,13 @@ export class AnthropicCodec {
   getUsage(response: Message): ModelUsage {
     const usage = response.usage;
     if (!usage) {
-      return { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
+      return createEmptyModelUsage();
     }
     return {
-      inputTokens: usage.input_tokens,
+      cacheWriteInputTokens: usage.cache_creation_input_tokens ?? 0,
+      cachedInputTokens: usage.cache_read_input_tokens ?? 0,
       outputTokens: usage.output_tokens,
-      cachedTokens: usage.cache_read_input_tokens ?? 0,
+      uncachedInputTokens: usage.input_tokens,
     };
   }
 }

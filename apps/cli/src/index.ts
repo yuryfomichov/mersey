@@ -155,8 +155,10 @@ async function main(): Promise<void> {
   const sessionInfo = async () => {
     const u = await harness.session.getUsage();
     const contextSize = await harness.session.getContextSize();
+    const totalInputTokens = u.uncachedInputTokens + u.cachedInputTokens + u.cacheWriteInputTokens;
+
     output.write(
-      `[usage: ${u.inputTokens}in / ${u.outputTokens}out / ${u.cachedTokens}cached] [context: ${contextSize}]\n`,
+      `[usage: ${totalInputTokens} in = ${u.uncachedInputTokens} uncached + ${u.cachedInputTokens} cached + ${u.cacheWriteInputTokens}cache-write / ${u.outputTokens}out] [context size: ${contextSize} tokens]\n`,
     );
   };
 

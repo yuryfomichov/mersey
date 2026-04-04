@@ -43,6 +43,7 @@ export abstract class OpenAILikeProvider implements ModelProvider {
     };
 
     if (this.cache) {
+      // TODO: Some OpenAI models reject 24h prompt cache retention; handle unsupported models without failing requests.
       return { ...request, prompt_cache_retention: '24h' as const };
     }
 
