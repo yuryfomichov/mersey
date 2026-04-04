@@ -10,6 +10,7 @@ export type AnthropicLikeProviderConfig = {
   baseUrl: string;
   model: string;
   maxTokens: number;
+  cache?: boolean;
 };
 
 export type AnthropicConfig = AnthropicLikeProviderConfig;
@@ -20,6 +21,7 @@ export abstract class AnthropicLikeProvider implements ModelProvider {
   readonly maxTokens: number;
   readonly model: string;
   readonly name: string = 'anthropic-compatible';
+  readonly cache: boolean;
 
   constructor(config: AnthropicLikeProviderConfig, codec: AnthropicCodec) {
     this.client = new Anthropic({
@@ -29,6 +31,7 @@ export abstract class AnthropicLikeProvider implements ModelProvider {
     this.maxTokens = config.maxTokens;
     this.model = config.model;
     this.codec = codec;
+    this.cache = config.cache ?? false;
   }
 
   private getRequest(input: ModelRequest): {
@@ -37,6 +40,7 @@ export abstract class AnthropicLikeProvider implements ModelProvider {
     model: string;
     system: ModelRequest['systemPrompt'];
     tools: Tool[] | undefined;
+    cache_control?: { type: 'ephemeral' };
   } {
     return {
       max_tokens: this.maxTokens,
@@ -44,6 +48,7 @@ export abstract class AnthropicLikeProvider implements ModelProvider {
       model: this.model,
       system: input.systemPrompt,
       tools: this.codec.getTools(input),
+      ...(this.cache && { cache_control: { type: 'ephemeral' } }),
     };
   }
 
@@ -55,6 +60,7 @@ export abstract class AnthropicLikeProvider implements ModelProvider {
         response: {
           text: this.codec.getResponseText(response),
           toolCalls: this.codec.getToolCalls(response),
+          usage: this.codec.getUsage(response),
         },
         type: 'response_completed',
       };
@@ -79,6 +85,7 @@ export abstract class AnthropicLikeProvider implements ModelProvider {
       response: {
         text: this.codec.getResponseText(response),
         toolCalls: this.codec.getToolCalls(response),
+        usage: this.codec.getUsage(response),
       },
       type: 'response_completed',
     };

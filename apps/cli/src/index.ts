@@ -86,6 +86,20 @@ function getStreamMode(args: string[]): boolean {
   return false;
 }
 
+function getCacheMode(args: string[]): boolean {
+  for (const arg of args) {
+    if (arg === '--cache' || arg === '--cache=true') {
+      return true;
+    }
+
+    if (arg === '--cache=false') {
+      return false;
+    }
+  }
+
+  return false;
+}
+
 function getProviderModel(provider: ReturnType<typeof getProviderDefinition>): string | null {
   return 'config' in provider && provider.config?.model ? provider.config.model : null;
 }
@@ -94,8 +108,9 @@ async function main(): Promise<void> {
   const args = argv.slice(2);
   const debug = getDebugMode(args);
   const stream = getStreamMode(args);
+  const cache = getCacheMode(args);
   const providerName = getProviderName(args);
-  const providerDefinition = getProviderDefinition(providerName);
+  const providerDefinition = getProviderDefinition(providerName, process.env, cache);
   const sessionId = getSessionId(args) ?? 'local-session';
   const sessionStoreDefinition = getSessionStoreDefinition(args);
   const session = createSession(sessionStoreDefinition, sessionId);
@@ -106,6 +121,7 @@ async function main(): Promise<void> {
     loggers,
     provider: providerDefinition,
     session,
+    systemPrompt: 'You are a helpful assistant.',
     toolExecutionPolicy: {
       maxToolResultBytes: 16 * 1024,
       workspaceRoot: process.cwd(),
@@ -133,7 +149,19 @@ async function main(): Promise<void> {
   output.write(`${formatSessionStore(sessionStoreDefinition)}\n`);
   output.write(`debug: ${String(debug)}\n`);
   output.write(`stream: ${String(stream)}\n`);
-  output.write(`logs: ${logPaths.jsonlPath}, ${logPaths.textPath}\n`);
+  output.write(`cache: ${String(cache)}\n`);
+  output.write(`logs: ${logPaths.jsonlPath}, ${logPaths.textPath}\n\n`);
+
+  const sessionInfo = async () => {
+    const u = await harness.session.getUsage();
+    const contextSize = await harness.session.getContextSize();
+    output.write(
+      `[usage: ${u.inputTokens}in / ${u.outputTokens}out / ${u.cachedTokens}cached] [context: ${contextSize}]\n`,
+    );
+  };
+
+  await harness.session.ensure();
+  await sessionInfo();
   output.write("Type a message or 'exit' to quit.\n\n");
 
   try {
@@ -193,11 +221,13 @@ async function main(): Promise<void> {
           }
         }
 
+        await sessionInfo();
         continue;
       }
 
       const reply = await harness.sendMessage(message);
       output.write(`assistant: ${reply.content}\n`);
+      await sessionInfo();
     }
   } finally {
     cli.close();

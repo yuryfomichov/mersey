@@ -249,6 +249,7 @@ test('OpenAIProvider forwards codec-produced input and tools to responses.create
   assert.deepEqual(response, {
     text: '',
     toolCalls: [{ id: 'call_2', input: { command: 'pwd' }, name: 'run_command' }],
+    usage: { cachedTokens: 0, inputTokens: 0, outputTokens: 0 },
   });
 });
 
@@ -351,6 +352,7 @@ test('OpenAIProvider streams text deltas and returns the final response', async 
       response: {
         text: 'hello',
         toolCalls: [{ id: 'call_1', input: { command: 'pwd' }, name: 'run_command' }],
+        usage: { cachedTokens: 0, inputTokens: 0, outputTokens: 0 },
       },
       type: 'response_completed',
     },
@@ -434,6 +436,9 @@ test('OpenAIProvider derives streamed final text from output items when output_t
 
   assert.deepEqual(events, [
     { delta: 'hello', type: 'text_delta' },
-    { response: { text: 'hello', toolCalls: [] }, type: 'response_completed' },
+    {
+      response: { text: 'hello', toolCalls: [], usage: { cachedTokens: 0, inputTokens: 0, outputTokens: 0 } },
+      type: 'response_completed',
+    },
   ]);
 });

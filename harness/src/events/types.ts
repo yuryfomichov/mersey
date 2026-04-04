@@ -1,3 +1,5 @@
+import type { ModelUsage } from '../models/types.js';
+
 export type HarnessEventBase = {
   sessionId: string;
   timestamp: string;
@@ -43,6 +45,7 @@ export type ProviderRespondedEvent = HarnessEventBase & {
   toolCallCount: number;
   toolCallNames: string[];
   usedFallbackText: boolean;
+  usage: ModelUsage;
 };
 
 export type SafeCommandArgSummary = {

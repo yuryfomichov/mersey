@@ -1,4 +1,4 @@
-import type { ModelToolCall } from '../models/types.js';
+import type { ModelToolCall, ModelUsage } from '../models/types.js';
 
 export type UserMessage = {
   role: 'user';
@@ -11,6 +11,7 @@ export type AssistantMessage = {
   content: string;
   createdAt: string;
   toolCalls?: ModelToolCall[];
+  usage?: ModelUsage;
 };
 
 export type ToolMessage = {

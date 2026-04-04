@@ -19,6 +19,12 @@ export type ModelToolCall = {
   name: string;
 };
 
+export type ModelUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+};
+
 export type ModelUserMessage = {
   role: 'user';
   content: string;
@@ -52,6 +58,7 @@ export type ModelRequest = {
 export type ModelResponse = {
   text: string;
   toolCalls?: ModelToolCall[];
+  usage: ModelUsage;
 };
 
 export type ModelStreamEvent =

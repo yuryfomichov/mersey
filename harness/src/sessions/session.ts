@@ -1,3 +1,4 @@
+import type { ModelUsage } from '../models/types.js';
 import { snapshot } from '../utils/object.js';
 import type { SessionStore } from './store.js';
 import type { Message, SessionState } from './types.js';
@@ -59,6 +60,14 @@ export class Session {
     }
 
     return this.stateSnapshot;
+  }
+
+  async getUsage(): Promise<ModelUsage> {
+    return this.store.getUsage(this.id);
+  }
+
+  async getContextSize(): Promise<number> {
+    return this.store.getContextSize(this.id);
   }
 
   async commit(messages: Message[]): Promise<void> {

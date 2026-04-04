@@ -41,7 +41,11 @@ export class FakeProvider implements ModelProvider {
   private getResponse(input: ModelRequest): ModelResponse {
     const reply = typeof this.reply === 'function' ? this.reply(input) : this.reply;
 
-    return typeof reply === 'string' ? { text: reply } : reply;
+    if (typeof reply === 'string') {
+      return { text: reply, usage: { inputTokens: 0, outputTokens: 0, cachedTokens: 0 } };
+    }
+
+    return { ...reply, usage: reply.usage ?? { inputTokens: 0, outputTokens: 0, cachedTokens: 0 } };
   }
 
   private getStreamReply(input: ModelRequest): AsyncIterable<ModelStreamEvent> | ModelStreamEvent[] | undefined {

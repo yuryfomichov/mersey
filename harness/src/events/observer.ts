@@ -148,6 +148,7 @@ export class HarnessObserver {
       turnId: this.getTurnId(),
       type: 'provider_responded',
       usedFallbackText,
+      usage: response.usage,
     });
 
     this.emitTrace('provider_response_finished', {
@@ -160,6 +161,7 @@ export class HarnessObserver {
       toolCallCount: response.toolCalls?.length ?? 0,
       turnId: this.getTurnId(),
       usedFallbackText,
+      usage: response.usage,
     });
   }
 
