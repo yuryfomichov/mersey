@@ -1,4 +1,4 @@
-import type { HarnessRuntimeTrace } from './types.js';
+import type { HarnessEvent } from '../../src/events/types.js';
 
 function hasUnsafeStringContent(value: string): boolean {
   for (const character of value) {
@@ -12,7 +12,7 @@ function hasUnsafeStringContent(value: string): boolean {
   return false;
 }
 
-function formatTraceValue(value: unknown): string {
+function formatValue(value: unknown): string {
   if (typeof value === 'string') {
     return hasUnsafeStringContent(value) ? JSON.stringify(value) : value;
   }
@@ -34,9 +34,10 @@ function formatTraceValue(value: unknown): string {
   }
 }
 
-export function toTraceLine(event: HarnessRuntimeTrace): string {
-  const detail = Object.entries(event.detail)
-    .map(([key, value]) => `${key}=${formatTraceValue(value)}`)
+export function toEventTextLine(event: HarnessEvent): string {
+  const detail = Object.entries(event)
+    .filter(([key]) => key !== 'timestamp' && key !== 'type')
+    .map(([key, value]) => `${key}=${formatValue(value)}`)
     .join(' ');
 
   return detail ? `${event.timestamp} ${event.type} ${detail}` : `${event.timestamp} ${event.type}`;

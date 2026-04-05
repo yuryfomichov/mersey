@@ -4,8 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "test": "tsx --test harness/src/*.test.ts harness/src/*/*.test.ts harness/src/*/*/*.test.ts",
-    "test:coverage": "tsx --test --experimental-test-coverage harness/src/*.test.ts harness/src/*/*.test.ts harness/src/*/*/*.test.ts",
+    "test": "tsx --test harness/src/*.test.ts harness/src/*/*.test.ts harness/src/*/*/*.test.ts harness/plugins/*/*.test.ts apps/*/src/*.test.ts",
+    "test:coverage": "tsx --test --experimental-test-coverage harness/src/*.test.ts harness/src/*/*.test.ts harness/src/*/*/*.test.ts harness/plugins/*/*.test.ts apps/*/src/*.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",

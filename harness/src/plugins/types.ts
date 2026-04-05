@@ -1,5 +1,4 @@
 import type { HarnessEvent } from '../events/types.js';
-import type { ModelToolCall } from '../models/types.js';
 
 export type HookDecision =
   | { continue: true }
@@ -29,13 +28,15 @@ export type BeforeToolCallContext = {
   toolCall: {
     id: string;
     name: string;
-    input: Record<string, unknown>;
+    input: unknown;
   };
 };
 
 export type PluginEventContext = {
   pluginName: string;
-  runId?: string;
+  runId: string;
+  sessionId: string;
+  turnId?: string;
 };
 
 export type HarnessPlugin = {
@@ -45,10 +46,6 @@ export type HarnessPlugin = {
   beforeToolCall?(ctx: BeforeToolCallContext): Promise<HookDecision> | HookDecision;
 
   onEvent?(event: HarnessEvent, ctx: PluginEventContext): Promise<void> | void;
-};
-
-export type ToolCall = ModelToolCall & {
-  input: Record<string, unknown>;
 };
 
 export function isHookDecision(value: unknown): value is HookDecision {

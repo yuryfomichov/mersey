@@ -31,7 +31,9 @@ Main goals:
 - `harness/src/sessions/`
   - session types and storage implementations
 - `harness/src/events/`
-  - event publishing and safe telemetry
+  - event emitter/reporter and safe telemetry
+- `harness/plugins/logging/`
+  - built-in JSONL/text event logging plugins
 - `apps/helpers/cli/`
   - shared app-side wiring for provider, session, tool, and logging setup
 - `apps/cli/`
@@ -55,6 +57,8 @@ Main goals:
 - Apps should decide which tools are registered, but the runtime behavior should stay inside `harness`.
 - Session persistence details belong in `harness/src/sessions/` so apps can swap storage without changing loop behavior.
 - Event shape and safe telemetry belong in `harness/src/events/` so apps can observe runtime behavior without coupling to implementation details.
+- Logging is plugin-based and app-injected; core harness stays event-only.
+- Tool registration and behavior are unchanged in the logging refactor phase.
 
 ## Providers
 

@@ -1,14 +1,24 @@
 export { createHarness } from './src/harness.js';
 export type { CreateHarnessOptions, Harness } from './src/harness.js';
 
+export { HarnessEventEmitter } from './src/events/emitter.js';
+export { HarnessEventReporter } from './src/events/reporter.js';
 export type { HarnessEvent, HarnessEventListener } from './src/events/types.js';
-export type { HarnessPlugin, HookDecision } from './src/plugins/types.js';
-export type { BeforeProviderCallContext } from './src/plugins/types.js';
-export type { BeforeToolCallContext } from './src/plugins/types.js';
+export type { HarnessEventSink } from './src/events/emitter.js';
 
-export { createJsonlFileLogger } from './src/logger/jsonl.js';
-export { createTextFileLogger } from './src/logger/text.js';
-export type { HarnessLogger } from './src/logger/types.js';
+export type {
+  BeforeProviderCallContext,
+  BeforeToolCallContext,
+  HarnessPlugin,
+  HookName,
+  HookDecision,
+  PluginEventContext,
+} from './src/plugins/types.js';
+
+export { createJsonlEventLoggingPlugin } from './plugins/logging/jsonl.js';
+export type { JsonlEventLoggingPluginOptions } from './plugins/logging/jsonl.js';
+export { createTextEventLoggingPlugin } from './plugins/logging/text.js';
+export type { TextEventLoggingPluginOptions } from './plugins/logging/text.js';
 
 export type { TurnChunk } from './src/core/loop.js';
 

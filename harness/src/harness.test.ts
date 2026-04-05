@@ -4,7 +4,6 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import type { HarnessEvent } from './events/types.js';
 import { createHarness, type CreateHarnessOptions } from './harness.js';
-import type { HarnessRuntimeTrace } from './logger/types.js';
 import type { ModelProvider } from './models/provider.js';
 import { createEmptyModelUsage, type ModelRequest, type ModelStreamEvent } from './models/types.js';
 import { FakeProvider } from './providers/fake.js';
@@ -69,8 +68,7 @@ test('createHarness uses the injected provider and appends session history', asy
   );
 });
 
-test('createHarness emits events and traces with the canonical session id after ensure', async () => {
-  const recordedTraces: HarnessRuntimeTrace[] = [];
+test('createHarness emits events with the canonical session id after ensure', async () => {
   const recordedEvents: HarnessEvent[] = [];
 
   class CanonicalSessionStore extends MemorySessionStore {
@@ -90,13 +88,6 @@ test('createHarness emits events and traces with the canonical session id after 
   }
 
   const harness = createTestHarness({
-    loggers: [
-      {
-        log(trace): void {
-          recordedTraces.push(trace);
-        },
-      },
-    ],
     providerInstance: new FakeProvider(),
     sessionStore: new CanonicalSessionStore(),
   });
@@ -108,11 +99,6 @@ test('createHarness emits events and traces with the canonical session id after 
   await harness.sendMessage('hello');
 
   assert.equal(harness.session.id, 'canonical-session');
-  assert.ok(
-    recordedTraces
-      .filter((trace) => trace.type === 'session_started')
-      .every((trace) => trace.detail.sessionId === 'canonical-session'),
-  );
   assert.ok(recordedEvents.every((event) => event.sessionId === 'canonical-session'));
 });
 
@@ -222,12 +208,15 @@ test('createHarness emits live events in stable order without leaking raw conten
     assert.deepEqual(
       events.map((event) => event.type),
       [
+        'session_started',
         'turn_started',
+        'iteration_started',
         'provider_requested',
         'provider_responded',
         'tool_requested',
         'tool_started',
         'tool_finished',
+        'iteration_started',
         'provider_requested',
         'provider_responded',
         'turn_finished',

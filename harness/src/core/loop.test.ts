@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { HarnessObserver } from '../events/observer.js';
-import type { HarnessEventSink } from '../events/publisher.js';
-import { HarnessEventPublisher } from '../events/publisher.js';
+import { HarnessEventEmitter, type HarnessEventSink } from '../events/emitter.js';
+import { HarnessEventReporter } from '../events/reporter.js';
 import type { HarnessEvent } from '../events/types.js';
 import type { ModelProvider } from '../models/provider.js';
 import { createEmptyModelUsage } from '../models/types.js';
@@ -59,28 +58,27 @@ async function collectLoopResult(
   }
 }
 
-function createObserver(input: {
+function createReporter(input: {
   debug?: boolean;
   eventPublisher?: HarnessEventSink;
   provider: ModelProvider;
   sessionId: string;
 }) {
-  const observer = new HarnessObserver({
+  const reporter = new HarnessEventReporter({
     debug: input.debug,
     getSessionId: () => input.sessionId,
-    logger: undefined,
     providerName: input.provider.name,
   });
 
-  observer.sessionStarted();
+  reporter.sessionStarted();
 
   if (input.eventPublisher) {
-    observer.subscribe((event) => {
+    reporter.subscribe((event) => {
       input.eventPublisher?.publish(event);
     });
   }
 
-  return observer;
+  return reporter;
 }
 
 function createLoopInput(input: {
@@ -97,7 +95,7 @@ function createLoopInput(input: {
   toolExecutionPolicy: ToolExecutionPolicy;
   tools: Tool[];
 }): Parameters<typeof streamLoop>[0] {
-  const observer = createObserver({
+  const reporter = createReporter({
     debug: input.debug,
     eventPublisher: input.eventPublisher,
     provider: input.provider,
@@ -107,12 +105,12 @@ function createLoopInput(input: {
   return {
     content: input.content,
     history: input.history,
-    observer,
+    reporter,
     options: input.options,
     pluginRunner: createPluginRunner({
-      observer,
+      reporter,
       plugins: input.plugins ?? [],
-      runId: observer.getRunId(),
+      runId: reporter.getRunId(),
     }),
     provider: input.provider,
     stream: input.stream ?? false,
@@ -347,9 +345,9 @@ test('streamLoop wires tool results back into the next provider request', async 
 test('streamLoop degrades malformed tool input into a normal tool error', async () => {
   let callCount = 0;
   const events: HarnessEvent[] = [];
-  const publisher = new HarnessEventPublisher();
+  const publisher = new HarnessEventEmitter();
 
-  publisher.subscribe((event) => {
+  publisher.subscribe((event: HarnessEvent) => {
     events.push(event);
   });
 
@@ -413,9 +411,9 @@ test('streamLoop yields assistant deltas and final message while events stay coa
 
   const chunks = [];
   const events: HarnessEvent[] = [];
-  const publisher = new HarnessEventPublisher();
+  const publisher = new HarnessEventEmitter();
 
-  publisher.subscribe((event) => {
+  publisher.subscribe((event: HarnessEvent) => {
     events.push(event);
   });
 
@@ -470,7 +468,7 @@ test('streamLoop yields assistant deltas and final message while events stay coa
   ]);
   assert.deepEqual(
     events.map((event) => event.type),
-    ['turn_started', 'provider_requested', 'provider_responded', 'turn_finished'],
+    ['turn_started', 'iteration_started', 'provider_requested', 'provider_responded', 'turn_finished'],
   );
 });
 
@@ -663,8 +661,8 @@ test('streamLoop rejects multiple completed responses from one provider turn', a
 
 test('streamLoop provider deny path hides non-exposed policy reason and reports provider error type', async () => {
   const events: HarnessEvent[] = [];
-  const publisher = new HarnessEventPublisher();
-  publisher.subscribe((event) => {
+  const publisher = new HarnessEventEmitter();
+  publisher.subscribe((event: HarnessEvent) => {
     events.push(event);
   });
 

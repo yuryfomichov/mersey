@@ -2,27 +2,29 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { HarnessObserver } from '../events/observer.js';
+import { HarnessEventReporter } from '../events/reporter.js';
 import type { HarnessEvent } from '../events/types.js';
 import { PluginRunner, createPluginRunner } from './runner.js';
 import type { BeforeProviderCallContext, BeforeToolCallContext, HarnessPlugin } from './types.js';
 
-function createTestObserver(): HarnessObserver {
-  return new HarnessObserver({
+function createTestReporter(): HarnessEventReporter {
+  return new HarnessEventReporter({
     getSessionId: () => 'test-session',
-    logger: undefined,
     providerName: 'test-provider',
   });
 }
 
-function createPluginRunnerWithPlugins(plugins: HarnessPlugin[]): { observer: HarnessObserver; runner: PluginRunner } {
-  const observer = createTestObserver();
+function createPluginRunnerWithPlugins(plugins: HarnessPlugin[]): {
+  reporter: HarnessEventReporter;
+  runner: PluginRunner;
+} {
+  const reporter = createTestReporter();
   const runner = createPluginRunner({
-    observer,
+    reporter,
     plugins,
     runId: 'test-run-id',
   });
-  return { observer, runner };
+  return { reporter, runner };
 }
 
 test('PluginRunner.runBeforeProviderCall executes in registration order', async () => {
@@ -116,8 +118,8 @@ test('PluginRunner.runBeforeProviderCall fails closed on hook error', async () =
     },
   ];
 
-  const { observer, runner } = createPluginRunnerWithPlugins(plugins);
-  observer.subscribe((event) => {
+  const { reporter, runner } = createPluginRunnerWithPlugins(plugins);
+  reporter.subscribe((event) => {
     events.push(event);
   });
 
@@ -226,8 +228,8 @@ test('PluginRunner.runBeforeToolCall fails closed on hook error', async () => {
     },
   ];
 
-  const { observer, runner } = createPluginRunnerWithPlugins(plugins);
-  observer.subscribe((event) => {
+  const { reporter, runner } = createPluginRunnerWithPlugins(plugins);
+  reporter.subscribe((event) => {
     events.push(event);
   });
 
@@ -266,8 +268,8 @@ test('PluginRunner delivers events to all plugins via observer subscription', as
     },
   ];
 
-  const { observer } = createPluginRunnerWithPlugins(plugins);
-  observer.turnStarted(10);
+  const { reporter } = createPluginRunnerWithPlugins(plugins);
+  reporter.turnStarted(10);
 
   assert.deepEqual(receivedEvents, ['plugin-a:turn_started', 'plugin-b:turn_started']);
 });
@@ -288,14 +290,14 @@ test('PluginRunner event delivery is best-effort and non-blocking', async () => 
     },
   ];
 
-  const { observer } = createPluginRunnerWithPlugins(plugins);
+  const { reporter } = createPluginRunnerWithPlugins(plugins);
 
   await assert.doesNotReject(
     new Promise<void>((resolve) => {
-      observer.subscribe(() => {
+      reporter.subscribe(() => {
         resolve();
       });
-      observer.turnStarted(10);
+      reporter.turnStarted(10);
     }),
   );
 });
@@ -311,12 +313,12 @@ test('PluginRunner converts async onEvent errors into hook_error events', async 
     },
   ];
 
-  const { observer } = createPluginRunnerWithPlugins(plugins);
-  observer.subscribe((event) => {
+  const { reporter } = createPluginRunnerWithPlugins(plugins);
+  reporter.subscribe((event) => {
     events.push(event);
   });
 
-  observer.turnStarted(10);
+  reporter.turnStarted(10);
   await delay(0);
 
   const hookError = events.find((event) => event.type === 'hook_error');
@@ -338,12 +340,12 @@ test('PluginRunner avoids recursive hook_error storms for the same plugin', asyn
     },
   ];
 
-  const { observer } = createPluginRunnerWithPlugins(plugins);
-  observer.subscribe((event) => {
+  const { reporter } = createPluginRunnerWithPlugins(plugins);
+  reporter.subscribe((event) => {
     events.push(event);
   });
 
-  observer.turnStarted(10);
+  reporter.turnStarted(10);
   await delay(0);
 
   const hookErrors = events.filter((event) => event.type === 'hook_error');
@@ -355,32 +357,32 @@ test('PluginRunner avoids recursive hook_error storms for the same plugin', asyn
 });
 
 test('PluginRunner subscribes only when at least one plugin defines onEvent', () => {
-  const observerWithoutEvents = createTestObserver();
+  const reporterWithoutEvents = createTestReporter();
   let subscribeCallsWithoutEvents = 0;
-  const originalSubscribeWithoutEvents = observerWithoutEvents.subscribe.bind(observerWithoutEvents);
-  observerWithoutEvents.subscribe = ((listener) => {
+  const originalSubscribeWithoutEvents = reporterWithoutEvents.subscribe.bind(reporterWithoutEvents);
+  reporterWithoutEvents.subscribe = ((listener) => {
     subscribeCallsWithoutEvents += 1;
     return originalSubscribeWithoutEvents(listener);
-  }) as HarnessObserver['subscribe'];
+  }) as HarnessEventReporter['subscribe'];
 
   createPluginRunner({
-    observer: observerWithoutEvents,
+    reporter: reporterWithoutEvents,
     plugins: [{ name: 'policy-only', beforeToolCall: () => ({ continue: true }) }],
     runId: 'run-without-events',
   });
 
   assert.equal(subscribeCallsWithoutEvents, 0);
 
-  const observerWithEvents = createTestObserver();
+  const reporterWithEvents = createTestReporter();
   let subscribeCallsWithEvents = 0;
-  const originalSubscribeWithEvents = observerWithEvents.subscribe.bind(observerWithEvents);
-  observerWithEvents.subscribe = ((listener) => {
+  const originalSubscribeWithEvents = reporterWithEvents.subscribe.bind(reporterWithEvents);
+  reporterWithEvents.subscribe = ((listener) => {
     subscribeCallsWithEvents += 1;
     return originalSubscribeWithEvents(listener);
-  }) as HarnessObserver['subscribe'];
+  }) as HarnessEventReporter['subscribe'];
 
   createPluginRunner({
-    observer: observerWithEvents,
+    reporter: reporterWithEvents,
     plugins: [{ name: 'event-plugin', onEvent: () => {} }],
     runId: 'run-with-events',
   });
@@ -395,9 +397,9 @@ test('createPluginRunner creates PluginRunner with correct options', () => {
     },
   ];
 
-  const observer = createTestObserver();
+  const reporter = createTestReporter();
   const runner = createPluginRunner({
-    observer,
+    reporter,
     plugins,
     runId: 'custom-run-id',
   });

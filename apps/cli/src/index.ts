@@ -4,7 +4,7 @@ import { createInterface } from 'node:readline/promises';
 import { createHarness } from '../../../harness/index.js';
 import { getBooleanFlag, getProviderName, getSessionId } from '../../helpers/cli/args.js';
 import { createDefaultTools, getProviderModel, getToolExecutionPolicy } from '../../helpers/cli/harness-config.js';
-import { createCliLoggers } from '../../helpers/cli/logging.js';
+import { createCliLoggingPlugins } from '../../helpers/cli/logging.js';
 import { getProviderDefinition } from '../../helpers/cli/provider-config.js';
 import { createSession, formatSessionStore, getSessionStoreDefinition } from '../../helpers/cli/session-store.js';
 
@@ -19,10 +19,10 @@ async function main(): Promise<void> {
   const sessionStoreDefinition = getSessionStoreDefinition(args);
   const session = createSession(sessionStoreDefinition, sessionId);
   const cli = createInterface({ input, output });
-  const { logPaths, loggers } = await createCliLoggers(sessionId);
+  const { logPaths, plugins } = await createCliLoggingPlugins(sessionId);
   const harness = createHarness({
     debug,
-    loggers,
+    plugins,
     provider: providerDefinition,
     session,
     systemPrompt: 'You are a helpful assistant.',

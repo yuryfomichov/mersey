@@ -1,4 +1,4 @@
-import type { HarnessObserver } from '../events/observer.js';
+import type { HarnessEventReporter } from '../events/reporter.js';
 import type { HarnessEvent } from '../events/types.js';
 import type {
   BeforeProviderCallContext,
@@ -11,25 +11,25 @@ import type {
 const SANITIZED_ERROR_REASON = 'Policy check failed';
 
 export type PluginRunnerOptions = {
-  observer: HarnessObserver;
+  reporter: HarnessEventReporter;
   plugins: HarnessPlugin[];
   runId: string;
 };
 
 export class PluginRunner {
-  private readonly observer: HarnessObserver;
+  private readonly reporter: HarnessEventReporter;
   private readonly pluginsWithEvents: HarnessPlugin[];
   private readonly plugins: HarnessPlugin[];
   private readonly runId: string;
 
   constructor(options: PluginRunnerOptions) {
-    this.observer = options.observer;
+    this.reporter = options.reporter;
     this.plugins = options.plugins;
     this.pluginsWithEvents = this.plugins.filter((plugin) => Boolean(plugin.onEvent));
     this.runId = options.runId;
 
     if (this.pluginsWithEvents.length > 0) {
-      this.observer.subscribe((event) => {
+      this.reporter.subscribe((event) => {
         this.deliverEvent(event);
       });
     }
@@ -48,7 +48,7 @@ export class PluginRunner {
           return decision;
         }
       } catch (error: unknown) {
-        this.observer.hookError(plugin.name, 'beforeProviderCall', error);
+        this.reporter.hookError(plugin.name, 'beforeProviderCall', error);
         return {
           continue: false,
           reason: SANITIZED_ERROR_REASON,
@@ -72,7 +72,7 @@ export class PluginRunner {
           return decision;
         }
       } catch (error: unknown) {
-        this.observer.hookError(plugin.name, 'beforeToolCall', error);
+        this.reporter.hookError(plugin.name, 'beforeToolCall', error);
         return {
           continue: false,
           reason: SANITIZED_ERROR_REASON,
@@ -88,6 +88,8 @@ export class PluginRunner {
       const pluginCtx: PluginEventContext = {
         pluginName: plugin.name,
         runId: this.runId,
+        sessionId: event.sessionId,
+        ...(event.type === 'session_started' ? {} : { turnId: event.turnId }),
       };
 
       this.runEventHook(plugin, pluginCtx, event);
@@ -105,13 +107,13 @@ export class PluginRunner {
       if (hookResult && typeof (hookResult as PromiseLike<unknown>).then === 'function') {
         void Promise.resolve(hookResult).catch((error: unknown) => {
           if (this.shouldEmitHookError(event)) {
-            this.observer.hookError(plugin.name, 'onEvent', error);
+            this.reporter.hookError(plugin.name, 'onEvent', error);
           }
         });
       }
     } catch (error: unknown) {
       if (this.shouldEmitHookError(event)) {
-        this.observer.hookError(plugin.name, 'onEvent', error);
+        this.reporter.hookError(plugin.name, 'onEvent', error);
       }
     }
   }
