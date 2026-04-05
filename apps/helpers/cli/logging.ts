@@ -1,7 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { createJsonlFileLogger, createTextFileLogger, type HarnessLogger } from '../../../harness/index.js';
+import { type HarnessPlugin } from '../../../harness/index.js';
+import { createJsonlEventLoggingPlugin, createTextEventLoggingPlugin } from '../../../harness/plugins/index.js';
 
 function assertValidSessionId(sessionId: string): void {
   if (!sessionId || sessionId === '.' || sessionId === '..') {
@@ -31,12 +32,12 @@ export function getCliLogPaths(sessionId: string, cwd: string = process.cwd()): 
   };
 }
 
-export async function createCliLoggers(
+export async function createCliLoggingPlugins(
   sessionId: string,
   cwd: string = process.cwd(),
 ): Promise<{
   logPaths: CliLogPaths;
-  loggers: HarnessLogger[];
+  plugins: HarnessPlugin[];
 }> {
   const logPaths = getCliLogPaths(sessionId, cwd);
 
@@ -48,6 +49,9 @@ export async function createCliLoggers(
 
   return {
     logPaths,
-    loggers: [createJsonlFileLogger({ path: logPaths.jsonlPath }), createTextFileLogger({ path: logPaths.textPath })],
+    plugins: [
+      createJsonlEventLoggingPlugin({ path: logPaths.jsonlPath }),
+      createTextEventLoggingPlugin({ path: logPaths.textPath }),
+    ],
   };
 }

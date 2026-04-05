@@ -1,12 +1,10 @@
 import { randomUUID } from 'node:crypto';
 
-import { emitRuntimeTrace } from '../logger/runtime-trace.js';
-import type { HarnessLogger, HarnessRuntimeTraceType } from '../logger/types.js';
 import type { ModelProvider } from '../models/provider.js';
 import type { ModelResponse, ModelToolCall, ModelToolDefinition } from '../models/types.js';
 import type { Message } from '../sessions/types.js';
 import type { ToolExecutionResult } from '../tools/types.js';
-import { HarnessEventPublisher } from './publisher.js';
+import { HarnessEventEmitter } from './emitter.js';
 import {
   getDebugToolArgs,
   getResultDataKeys,
@@ -14,12 +12,12 @@ import {
   sanitizeErrorMessage,
   sanitizeHookErrorMessage,
 } from './telemetry.js';
-import type { HarnessEvent, HarnessEventListener, HookErrorEvent, TurnFailedEvent } from './types.js';
+import type { HarnessEventListener, HookErrorEvent, TurnFailedEvent } from './types.js';
 
-export type HarnessObserverOptions = {
+export type HarnessEventReporterOptions = {
   debug?: boolean;
+  eventEmitter?: HarnessEventEmitter;
   getSessionId: () => string;
-  logger?: HarnessLogger;
   providerName: string;
 };
 
@@ -48,40 +46,21 @@ export function getMessageCountsByRole(messages: readonly Message[]): {
   );
 }
 
-export class HarnessObserver {
+export class HarnessEventReporter {
   private readonly debug: boolean;
   readonly getSessionId: () => string;
-  private readonly logger: HarnessLogger | undefined;
   private readonly providerName: string;
   private readonly runId = randomUUID();
-  private readonly eventPublisher: HarnessEventPublisher;
+  private readonly eventEmitter: HarnessEventEmitter;
   private hasStartedSession = false;
   private currentTurnId: string | null = null;
   private currentTurnStartTime: number | null = null;
 
-  constructor({ debug, getSessionId, logger, providerName }: HarnessObserverOptions) {
+  constructor({ debug, eventEmitter, getSessionId, providerName }: HarnessEventReporterOptions) {
     this.debug = Boolean(debug);
+    this.eventEmitter = eventEmitter ?? new HarnessEventEmitter();
     this.getSessionId = getSessionId;
-    this.logger = logger;
     this.providerName = providerName;
-    const publisherOptions = this.logger
-      ? {
-          onEventPublished: (event: HarnessEvent) => {
-            this.emitTrace('event_emitted', {
-              eventType: event.type,
-              sessionId: event.sessionId,
-              turnId: event.turnId,
-            });
-          },
-          onListenerFailed: (event: HarnessEvent) => {
-            this.emitTrace('listener_failed', {
-              eventType: event.type,
-            });
-          },
-        }
-      : {};
-
-    this.eventPublisher = new HarnessEventPublisher(publisherOptions);
   }
 
   sessionStarted(): void {
@@ -91,20 +70,24 @@ export class HarnessObserver {
 
     this.hasStartedSession = true;
 
-    this.emitTrace('session_started', {
+    this.eventEmitter.publish({
       debug: this.debug,
-      provider: this.providerName,
+      providerName: this.providerName,
       runId: this.runId,
       sessionId: this.getSessionId(),
+      timestamp: new Date().toISOString(),
+      type: 'session_started',
     });
   }
 
   iterationStarted(iteration: number, messageCount: number): void {
-    this.emitTrace('loop_iteration_started', {
+    this.eventEmitter.publish({
       iteration,
       messageCount,
       sessionId: this.getSessionId(),
+      timestamp: new Date().toISOString(),
       turnId: this.getTurnId(),
+      type: 'iteration_started',
     });
   }
 
@@ -114,7 +97,7 @@ export class HarnessObserver {
     provider: ProviderMetadata,
     toolDefinitions: ModelToolDefinition[] | undefined,
   ): void {
-    this.publishEvent({
+    this.eventEmitter.publish({
       iteration,
       messageCount: messages.length,
       messageCountsByRole: getMessageCountsByRole(messages),
@@ -127,21 +110,13 @@ export class HarnessObserver {
       turnId: this.getTurnId(),
       type: 'provider_requested',
     });
-
-    this.emitTrace('provider_request_started', {
-      iteration,
-      model: provider.model,
-      providerName: provider.name,
-      sessionId: this.getSessionId(),
-      turnId: this.getTurnId(),
-    });
   }
 
   providerResponded(iteration: number, provider: ProviderMetadata, response: ModelResponse, durationMs: number): void {
     const toolCallNames = getToolCallNames(response.toolCalls);
     const usedFallbackText = !response.text.trim() && !(response.toolCalls?.length ?? 0);
 
-    this.publishEvent({
+    this.eventEmitter.publish({
       durationMs,
       iteration,
       model: provider.model,
@@ -156,23 +131,10 @@ export class HarnessObserver {
       usedFallbackText,
       usage: response.usage,
     });
-
-    this.emitTrace('provider_response_finished', {
-      durationMs,
-      iteration,
-      model: provider.model,
-      providerName: provider.name,
-      sessionId: this.getSessionId(),
-      textLength: response.text.length,
-      toolCallCount: response.toolCalls?.length ?? 0,
-      turnId: this.getTurnId(),
-      usedFallbackText,
-      usage: response.usage,
-    });
   }
 
   toolFinished(iteration: number, toolCall: ModelToolCall, toolResult: ToolExecutionResult, durationMs: number): void {
-    this.publishEvent({
+    this.eventEmitter.publish({
       durationMs,
       isError: Boolean(toolResult.isError),
       iteration,
@@ -185,19 +147,12 @@ export class HarnessObserver {
       turnId: this.getTurnId(),
       type: 'tool_finished',
     });
-
-    this.emitToolTrace('tool_execution_finished', iteration, toolCall, {
-      durationMs,
-      isError: Boolean(toolResult.isError),
-      resultContentLength: toolResult.content.length,
-      resultDataKeys: getResultDataKeys(toolResult.data),
-    });
   }
 
   toolRequested(iteration: number, toolCall: ModelToolCall): void {
     const debugArgs = getDebugToolArgs(toolCall.input, { debug: this.debug });
 
-    this.publishEvent({
+    this.eventEmitter.publish({
       ...(debugArgs ? { debugArgs } : {}),
       iteration,
       safeArgs: getSafeToolArgs(toolCall.input),
@@ -211,7 +166,7 @@ export class HarnessObserver {
   }
 
   toolStarted(iteration: number, toolCall: ModelToolCall): void {
-    this.publishEvent({
+    this.eventEmitter.publish({
       iteration,
       sessionId: this.getSessionId(),
       timestamp: new Date().toISOString(),
@@ -220,12 +175,10 @@ export class HarnessObserver {
       turnId: this.getTurnId(),
       type: 'tool_started',
     });
-
-    this.emitToolTrace('tool_execution_started', iteration, toolCall, {});
   }
 
   toolBlocked(iteration: number, toolCall: ModelToolCall, reason: string, exposeToModel: boolean): void {
-    this.publishEvent({
+    this.eventEmitter.publish({
       exposeToModel,
       iteration,
       reason,
@@ -239,7 +192,7 @@ export class HarnessObserver {
   }
 
   providerBlocked(iteration: number, reason: string, exposeToModel: boolean): void {
-    this.publishEvent({
+    this.eventEmitter.publish({
       exposeToModel,
       iteration,
       reason,
@@ -251,10 +204,8 @@ export class HarnessObserver {
   }
 
   hookError(pluginName: string, hookName: HookErrorEvent['hookName'], error: unknown): void {
-    void error;
-
-    this.publishEvent({
-      errorMessage: sanitizeHookErrorMessage(),
+    this.eventEmitter.publish({
+      errorMessage: sanitizeHookErrorMessage(error),
       hookName,
       pluginName,
       sessionId: this.getSessionId(),
@@ -265,7 +216,7 @@ export class HarnessObserver {
   }
 
   turnFailed(iteration: number, errorType: ErrorType, error: unknown): void {
-    this.publishEvent({
+    this.eventEmitter.publish({
       durationMs: this.getDurationMs(),
       errorMessage: sanitizeErrorMessage(errorType, error),
       errorType,
@@ -280,7 +231,7 @@ export class HarnessObserver {
   }
 
   turnFinished(totalIterations: number, totalToolCalls: number, finalAssistantLength: number): void {
-    this.publishEvent({
+    this.eventEmitter.publish({
       durationMs: this.getDurationMs(),
       finalAssistantLength,
       sessionId: this.getSessionId(),
@@ -298,7 +249,7 @@ export class HarnessObserver {
     this.currentTurnId = randomUUID();
     this.currentTurnStartTime = Date.now();
 
-    this.publishEvent({
+    this.eventEmitter.publish({
       sessionId: this.getSessionId(),
       timestamp: new Date().toISOString(),
       turnId: this.getTurnId(),
@@ -308,44 +259,11 @@ export class HarnessObserver {
   }
 
   subscribe(listener: HarnessEventListener): () => void {
-    return this.eventPublisher.subscribe(listener);
+    return this.eventEmitter.subscribe(listener);
   }
 
   getRunId(): string {
     return this.runId;
-  }
-
-  private clearTurn(): void {
-    this.currentTurnId = null;
-    this.currentTurnStartTime = null;
-  }
-
-  private emitToolTrace(
-    type: HarnessRuntimeTraceType,
-    iteration: number,
-    toolCall: ModelToolCall,
-    detail: Record<string, unknown>,
-  ): void {
-    const debugArgs = getDebugToolArgs(toolCall.input, { debug: this.debug });
-
-    this.emitTrace(type, {
-      ...(debugArgs ? { debugArgs } : {}),
-      iteration,
-      safeArgs: getSafeToolArgs(toolCall.input),
-      sessionId: this.getSessionId(),
-      toolCallId: toolCall.id,
-      toolName: toolCall.name,
-      turnId: this.getTurnId(),
-      ...detail,
-    });
-  }
-
-  private emitTrace(type: HarnessRuntimeTraceType, detail: Record<string, unknown>): void {
-    emitRuntimeTrace(this.logger, type, detail);
-  }
-
-  private getDurationMs(): number {
-    return Date.now() - this.getTurnStartTime();
   }
 
   getTurnId(): string {
@@ -356,23 +274,20 @@ export class HarnessObserver {
     return this.currentTurnId;
   }
 
+  private clearTurn(): void {
+    this.currentTurnId = null;
+    this.currentTurnStartTime = null;
+  }
+
+  private getDurationMs(): number {
+    return Date.now() - this.getTurnStartTime();
+  }
+
   private getTurnStartTime(): number {
     if (!this.currentTurnStartTime) {
       this.currentTurnStartTime = Date.now();
     }
 
     return this.currentTurnStartTime;
-  }
-
-  private publishEvent(event: HarnessEvent): void {
-    try {
-      this.eventPublisher.publish(event);
-    } catch {
-      this.emitTrace('event_delivery_failed', {
-        eventType: event.type,
-        sessionId: this.getSessionId(),
-        turnId: this.getTurnId(),
-      });
-    }
   }
 }

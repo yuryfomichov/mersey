@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { HarnessObserver } from '../events/observer.js';
+import { HarnessEventReporter } from '../events/reporter.js';
 import type { ModelProvider } from '../models/provider.js';
 import { createEmptyModelUsage } from '../models/types.js';
 import { createPluginRunner } from '../plugins/runner.js';
@@ -44,9 +44,8 @@ function createStreamTurnFactory(input: {
 }) {
   const provider = input.provider ?? new FakeProvider();
   const session = createTestSession(input.sessionStore ?? new MemorySessionStore(), input.sessionId ?? 'local-session');
-  const observer = new HarnessObserver({
+  const reporter = new HarnessEventReporter({
     getSessionId: () => session.id,
-    logger: undefined,
     providerName: provider.name,
   });
 
@@ -54,12 +53,12 @@ function createStreamTurnFactory(input: {
     provider,
     session,
     streamTurn: createTurnStreamFactory({
-      observer,
       pluginRunner: createPluginRunner({
-        observer,
+        reporter,
         plugins: input.plugins ?? [],
-        runId: observer.getRunId(),
+        runId: reporter.getRunId(),
       }),
+      reporter,
       provider,
       session,
       toolRuntimeFactory: createToolRuntimeFactory({
@@ -132,18 +131,17 @@ test('createTurnStreamFactory rejects iteration when the background turn throws 
       throw undefined;
     },
   };
-  const observer = new HarnessObserver({
+  const reporter = new HarnessEventReporter({
     getSessionId: () => session.id,
-    logger: undefined,
     providerName: provider.name,
   });
 
   const streamTurn = createTurnStreamFactory({
-    observer,
+    reporter,
     pluginRunner: createPluginRunner({
-      observer,
+      reporter,
       plugins: [],
-      runId: observer.getRunId(),
+      runId: reporter.getRunId(),
     }),
     provider,
     session,

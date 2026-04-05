@@ -12,7 +12,7 @@ import {
 } from '../../../harness/index.js';
 import { getBooleanFlag, getProviderName, getSessionId } from '../../helpers/cli/args.js';
 import { createDefaultTools, getProviderModel, getToolExecutionPolicy } from '../../helpers/cli/harness-config.js';
-import { createCliLoggers } from '../../helpers/cli/logging.js';
+import { createCliLoggingPlugins } from '../../helpers/cli/logging.js';
 import { getProviderDefinition } from '../../helpers/cli/provider-config.js';
 import {
   createSession,
@@ -333,7 +333,7 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
 
     void (async () => {
       try {
-        const { loggers } = await createCliLoggers(sessionId);
+        const { plugins: loggingPlugins } = await createCliLoggingPlugins(sessionId);
 
         if (disposed) {
           return;
@@ -341,8 +341,7 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
 
         const h = createHarness({
           debug,
-          loggers,
-          plugins: [toolApprovalPlugin],
+          plugins: [...loggingPlugins, toolApprovalPlugin],
           provider: providerDef,
           session,
           toolExecutionPolicy: getToolExecutionPolicy(),

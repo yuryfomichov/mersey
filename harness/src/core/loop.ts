@@ -1,4 +1,4 @@
-import { HarnessObserver, getMessageCountsByRole } from '../events/observer.js';
+import { getMessageCountsByRole, HarnessEventReporter } from '../events/reporter.js';
 import type { ModelProvider } from '../models/provider.js';
 import type { ModelMessage, ModelRequest, ModelResponse } from '../models/types.js';
 import type { PluginRunner } from '../plugins/runner.js';
@@ -12,7 +12,7 @@ export type LoopOptions = {
 export type LoopInput = {
   content: string;
   history: readonly Message[];
-  observer: HarnessObserver;
+  reporter: HarnessEventReporter;
   options?: LoopOptions;
   pluginRunner: PluginRunner;
   provider: ModelProvider;
@@ -116,16 +116,16 @@ function toToolInputRecord(input: unknown): Record<string, unknown> {
  *
  * If the stream ends without a `response_completed`, an error is thrown.
  *
- * The {@link observer} is notified when the response completes.
+ * The {@link reporter} is notified when the response completes.
  */
 async function* getProviderResponse({
-  observer,
+  reporter,
   provider,
   request,
   iteration,
   signal,
 }: {
-  observer: HarnessObserver;
+  reporter: HarnessEventReporter;
   provider: ModelProvider;
   request: ModelRequest;
   iteration: number;
@@ -170,7 +170,7 @@ async function* getProviderResponse({
     throw new Error('Provider stream ended without a completed response.');
   }
 
-  observer.providerResponded(iteration, provider, response, Date.now() - providerStartTime);
+  reporter.providerResponded(iteration, provider, response, Date.now() - providerStartTime);
 
   yield {
     response,
@@ -201,7 +201,7 @@ async function* getProviderResponse({
  * provider calls, before tool execution). If aborted, the loop throws
  * an `AbortError`.
  *
- * **Events**: The {@link observer} is notified at each phase (turn started,
+ * **Events**: The {@link reporter} is notified at each phase (turn started,
  * iteration started, provider requested/responded, tool requested/started/finished,
  * turn finished/failed).
  *
@@ -216,7 +216,7 @@ async function* getProviderResponse({
 export async function* streamLoop({
   content,
   history,
-  observer,
+  reporter,
   options,
   pluginRunner,
   provider,
@@ -238,7 +238,7 @@ export async function* streamLoop({
   const toolRuntime = toolRuntimeFactory({ signal });
   const maxToolIterations = options?.maxToolIterations ?? DEFAULT_MAX_TOOL_ITERATIONS;
   let toolIterations = 0;
-  observer.turnStarted(content.length);
+  reporter.turnStarted(content.length);
   const resolvedSystemPrompt = systemPrompt?.trim() ? systemPrompt : undefined;
   const getTranscript = (): Message[] => [...history, ...turnMessages];
 
@@ -250,7 +250,7 @@ export async function* streamLoop({
       const transcript = getTranscript();
 
       currentIteration += 1;
-      observer.iterationStarted(currentIteration, transcript.length);
+      reporter.iterationStarted(currentIteration, transcript.length);
 
       const providerCtx = {
         iteration: currentIteration,
@@ -258,9 +258,9 @@ export async function* streamLoop({
         messageCountsByRole: getMessageCountsByRole(transcript),
         model: provider.model,
         providerName: provider.name,
-        sessionId: observer.getSessionId(),
+        sessionId: reporter.getSessionId(),
         toolDefinitionNames: toolRuntime.toolDefinitions?.map((t) => t.name) ?? [],
-        turnId: observer.getTurnId(),
+        turnId: reporter.getTurnId(),
       };
 
       const providerDecision = await pluginRunner.runBeforeProviderCall(providerCtx);
@@ -268,11 +268,11 @@ export async function* streamLoop({
       if (providerDecision.continue === false) {
         currentErrorType = 'provider';
         const exposeToModel = providerDecision.exposeToModel ?? false;
-        observer.providerBlocked(currentIteration, providerDecision.reason, exposeToModel);
+        reporter.providerBlocked(currentIteration, providerDecision.reason, exposeToModel);
         throw new Error(exposeToModel ? providerDecision.reason : 'Provider request blocked by policy.');
       }
 
-      observer.providerRequested(currentIteration, transcript, provider, toolRuntime.toolDefinitions);
+      reporter.providerRequested(currentIteration, transcript, provider, toolRuntime.toolDefinitions);
 
       currentErrorType = 'provider';
       throwIfAborted(signal);
@@ -281,7 +281,7 @@ export async function* streamLoop({
 
       for await (const providerEvent of getProviderResponse({
         iteration: currentIteration,
-        observer,
+        reporter,
         provider,
         request: {
           messages: toModelMessages(transcript),
@@ -337,7 +337,7 @@ export async function* streamLoop({
       appendMessage(turnMessages, assistantMessage);
 
       if (!response.toolCalls?.length) {
-        observer.turnFinished(currentIteration, totalToolCalls, assistantMessage.content.length);
+        reporter.turnFinished(currentIteration, totalToolCalls, assistantMessage.content.length);
 
         yield {
           message: assistantMessage,
@@ -355,24 +355,24 @@ export async function* streamLoop({
 
       for (const toolCall of response.toolCalls) {
         throwIfAborted(signal);
-        observer.toolRequested(currentIteration, toolCall);
+        reporter.toolRequested(currentIteration, toolCall);
 
         const toolCtx = {
           iteration: currentIteration,
-          sessionId: observer.getSessionId(),
+          sessionId: reporter.getSessionId(),
           toolCall: {
             id: toolCall.id,
             input: toToolInputRecord(toolCall.input),
             name: toolCall.name,
           },
-          turnId: observer.getTurnId(),
+          turnId: reporter.getTurnId(),
         };
 
         const toolDecision = await pluginRunner.runBeforeToolCall(toolCtx);
 
         if (toolDecision.continue === false) {
           const exposeToModel = toolDecision.exposeToModel ?? false;
-          observer.toolBlocked(currentIteration, toolCall, toolDecision.reason, exposeToModel);
+          reporter.toolBlocked(currentIteration, toolCall, toolDecision.reason, exposeToModel);
 
           appendMessage(turnMessages, {
             content: exposeToModel ? toolDecision.reason : 'Tool call denied by policy.',
@@ -386,14 +386,14 @@ export async function* streamLoop({
           continue;
         }
 
-        observer.toolStarted(currentIteration, toolCall);
+        reporter.toolStarted(currentIteration, toolCall);
 
         currentErrorType = 'tool';
         const toolStartTime = Date.now();
         const toolResult = await toolRuntime.executeToolCall(toolCall);
         currentErrorType = 'runtime';
         throwIfAborted(signal);
-        observer.toolFinished(currentIteration, toolCall, toolResult, Date.now() - toolStartTime);
+        reporter.toolFinished(currentIteration, toolCall, toolResult, Date.now() - toolStartTime);
 
         appendMessage(turnMessages, {
           ...toolResult,
@@ -403,7 +403,7 @@ export async function* streamLoop({
       }
     }
   } catch (error: unknown) {
-    observer.turnFailed(currentIteration, currentErrorType, error);
+    reporter.turnFailed(currentIteration, currentErrorType, error);
     throw error;
   }
 }

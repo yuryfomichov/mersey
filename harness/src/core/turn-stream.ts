@@ -1,4 +1,4 @@
-import { HarnessObserver } from '../events/observer.js';
+import { HarnessEventReporter } from '../events/reporter.js';
 import type { ModelProvider } from '../models/provider.js';
 import type { PluginRunner } from '../plugins/runner.js';
 import { Session } from '../sessions/session.js';
@@ -13,7 +13,7 @@ import { streamLoop, type TurnChunk } from './loop.js';
  */
 type TurnStreamOptions = {
   content: string;
-  observer: HarnessObserver;
+  reporter: HarnessEventReporter;
   pluginRunner: PluginRunner;
   provider: ModelProvider;
   session: Session;
@@ -58,7 +58,7 @@ export type TurnStreamFactory = (content: string, stream?: boolean) => TurnStrea
  */
 function createTurnStream({
   content,
-  observer,
+  reporter,
   pluginRunner,
   provider,
   session,
@@ -81,12 +81,12 @@ function createTurnStream({
     backgroundTask = session.runExclusive(async () => {
       try {
         await session.ensure();
-        observer.sessionStarted();
+        reporter.sessionStarted();
 
         const iterator = streamLoop({
           content,
           history: session.messages,
-          observer,
+          reporter,
           pluginRunner,
           provider,
           signal: abortController.signal,

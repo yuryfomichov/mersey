@@ -1,9 +1,8 @@
 import type { TurnChunk } from './core/loop.js';
 import { asFinalMessage, createTurnStreamFactory } from './core/turn-stream.js';
-import { HarnessObserver } from './events/observer.js';
+import { HarnessEventEmitter } from './events/emitter.js';
+import { HarnessEventReporter } from './events/reporter.js';
 import type { HarnessEventListener } from './events/types.js';
-import { createFanoutLogger } from './logger/fanout.js';
-import type { HarnessLogger } from './logger/types.js';
 import type { ModelProvider } from './models/provider.js';
 import { createPluginRunner } from './plugins/runner.js';
 import type { HarnessPlugin } from './plugins/types.js';
@@ -24,7 +23,6 @@ export type Harness = {
 
 export type CreateHarnessOptions = {
   debug?: boolean;
-  loggers?: HarnessLogger[];
   plugins?: HarnessPlugin[];
   providerInstance?: ModelProvider;
   provider?: ProviderDefinition;
@@ -51,20 +49,21 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
     policy: options.toolExecutionPolicy ?? { workspaceRoot: process.cwd() },
     tools: options.tools ?? [],
   });
+  const eventEmitter = new HarnessEventEmitter();
 
-  const observer = new HarnessObserver({
+  const reporter = new HarnessEventReporter({
     debug: options.debug,
+    eventEmitter,
     getSessionId: () => session.id,
-    logger: createFanoutLogger(options.loggers),
     providerName: resolvedProvider.name,
   });
   const pluginRunner = createPluginRunner({
-    observer,
+    reporter,
     plugins: options.plugins ?? [],
-    runId: observer.getRunId(),
+    runId: reporter.getRunId(),
   });
   const streamTurn = createTurnStreamFactory({
-    observer,
+    reporter,
     pluginRunner,
     provider: resolvedProvider,
     session,
@@ -79,7 +78,7 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
       return streamTurn(content);
     },
     subscribe(listener: HarnessEventListener): () => void {
-      return observer.subscribe(listener);
+      return reporter.subscribe(listener);
     },
   };
 }

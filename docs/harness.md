@@ -12,7 +12,7 @@ Key exports include:
 - `Session`, `MemorySessionStore`, `FilesystemSessionStore`
 - provider types like `ProviderDefinition`, `ProviderName`, and `ModelProvider`
 - built-in tools like `ReadFileTool`, `WriteFileTool`, `EditFileTool`, `RunCommandTool`
-- event and logger types
+- event and plugin types
 
 ## Minimal Example
 
@@ -165,7 +165,22 @@ unsubscribe();
 
 The event stream includes turn lifecycle, provider calls, and tool execution. See `harness/src/events/types.ts` for the full event union.
 
-`createHarness()` also accepts `loggers`, which receive runtime traces. This is how the CLI writes structured and text logs for each session.
+The core harness is event-only. Logging is implemented through plugins that subscribe with `onEvent`.
+
+```ts
+import { createHarness } from '../harness/index.js';
+import { createJsonlEventLoggingPlugin, createTextEventLoggingPlugin } from '../harness/plugins/index.js';
+
+const harness = createHarness({
+  provider: { name: 'fake' },
+  plugins: [
+    createJsonlEventLoggingPlugin({ path: 'logs/session.jsonl' }),
+    createTextEventLoggingPlugin({ path: 'logs/session.log' }),
+  ],
+});
+```
+
+Under the hood, `HarnessEventEmitter` owns immutable publish/subscribe delivery and `HarnessEventReporter` owns typed event construction, turn/session IDs, timing, and sanitization.
 
 ## Integration Boundaries
 

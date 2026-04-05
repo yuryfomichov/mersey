@@ -1,1 +1,1 @@
-export { createCliLoggers, getCliLogPaths, type CliLogPaths } from '../../helpers/cli/logging.js';
+export { createCliLoggingPlugins, getCliLogPaths, type CliLogPaths } from '../../helpers/cli/logging.js';

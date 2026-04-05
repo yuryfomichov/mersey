@@ -21,7 +21,8 @@ The repo is organized around a reusable `harness` package and thin apps that sit
 - `harness/src/providers/`: provider implementations, codecs, and factory
 - `harness/src/tools/`: built-in tools and runtime services
 - `harness/src/sessions/`: session state and storage implementations
-- `harness/src/events/`: event publishing and safe telemetry
+- `harness/src/events/`: event emitter/reporter and safe telemetry
+- `harness/plugins/logging/`: built-in JSONL and text logging plugins
 - `apps/helpers/cli/`: shared app-side wiring for provider, session, tool, and logging setup
 - `apps/cli/`: thin terminal app over `harness`
 - `apps/ftv/`: thin Ink TUI app over `harness`
@@ -85,7 +86,8 @@ pnpm ftv -- --provider openai --session-store filesystem --sessions-dir tmp/sess
 
 - Apps own interaction and presentation.
 - `harness` owns turn orchestration, tool execution, session state, and event emission.
-- Shared app-side provider, session, tool, and logging wiring lives under `apps/helpers/cli/` so apps do not depend on each other.
+- Logging is plugin-based: apps inject logging plugins through `createHarness({ plugins })`.
+- Shared app-side provider, session, tool, and logging plugin wiring lives under `apps/helpers/cli/` so apps do not depend on each other.
 - The turn loop depends on `ModelProvider`, not SDK-specific request or response types.
 - Provider-specific translation belongs in `harness/src/providers/` and `harness/src/providers/codecs/`.
 - Tool execution is routed through `harness/src/tools/runtime/`, which applies workspace and output policies.

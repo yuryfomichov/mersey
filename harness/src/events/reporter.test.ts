@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import type { HarnessRuntimeTrace } from '../logger/types.js';
 import { createEmptyModelUsage, type ModelToolCall } from '../models/types.js';
-import { HarnessObserver } from './observer.js';
+import { HarnessEventReporter } from './reporter.js';
 import type { HarnessEvent } from './types.js';
 
 function createToolCall(input: Record<string, unknown>): ModelToolCall {
@@ -14,47 +13,40 @@ function createToolCall(input: Record<string, unknown>): ModelToolCall {
   };
 }
 
-test('HarnessObserver emits session_started and event delivery traces', async () => {
-  const traces: HarnessRuntimeTrace[] = [];
-  const observer = new HarnessObserver({
+test('HarnessEventReporter emits session_started only once', async () => {
+  const events: HarnessEvent[] = [];
+  const reporter = new HarnessEventReporter({
     debug: false,
     getSessionId: () => 'session-1',
-    logger: {
-      log(trace): void {
-        traces.push(trace);
-      },
-    },
-    providerName: 'fake',
-  });
-  observer.sessionStarted();
-
-  observer.subscribe(() => {
-    throw new Error('listener boom');
-  });
-
-  observer.turnStarted(5);
-  observer.turnFinished(1, 0, 5);
-  await Promise.resolve();
-
-  assert.ok(traces.some((trace) => trace.type === 'session_started'));
-  assert.ok(traces.some((trace) => trace.type === 'event_emitted'));
-  assert.ok(traces.some((trace) => trace.type === 'listener_failed'));
-});
-
-test('HarnessObserver publishes safe tool args without debug args by default', () => {
-  const events: HarnessEvent[] = [];
-  const observer = new HarnessObserver({
-    getSessionId: () => 'session-1',
-    logger: undefined,
     providerName: 'fake',
   });
 
-  observer.subscribe((event) => {
+  reporter.subscribe((event) => {
     events.push(event);
   });
 
-  observer.turnStarted(5);
-  observer.toolRequested(1, createToolCall({ path: 'notes/note.txt' }));
+  reporter.sessionStarted();
+  reporter.sessionStarted();
+  reporter.turnStarted(5);
+  reporter.turnFinished(1, 0, 5);
+  await Promise.resolve();
+
+  assert.equal(events.filter((event) => event.type === 'session_started').length, 1);
+});
+
+test('HarnessEventReporter publishes safe tool args without debug args by default', () => {
+  const events: HarnessEvent[] = [];
+  const reporter = new HarnessEventReporter({
+    getSessionId: () => 'session-1',
+    providerName: 'fake',
+  });
+
+  reporter.subscribe((event) => {
+    events.push(event);
+  });
+
+  reporter.turnStarted(5);
+  reporter.toolRequested(1, createToolCall({ path: 'notes/note.txt' }));
 
   const event = events[1];
 
@@ -63,30 +55,23 @@ test('HarnessObserver publishes safe tool args without debug args by default', (
   assert.equal(event && event.type === 'tool_requested' ? event.safeArgs.path?.basename : undefined, 'note.txt');
 });
 
-test('HarnessObserver includes debug tool args when debug is enabled', () => {
-  const traces: HarnessRuntimeTrace[] = [];
+test('HarnessEventReporter includes debug tool args when debug is enabled', () => {
   const events: HarnessEvent[] = [];
-  const observer = new HarnessObserver({
+  const reporter = new HarnessEventReporter({
     debug: true,
     getSessionId: () => 'session-1',
-    logger: {
-      log(trace): void {
-        traces.push(trace);
-      },
-    },
     providerName: 'fake',
   });
 
-  observer.subscribe((event) => {
+  reporter.subscribe((event) => {
     events.push(event);
   });
 
-  observer.turnStarted(5);
-  observer.toolRequested(1, createToolCall({ args: ['status'], command: 'git', cwd: '.' }));
-  observer.toolStarted(1, createToolCall({ args: ['status'], command: 'git', cwd: '.' }));
+  reporter.turnStarted(5);
+  reporter.toolRequested(1, createToolCall({ args: ['status'], command: 'git', cwd: '.' }));
+  reporter.toolStarted(1, createToolCall({ args: ['status'], command: 'git', cwd: '.' }));
 
   const toolRequestedEvent = events[1];
-  const toolTrace = traces.find((trace) => trace.type === 'tool_execution_started');
 
   assert.deepEqual(
     toolRequestedEvent && toolRequestedEvent.type === 'tool_requested' ? toolRequestedEvent.debugArgs : undefined,
@@ -96,27 +81,21 @@ test('HarnessObserver includes debug tool args when debug is enabled', () => {
       cwd: '.',
     },
   );
-  assert.deepEqual((toolTrace?.detail.debugArgs as Record<string, unknown> | undefined) ?? undefined, {
-    args: ['status'],
-    command: 'git',
-    cwd: '.',
-  });
 });
 
-test('HarnessObserver sanitizes provider failures in turn_failed events', () => {
+test('HarnessEventReporter sanitizes provider failures in turn_failed events', () => {
   const events: HarnessEvent[] = [];
-  const observer = new HarnessObserver({
+  const reporter = new HarnessEventReporter({
     getSessionId: () => 'session-1',
-    logger: undefined,
     providerName: 'fake',
   });
 
-  observer.subscribe((event) => {
+  reporter.subscribe((event) => {
     events.push(event);
   });
 
-  observer.turnStarted('top secret prompt'.length);
-  observer.turnFailed(1, 'provider', new Error('provider secret: leaked prompt contents'));
+  reporter.turnStarted('top secret prompt'.length);
+  reporter.turnFailed(1, 'provider', new Error('provider secret: leaked prompt contents'));
 
   const event = events.at(-1);
 
@@ -127,20 +106,19 @@ test('HarnessObserver sanitizes provider failures in turn_failed events', () => 
   assert.doesNotMatch(JSON.stringify(events), /leaked prompt contents/);
 });
 
-test('HarnessObserver marks fallback provider responses in provider_responded events', () => {
+test('HarnessEventReporter marks fallback provider responses in provider_responded events', () => {
   const events: HarnessEvent[] = [];
-  const observer = new HarnessObserver({
+  const reporter = new HarnessEventReporter({
     getSessionId: () => 'session-1',
-    logger: undefined,
     providerName: 'fake',
   });
 
-  observer.subscribe((event) => {
+  reporter.subscribe((event) => {
     events.push(event);
   });
 
-  observer.turnStarted(5);
-  observer.providerResponded(
+  reporter.turnStarted(5);
+  reporter.providerResponded(
     1,
     { model: 'fake-model', name: 'fake' },
     { text: '', usage: createEmptyModelUsage() },
@@ -153,20 +131,19 @@ test('HarnessObserver marks fallback provider responses in provider_responded ev
   assert.equal(event && event.type === 'provider_responded' ? event.usedFallbackText : undefined, true);
 });
 
-test('HarnessObserver sanitizes hook_error messages', () => {
+test('HarnessEventReporter sanitizes hook_error messages', () => {
   const events: HarnessEvent[] = [];
-  const observer = new HarnessObserver({
+  const reporter = new HarnessEventReporter({
     getSessionId: () => 'session-1',
-    logger: undefined,
     providerName: 'fake',
   });
 
-  observer.subscribe((event) => {
+  reporter.subscribe((event) => {
     events.push(event);
   });
 
-  observer.turnStarted(5);
-  observer.hookError('plugin-a', 'onEvent', new Error('sensitive detail'));
+  reporter.turnStarted(5);
+  reporter.hookError('plugin-a', 'onEvent', new Error('sensitive detail'));
 
   const event = events.at(-1);
 

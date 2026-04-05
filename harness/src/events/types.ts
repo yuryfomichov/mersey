@@ -3,8 +3,9 @@ import type { ModelUsage } from '../models/types.js';
 export type HarnessEventBase = {
   sessionId: string;
   timestamp: string;
-  turnId: string;
   type:
+    | 'session_started'
+    | 'iteration_started'
     | 'turn_started'
     | 'provider_requested'
     | 'provider_responded'
@@ -18,12 +19,29 @@ export type HarnessEventBase = {
     | 'turn_failed';
 };
 
-export type TurnStartedEvent = HarnessEventBase & {
+export type HarnessTurnEventBase = HarnessEventBase & {
+  turnId: string;
+};
+
+export type SessionStartedEvent = HarnessEventBase & {
+  type: 'session_started';
+  debug: boolean;
+  providerName: string;
+  runId: string;
+};
+
+export type IterationStartedEvent = HarnessTurnEventBase & {
+  type: 'iteration_started';
+  iteration: number;
+  messageCount: number;
+};
+
+export type TurnStartedEvent = HarnessTurnEventBase & {
   type: 'turn_started';
   userMessageLength: number;
 };
 
-export type ProviderRequestedEvent = HarnessEventBase & {
+export type ProviderRequestedEvent = HarnessTurnEventBase & {
   type: 'provider_requested';
   iteration: number;
   messageCount: number;
@@ -38,7 +56,7 @@ export type ProviderRequestedEvent = HarnessEventBase & {
   toolDefinitionNames: string[];
 };
 
-export type ProviderRespondedEvent = HarnessEventBase & {
+export type ProviderRespondedEvent = HarnessTurnEventBase & {
   type: 'provider_responded';
   durationMs: number;
   iteration: number;
@@ -78,7 +96,7 @@ export type SafeToolArgs = {
   path?: SafePathArgSummary;
 };
 
-export type ToolRequestedEvent = HarnessEventBase & {
+export type ToolRequestedEvent = HarnessTurnEventBase & {
   debugArgs?: DebugToolArgs;
   type: 'tool_requested';
   iteration: number;
@@ -87,14 +105,14 @@ export type ToolRequestedEvent = HarnessEventBase & {
   toolName: string;
 };
 
-export type ToolStartedEvent = HarnessEventBase & {
+export type ToolStartedEvent = HarnessTurnEventBase & {
   type: 'tool_started';
   iteration: number;
   toolCallId: string;
   toolName: string;
 };
 
-export type ToolFinishedEvent = HarnessEventBase & {
+export type ToolFinishedEvent = HarnessTurnEventBase & {
   type: 'tool_finished';
   durationMs: number;
   isError: boolean;
@@ -105,7 +123,7 @@ export type ToolFinishedEvent = HarnessEventBase & {
   toolName: string;
 };
 
-export type ToolBlockedEvent = HarnessEventBase & {
+export type ToolBlockedEvent = HarnessTurnEventBase & {
   type: 'tool_blocked';
   iteration: number;
   reason: string;
@@ -114,21 +132,21 @@ export type ToolBlockedEvent = HarnessEventBase & {
   toolName: string;
 };
 
-export type ProviderBlockedEvent = HarnessEventBase & {
+export type ProviderBlockedEvent = HarnessTurnEventBase & {
   type: 'provider_blocked';
   iteration: number;
   reason: string;
   exposeToModel: boolean;
 };
 
-export type HookErrorEvent = HarnessEventBase & {
+export type HookErrorEvent = HarnessTurnEventBase & {
   type: 'hook_error';
   pluginName: string;
   hookName: 'beforeProviderCall' | 'beforeToolCall' | 'onEvent';
   errorMessage: string;
 };
 
-export type TurnFinishedEvent = HarnessEventBase & {
+export type TurnFinishedEvent = HarnessTurnEventBase & {
   type: 'turn_finished';
   durationMs: number;
   finalAssistantLength: number;
@@ -136,7 +154,7 @@ export type TurnFinishedEvent = HarnessEventBase & {
   totalToolCalls: number;
 };
 
-export type TurnFailedEvent = HarnessEventBase & {
+export type TurnFailedEvent = HarnessTurnEventBase & {
   type: 'turn_failed';
   durationMs: number;
   errorMessage: string;
@@ -145,6 +163,8 @@ export type TurnFailedEvent = HarnessEventBase & {
 };
 
 export type HarnessEvent =
+  | SessionStartedEvent
+  | IterationStartedEvent
   | ProviderRequestedEvent
   | ProviderRespondedEvent
   | ProviderBlockedEvent
