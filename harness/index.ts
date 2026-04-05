@@ -15,11 +15,6 @@ export type {
   PluginEventContext,
 } from './src/plugins/types.js';
 
-export { createJsonlEventLoggingPlugin } from './plugins/logging/jsonl.js';
-export type { JsonlEventLoggingPluginOptions } from './plugins/logging/jsonl.js';
-export { createTextEventLoggingPlugin } from './plugins/logging/text.js';
-export type { TextEventLoggingPluginOptions } from './plugins/logging/text.js';
-
 export type { TurnChunk } from './src/core/loop.js';
 
 export type { ModelProvider } from './src/models/provider.js';

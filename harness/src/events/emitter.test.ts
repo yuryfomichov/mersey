@@ -17,16 +17,16 @@ function createEvent(): TurnFinishedEvent {
   };
 }
 
-test('HarnessEventPublisher snapshots events before delivery', () => {
-  const publisher = new HarnessEventEmitter();
+test('HarnessEventEmitter snapshots events before delivery', () => {
+  const emitter = new HarnessEventEmitter();
   const event = createEvent();
   const seenEvents: HarnessEvent[] = [];
 
-  publisher.subscribe((receivedEvent) => {
+  emitter.subscribe((receivedEvent) => {
     seenEvents.push(receivedEvent);
   });
 
-  publisher.publish(event);
+  emitter.publish(event);
   event.turnId = 'mutated-turn';
 
   const receivedEvent = seenEvents[0] as TurnFinishedEvent | undefined;
@@ -43,13 +43,13 @@ test('HarnessEventPublisher snapshots events before delivery', () => {
 test('HarnessEventEmitter emits session events without turnId', () => {
   const turnFinishedEvent = createEvent();
   const seenEvents: HarnessEvent[] = [];
-  const publisher = new HarnessEventEmitter();
+  const emitter = new HarnessEventEmitter();
 
-  publisher.subscribe((receivedEvent) => {
+  emitter.subscribe((receivedEvent) => {
     seenEvents.push(receivedEvent);
   });
 
-  publisher.publish({
+  emitter.publish({
     debug: false,
     providerName: 'fake',
     runId: 'run-1',
@@ -57,7 +57,7 @@ test('HarnessEventEmitter emits session events without turnId', () => {
     timestamp: '2026-03-29T00:00:00.000Z',
     type: 'session_started',
   });
-  publisher.publish(turnFinishedEvent);
+  emitter.publish(turnFinishedEvent);
   turnFinishedEvent.turnId = 'mutated-turn';
 
   assert.equal(seenEvents[0]?.type, 'session_started');
@@ -71,32 +71,32 @@ test('HarnessEventEmitter emits session events without turnId', () => {
   });
 });
 
-test('HarnessEventPublisher unsubscribes listeners and swallows listener failures', async () => {
-  const publisher = new HarnessEventEmitter();
+test('HarnessEventEmitter unsubscribes listeners and swallows listener failures', async () => {
+  const emitter = new HarnessEventEmitter();
   let callCount = 0;
-  const unsubscribe = publisher.subscribe(() => {
+  const unsubscribe = emitter.subscribe(() => {
     callCount += 1;
   });
 
-  publisher.subscribe(() => {
+  emitter.subscribe(() => {
     throw new Error('listener boom');
   });
 
-  publisher.publish(createEvent());
+  emitter.publish(createEvent());
   unsubscribe();
-  publisher.publish(createEvent());
+  emitter.publish(createEvent());
 
   await Promise.resolve();
 
   assert.equal(callCount, 1);
 });
 
-test('HarnessEventPublisher protects listeners from event mutation by other listeners', () => {
-  const publisher = new HarnessEventEmitter();
+test('HarnessEventEmitter protects listeners from event mutation by other listeners', () => {
+  const emitter = new HarnessEventEmitter();
   let mutationThrew = false;
   let seenTurnId: string | undefined;
 
-  publisher.subscribe((event) => {
+  emitter.subscribe((event) => {
     if (event.type === 'session_started') {
       return;
     }
@@ -108,28 +108,28 @@ test('HarnessEventPublisher protects listeners from event mutation by other list
     }
   });
 
-  publisher.subscribe((event) => {
+  emitter.subscribe((event) => {
     if (event.type !== 'session_started') {
       seenTurnId = event.turnId;
     }
   });
 
-  publisher.publish(createEvent());
+  emitter.publish(createEvent());
 
   assert.equal(mutationThrew, true);
   assert.equal(seenTurnId, 'turn-1');
 });
 
-test('HarnessEventEmitter validates required fields for turn-scoped events', () => {
-  const publisher = new HarnessEventEmitter();
+test('HarnessEventEmitter does not crash on malformed payloads at runtime', () => {
+  const emitter = new HarnessEventEmitter();
   let callCount = 0;
 
-  publisher.subscribe(() => {
+  emitter.subscribe(() => {
     callCount += 1;
   });
 
-  assert.throws(() => {
-    publisher.publish({
+  assert.doesNotThrow(() => {
+    emitter.publish({
       durationMs: 3,
       finalAssistantLength: 1,
       sessionId: 'session-1',
@@ -140,5 +140,5 @@ test('HarnessEventEmitter validates required fields for turn-scoped events', () 
     } as HarnessEvent);
   });
 
-  assert.equal(callCount, 0);
+  assert.equal(callCount, 1);
 });

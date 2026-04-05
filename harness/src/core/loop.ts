@@ -112,7 +112,7 @@ function appendMessage(messages: Message[], message: Message): void {
  *
  * If the stream ends without a `response_completed`, an error is thrown.
  *
- * The {@link observer} is notified when the response completes.
+ * The {@link reporter} is notified when the response completes.
  */
 async function* getProviderResponse({
   reporter,
@@ -197,7 +197,7 @@ async function* getProviderResponse({
  * provider calls, before tool execution). If aborted, the loop throws
  * an `AbortError`.
  *
- * **Events**: The {@link observer} is notified at each phase (turn started,
+ * **Events**: The {@link reporter} is notified at each phase (turn started,
  * iteration started, provider requested/responded, tool requested/started/finished,
  * turn finished/failed).
  *

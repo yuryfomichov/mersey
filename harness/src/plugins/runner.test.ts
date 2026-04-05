@@ -251,7 +251,7 @@ test('PluginRunner.runBeforeToolCall fails closed on hook error', async () => {
   assert.equal(hookError?.type === 'hook_error' ? hookError.hookName : undefined, 'beforeToolCall');
 });
 
-test('PluginRunner delivers events to all plugins via observer subscription', async () => {
+test('PluginRunner delivers events to all plugins via reporter subscription', async () => {
   const receivedEvents: string[] = [];
   const plugins: HarnessPlugin[] = [
     {

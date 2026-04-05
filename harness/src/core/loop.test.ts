@@ -60,7 +60,7 @@ async function collectLoopResult(
 
 function createReporter(input: {
   debug?: boolean;
-  eventPublisher?: HarnessEventSink;
+  eventSink?: HarnessEventSink;
   provider: ModelProvider;
   sessionId: string;
 }) {
@@ -72,9 +72,9 @@ function createReporter(input: {
 
   reporter.sessionStarted();
 
-  if (input.eventPublisher) {
+  if (input.eventSink) {
     reporter.subscribe((event) => {
-      input.eventPublisher?.publish(event);
+      input.eventSink?.publish(event);
     });
   }
 
@@ -84,7 +84,7 @@ function createReporter(input: {
 function createLoopInput(input: {
   content: string;
   debug?: boolean;
-  eventPublisher?: HarnessEventSink;
+  eventSink?: HarnessEventSink;
   history: readonly Message[];
   options?: Parameters<typeof streamLoop>[0]['options'];
   plugins?: HarnessPlugin[];
@@ -97,7 +97,7 @@ function createLoopInput(input: {
 }): Parameters<typeof streamLoop>[0] {
   const reporter = createReporter({
     debug: input.debug,
-    eventPublisher: input.eventPublisher,
+    eventSink: input.eventSink,
     provider: input.provider,
     sessionId: input.sessionId,
   });
@@ -235,7 +235,7 @@ test('streamLoop does not persist assistant tool calls when the tool iteration c
 
 test('streamLoop swallows event sink failures', async () => {
   const session = createSession('event-sink-session');
-  const publisher = {
+  const sink = {
     publish(): void {
       throw new Error('sink failed');
     },
@@ -247,7 +247,7 @@ test('streamLoop swallows event sink failures', async () => {
     createLoopInput({
       content: 'hello',
       history: session.messages,
-      eventPublisher: publisher,
+      eventSink: sink,
       provider,
       sessionId: session.id,
       toolExecutionPolicy: { workspaceRoot: process.cwd() },
@@ -345,9 +345,9 @@ test('streamLoop wires tool results back into the next provider request', async 
 test('streamLoop degrades malformed tool input into a normal tool error', async () => {
   let callCount = 0;
   const events: HarnessEvent[] = [];
-  const publisher = new HarnessEventEmitter();
+  const eventSink = new HarnessEventEmitter();
 
-  publisher.subscribe((event: HarnessEvent) => {
+  eventSink.subscribe((event: HarnessEvent) => {
     events.push(event);
   });
 
@@ -385,7 +385,7 @@ test('streamLoop degrades malformed tool input into a normal tool error', async 
   const { finalMessage, turnMessages } = await collectLoopResult(
     createLoopInput({
       content: 'trigger malformed tool call',
-      eventPublisher: publisher,
+      eventSink,
       history: [],
       provider,
       sessionId: 'tool-error-session',
@@ -411,9 +411,9 @@ test('streamLoop yields assistant deltas and final message while events stay coa
 
   const chunks = [];
   const events: HarnessEvent[] = [];
-  const publisher = new HarnessEventEmitter();
+  const eventSink = new HarnessEventEmitter();
 
-  publisher.subscribe((event: HarnessEvent) => {
+  eventSink.subscribe((event: HarnessEvent) => {
     events.push(event);
   });
 
@@ -428,7 +428,7 @@ test('streamLoop yields assistant deltas and final message while events stay coa
   const iterator = streamLoop(
     createLoopInput({
       content: 'hello',
-      eventPublisher: publisher,
+      eventSink,
       history: session.messages,
       provider,
       sessionId: session.id,
@@ -661,8 +661,8 @@ test('streamLoop rejects multiple completed responses from one provider turn', a
 
 test('streamLoop provider deny path hides non-exposed policy reason and reports provider error type', async () => {
   const events: HarnessEvent[] = [];
-  const publisher = new HarnessEventEmitter();
-  publisher.subscribe((event: HarnessEvent) => {
+  const eventSink = new HarnessEventEmitter();
+  eventSink.subscribe((event: HarnessEvent) => {
     events.push(event);
   });
 
@@ -670,7 +670,7 @@ test('streamLoop provider deny path hides non-exposed policy reason and reports 
     collectFinalMessage(
       createLoopInput({
         content: 'hello',
-        eventPublisher: publisher,
+        eventSink,
         history: [],
         plugins: [
           {

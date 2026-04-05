@@ -12,7 +12,7 @@ import {
   sanitizeErrorMessage,
   sanitizeHookErrorMessage,
 } from './telemetry.js';
-import type { HarnessEvent, HarnessEventListener, HookErrorEvent, TurnFailedEvent } from './types.js';
+import type { HarnessEventListener, HookErrorEvent, TurnFailedEvent } from './types.js';
 
 export type HarnessEventReporterOptions = {
   debug?: boolean;
@@ -70,18 +70,22 @@ export class HarnessEventReporter {
 
     this.hasStartedSession = true;
 
-    this.dispatchEvent({
+    this.eventEmitter.publish({
       debug: this.debug,
       providerName: this.providerName,
       runId: this.runId,
+      sessionId: this.getSessionId(),
+      timestamp: new Date().toISOString(),
       type: 'session_started',
     });
   }
 
   iterationStarted(iteration: number, messageCount: number): void {
-    this.dispatchEvent({
+    this.eventEmitter.publish({
       iteration,
       messageCount,
+      sessionId: this.getSessionId(),
+      timestamp: new Date().toISOString(),
       turnId: this.getTurnId(),
       type: 'iteration_started',
     });
@@ -93,12 +97,14 @@ export class HarnessEventReporter {
     provider: ProviderMetadata,
     toolDefinitions: ModelToolDefinition[] | undefined,
   ): void {
-    this.dispatchEvent({
+    this.eventEmitter.publish({
       iteration,
       messageCount: messages.length,
       messageCountsByRole: getMessageCountsByRole(messages),
       model: provider.model,
       providerName: provider.name,
+      sessionId: this.getSessionId(),
+      timestamp: new Date().toISOString(),
       toolDefinitionCount: toolDefinitions?.length ?? 0,
       toolDefinitionNames: getToolDefinitionNames(toolDefinitions),
       turnId: this.getTurnId(),
@@ -110,12 +116,14 @@ export class HarnessEventReporter {
     const toolCallNames = getToolCallNames(response.toolCalls);
     const usedFallbackText = !response.text.trim() && !(response.toolCalls?.length ?? 0);
 
-    this.dispatchEvent({
+    this.eventEmitter.publish({
       durationMs,
       iteration,
       model: provider.model,
       providerName: provider.name,
+      sessionId: this.getSessionId(),
       textLength: response.text.length,
+      timestamp: new Date().toISOString(),
       toolCallCount: response.toolCalls?.length ?? 0,
       toolCallNames,
       turnId: this.getTurnId(),
@@ -126,12 +134,14 @@ export class HarnessEventReporter {
   }
 
   toolFinished(iteration: number, toolCall: ModelToolCall, toolResult: ToolExecutionResult, durationMs: number): void {
-    this.dispatchEvent({
+    this.eventEmitter.publish({
       durationMs,
       isError: Boolean(toolResult.isError),
       iteration,
       resultContentLength: toolResult.content.length,
       resultDataKeys: getResultDataKeys(toolResult.data),
+      sessionId: this.getSessionId(),
+      timestamp: new Date().toISOString(),
       toolCallId: toolCall.id,
       toolName: toolCall.name,
       turnId: this.getTurnId(),
@@ -142,10 +152,12 @@ export class HarnessEventReporter {
   toolRequested(iteration: number, toolCall: ModelToolCall): void {
     const debugArgs = getDebugToolArgs(toolCall.input, { debug: this.debug });
 
-    this.dispatchEvent({
+    this.eventEmitter.publish({
       ...(debugArgs ? { debugArgs } : {}),
       iteration,
       safeArgs: getSafeToolArgs(toolCall.input),
+      sessionId: this.getSessionId(),
+      timestamp: new Date().toISOString(),
       toolCallId: toolCall.id,
       toolName: toolCall.name,
       turnId: this.getTurnId(),
@@ -154,8 +166,10 @@ export class HarnessEventReporter {
   }
 
   toolStarted(iteration: number, toolCall: ModelToolCall): void {
-    this.dispatchEvent({
+    this.eventEmitter.publish({
       iteration,
+      sessionId: this.getSessionId(),
+      timestamp: new Date().toISOString(),
       toolCallId: toolCall.id,
       toolName: toolCall.name,
       turnId: this.getTurnId(),
@@ -164,10 +178,12 @@ export class HarnessEventReporter {
   }
 
   toolBlocked(iteration: number, toolCall: ModelToolCall, reason: string, exposeToModel: boolean): void {
-    this.dispatchEvent({
+    this.eventEmitter.publish({
       exposeToModel,
       iteration,
       reason,
+      sessionId: this.getSessionId(),
+      timestamp: new Date().toISOString(),
       toolCallId: toolCall.id,
       toolName: toolCall.name,
       turnId: this.getTurnId(),
@@ -176,10 +192,12 @@ export class HarnessEventReporter {
   }
 
   providerBlocked(iteration: number, reason: string, exposeToModel: boolean): void {
-    this.dispatchEvent({
+    this.eventEmitter.publish({
       exposeToModel,
       iteration,
       reason,
+      sessionId: this.getSessionId(),
+      timestamp: new Date().toISOString(),
       turnId: this.getTurnId(),
       type: 'provider_blocked',
     });
@@ -188,21 +206,25 @@ export class HarnessEventReporter {
   hookError(pluginName: string, hookName: HookErrorEvent['hookName'], error: unknown): void {
     void error;
 
-    this.dispatchEvent({
+    this.eventEmitter.publish({
       errorMessage: sanitizeHookErrorMessage(),
       hookName,
       pluginName,
+      sessionId: this.getSessionId(),
+      timestamp: new Date().toISOString(),
       turnId: this.getTurnId(),
       type: 'hook_error',
     });
   }
 
   turnFailed(iteration: number, errorType: ErrorType, error: unknown): void {
-    this.dispatchEvent({
+    this.eventEmitter.publish({
       durationMs: this.getDurationMs(),
       errorMessage: sanitizeErrorMessage(errorType, error),
       errorType,
       iteration,
+      sessionId: this.getSessionId(),
+      timestamp: new Date().toISOString(),
       turnId: this.getTurnId(),
       type: 'turn_failed',
     });
@@ -211,9 +233,11 @@ export class HarnessEventReporter {
   }
 
   turnFinished(totalIterations: number, totalToolCalls: number, finalAssistantLength: number): void {
-    this.dispatchEvent({
+    this.eventEmitter.publish({
       durationMs: this.getDurationMs(),
       finalAssistantLength,
+      sessionId: this.getSessionId(),
+      timestamp: new Date().toISOString(),
       totalIterations,
       totalToolCalls,
       turnId: this.getTurnId(),
@@ -227,7 +251,9 @@ export class HarnessEventReporter {
     this.currentTurnId = randomUUID();
     this.currentTurnStartTime = Date.now();
 
-    this.dispatchEvent({
+    this.eventEmitter.publish({
+      sessionId: this.getSessionId(),
+      timestamp: new Date().toISOString(),
       turnId: this.getTurnId(),
       type: 'turn_started',
       userMessageLength,
@@ -248,14 +274,6 @@ export class HarnessEventReporter {
     }
 
     return this.currentTurnId;
-  }
-
-  private dispatchEvent(event: { type: HarnessEvent['type'] } & Record<string, unknown>): void {
-    this.eventEmitter.publish({
-      ...event,
-      sessionId: this.getSessionId(),
-      timestamp: new Date().toISOString(),
-    } as HarnessEvent);
   }
 
   private clearTurn(): void {

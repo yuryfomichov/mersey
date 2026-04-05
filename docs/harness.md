@@ -168,7 +168,8 @@ The event stream includes turn lifecycle, provider calls, and tool execution. Se
 The core harness is event-only. Logging is implemented through plugins that subscribe with `onEvent`.
 
 ```ts
-import { createHarness, createJsonlEventLoggingPlugin, createTextEventLoggingPlugin } from '../harness/index.js';
+import { createHarness } from '../harness/index.js';
+import { createJsonlEventLoggingPlugin, createTextEventLoggingPlugin } from '../harness/plugins/index.js';
 
 const harness = createHarness({
   provider: { name: 'fake' },

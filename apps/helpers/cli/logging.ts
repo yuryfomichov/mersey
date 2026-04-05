@@ -1,11 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import {
-  createJsonlEventLoggingPlugin,
-  createTextEventLoggingPlugin,
-  type HarnessPlugin,
-} from '../../../harness/index.js';
+import { type HarnessPlugin } from '../../../harness/index.js';
+import { createJsonlEventLoggingPlugin, createTextEventLoggingPlugin } from '../../../harness/plugins/index.js';
 
 function assertValidSessionId(sessionId: string): void {
   if (!sessionId || sessionId === '.' || sessionId === '..') {
