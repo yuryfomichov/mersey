@@ -3,10 +3,15 @@ import { dirname } from 'node:path';
 
 import { z } from 'zod';
 
-import type { ModelToolInput } from '../models/types.js';
-import type { ToolRuntimeServices } from './runtime/index.js';
-import type { Tool, ToolExecuteResult } from './types.js';
+import { FileService } from './services/files/file-service.js';
+import type { ToolExecutionContext, ToolExecutionPolicy, ToolFileService } from './services/index.js';
+import type { Tool, ToolExecuteResult, ToolInput } from './types.js';
+import { createCanonicalWorkspaceRootGetter, resolveToolExecutionPolicy } from './utils/policy.js';
 import { parseToolInput, toToolInputSchema } from './utils/schema.js';
+
+export type WriteFileToolOptions = {
+  policy?: ToolExecutionPolicy;
+};
 
 export class WriteFileTool implements Tool {
   private static readonly input = z.object({
@@ -20,15 +25,25 @@ export class WriteFileTool implements Tool {
       .describe('Absolute path or a path relative to the workspace root.'),
   });
 
+  private readonly files: ToolFileService;
+
   readonly description = 'Write a UTF-8 text file to disk.';
   readonly inputSchema = toToolInputSchema(WriteFileTool.input);
   readonly name = 'write_file';
 
-  async execute(input: ModelToolInput, runtime: ToolRuntimeServices): Promise<ToolExecuteResult> {
+  constructor(options: WriteFileToolOptions = {}) {
+    const policy = resolveToolExecutionPolicy(options.policy);
+    const getCanonicalWorkspaceRoot = createCanonicalWorkspaceRootGetter(policy.workspaceRoot);
+
+    this.files = new FileService({ getCanonicalWorkspaceRoot, policy });
+  }
+
+  async execute(input: ToolInput, context: ToolExecutionContext): Promise<ToolExecuteResult> {
     const { content, overwrite, path } = parseToolInput(WriteFileTool.input, input);
 
-    const resolvedPath = await runtime.files.resolveForWrite(path, this.name);
-    runtime.files.assertWriteSize(content, this.name);
+    context.cancellation.throwIfAborted();
+    const resolvedPath = await this.files.resolveForWrite(path, this.name);
+    this.files.assertWriteSize(content, this.name);
 
     await mkdir(dirname(resolvedPath), { recursive: true });
 
@@ -43,6 +58,8 @@ export class WriteFileTool implements Tool {
 
       throw error;
     }
+
+    context.cancellation.throwIfAborted();
 
     return {
       content: `Wrote file: ${resolvedPath}`,

@@ -1,6 +1,5 @@
 import type { ModelToolCall, ModelToolDefinition } from '../../models/types.js';
 import type { Tool, ToolExecutionResult } from '../types.js';
-import type { ToolCommandRunner } from './commands/types.js';
 
 export type ToolFileAccess = 'read' | 'write';
 
@@ -46,14 +45,11 @@ export type ToolCancellationService = {
   throwIfAborted(): void;
 };
 
-export type ToolRuntimeServices = {
+export type ToolExecutionContext = {
   cancellation: ToolCancellationService;
-  commands: ToolCommandRunner;
-  files: ToolFileService;
-  output: ToolOutputService;
 };
 
-export type ToolRuntime = ToolRuntimeServices & {
+export type ToolRuntime = ToolExecutionContext & {
   executeToolCall(toolCall: ModelToolCall): Promise<ToolExecutionResult>;
   toolDefinitions: ModelToolDefinition[] | undefined;
 };
@@ -63,7 +59,6 @@ export type ToolRuntimeFactory = ((options?: { signal?: AbortSignal }) => ToolRu
 };
 
 export type ToolRuntimeFactoryOptions = {
-  policy: ToolExecutionPolicy;
   tools: Tool[];
 };
 

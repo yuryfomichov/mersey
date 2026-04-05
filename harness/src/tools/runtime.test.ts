@@ -1,14 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { ReadFileTool } from '../../tools/read-file.js';
 import { withTempDir, writeWorkspaceFiles } from '../test/test-helpers.js';
-import { ReadFileTool } from './read-file.js';
 import { createToolRuntime } from './runtime/index.js';
 
 test('executeToolCall returns an error result for unknown tools', async () => {
   const result = await createToolRuntime({
-    policy: { workspaceRoot: process.cwd() },
-    tools: [new ReadFileTool()],
+    tools: [new ReadFileTool({ policy: { workspaceRoot: process.cwd() } })],
   }).executeToolCall({
     id: 'call-1',
     input: { path: 'note.txt' },
@@ -21,8 +20,7 @@ test('executeToolCall returns an error result for unknown tools', async () => {
 
 test('executeToolCall wraps tool execution errors', async () => {
   const result = await createToolRuntime({
-    policy: { workspaceRoot: process.cwd() },
-    tools: [new ReadFileTool()],
+    tools: [new ReadFileTool({ policy: { workspaceRoot: process.cwd() } })],
   }).executeToolCall({
     id: 'call-1',
     input: {},
@@ -38,8 +36,7 @@ test('executeToolCall returns tool results with tool metadata', async () => {
     await writeWorkspaceFiles(rootDir, { 'note.txt': 'hello from file' });
 
     const result = await createToolRuntime({
-      policy: { workspaceRoot: rootDir },
-      tools: [new ReadFileTool()],
+      tools: [new ReadFileTool({ policy: { workspaceRoot: rootDir } })],
     }).executeToolCall({
       id: 'call-1',
       input: { path: 'note.txt' },

@@ -1,9 +1,12 @@
 import { z } from 'zod';
 
-import type { ModelToolInput } from '../models/types.js';
-import type { ToolCommandPolicy, ToolCommandResult } from './runtime/commands/types.js';
-import type { ToolRuntimeServices } from './runtime/index.js';
-import type { Tool, ToolExecuteResult } from './types.js';
+import { CommandService } from './services/commands/command-service.js';
+import type { ToolCommandPolicy, ToolCommandResult } from './services/commands/types.js';
+import { resolvePathInWorkspace } from './services/files/path-utils.js';
+import type { ToolExecutionContext, ToolExecutionPolicy, ToolOutputService } from './services/index.js';
+import { OutputService } from './services/output/output-service.js';
+import type { Tool, ToolExecuteResult, ToolInput } from './types.js';
+import { createCanonicalWorkspaceRootGetter, resolveToolExecutionPolicy } from './utils/policy.js';
 import { parseToolInput, toToolInputSchema } from './utils/schema.js';
 
 const ZERO_ARG_COMMANDS = new Set(['pwd']);
@@ -32,7 +35,9 @@ function toResultContent(result: ToolCommandResult): string {
   return lines.join('\n');
 }
 
-export type RunCommandToolOptions = ToolCommandPolicy;
+export type RunCommandToolOptions = ToolCommandPolicy & {
+  policy?: ToolExecutionPolicy;
+};
 
 export class RunCommandTool implements Tool {
   private static readonly input = z.object({
@@ -65,14 +70,30 @@ export class RunCommandTool implements Tool {
       ),
   });
 
+  private readonly commandPolicy: ToolCommandPolicy;
+  private readonly output: ToolOutputService;
+  private readonly policy: ToolExecutionPolicy;
+  private readonly getCanonicalWorkspaceRoot: () => Promise<string>;
+
   readonly description =
     'Run one allowed executable directly inside the workspace without a shell. Put the executable in `command` and only trailing arguments in `args`. Example: `{ "command": "pwd" }` or `{ "command": "git", "args": ["status"] }`.';
   readonly inputSchema = toToolInputSchema(RunCommandTool.input);
   readonly name = 'run_command';
 
-  constructor(private readonly options: RunCommandToolOptions = {}) {}
+  constructor(options: RunCommandToolOptions = {}) {
+    this.policy = resolveToolExecutionPolicy(options.policy);
+    this.getCanonicalWorkspaceRoot = createCanonicalWorkspaceRootGetter(this.policy.workspaceRoot);
+    this.output = new OutputService(this.policy);
+    this.commandPolicy = {
+      commandAllowlist: options.commandAllowlist,
+      commandDenylist: options.commandDenylist,
+      defaultTimeoutMs: options.defaultTimeoutMs,
+      maxOutputBytes: options.maxOutputBytes,
+      maxTimeoutMs: options.maxTimeoutMs,
+    };
+  }
 
-  async execute(input: ModelToolInput, runtime: ToolRuntimeServices): Promise<ToolExecuteResult> {
+  async execute(input: ToolInput, context: ToolExecutionContext): Promise<ToolExecuteResult> {
     const parsedSpec = parseToolInput(RunCommandTool.input, input);
     const spec =
       parsedSpec.args?.length === 1 &&
@@ -80,8 +101,15 @@ export class RunCommandTool implements Tool {
       ZERO_ARG_COMMANDS.has(parsedSpec.command)
         ? { ...parsedSpec, args: [] }
         : parsedSpec;
-    const result = await runtime.commands.run(spec, this.name, this.options);
-    const content = runtime.output.limitResult(toResultContent(result));
+    const commands = new CommandService({
+      cancellation: context.cancellation,
+      getDefaultCwd: this.getCanonicalWorkspaceRoot,
+      resolveCwd: (cwd, cwdToolName) =>
+        resolvePathInWorkspace(cwd, this.policy.workspaceRoot, { toolName: cwdToolName }),
+    });
+    const result = await commands.run(spec, this.name, this.commandPolicy);
+    context.cancellation.throwIfAborted();
+    const content = this.output.limitResult(toResultContent(result));
 
     return {
       content: content.text,

@@ -1,5 +1,16 @@
 import type { ModelToolDefinition, ModelToolInput } from '../models/types.js';
-import type { ToolRuntimeServices } from './runtime/index.js';
+import type { ToolExecutionContext } from './runtime/index.js';
+
+export type ToolInputSchema = {
+  type: 'object';
+  properties?: Record<string, unknown>;
+  required?: string[];
+  [key: string]: unknown;
+};
+
+export type ToolInput = {
+  [key: string]: unknown;
+};
 
 export type ToolResultData = Record<string, unknown>;
 
@@ -18,5 +29,5 @@ export type ToolExecutionResult = {
 };
 
 export interface Tool extends ModelToolDefinition {
-  execute(input: ModelToolInput, runtime: ToolRuntimeServices): Promise<ToolExecuteResult>;
+  execute(input: ModelToolInput, context: ToolExecutionContext): Promise<ToolExecuteResult>;
 }

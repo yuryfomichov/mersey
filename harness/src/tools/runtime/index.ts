@@ -1,19 +1,12 @@
-import { realpath } from 'node:fs/promises';
-
 import type { ModelToolCall, ModelToolDefinition } from '../../models/types.js';
 import type { Tool, ToolExecutionResult } from '../types.js';
 import { CancellationService } from './cancellation/cancellation-service.js';
-import { CommandService } from './commands/command-service.js';
-import { FileService } from './files/file-service.js';
-import { resolvePathInWorkspace } from './files/path-utils.js';
-import { OutputService } from './output/output-service.js';
 import type {
-  ToolExecutionPolicy,
+  ToolExecutionContext,
   ToolRuntime,
   ToolRuntimeFactory,
   ToolRuntimeFactoryOptions,
   ToolRuntimeOptions,
-  ToolRuntimeServices,
 } from './types.js';
 
 function getToolDefinitions(tools: Tool[]): ModelToolDefinition[] | undefined {
@@ -35,7 +28,7 @@ function getToolMap(tools: Tool[]): Map<string, Tool> {
 async function executeToolCall(
   toolCall: ModelToolCall,
   tools: Map<string, Tool>,
-  runtimeServices: ToolRuntimeServices,
+  executionContext: ToolExecutionContext,
 ): Promise<ToolExecutionResult> {
   const tool = tools.get(toolCall.name);
 
@@ -49,7 +42,7 @@ async function executeToolCall(
   }
 
   try {
-    const result = await tool.execute(toolCall.input, runtimeServices);
+    const result = await tool.execute(toolCall.input, executionContext);
 
     return {
       content: result.content,
@@ -68,51 +61,21 @@ async function executeToolCall(
   }
 }
 
-export function createToolRuntimeFactory({ policy, tools }: ToolRuntimeFactoryOptions): ToolRuntimeFactory {
-  let canonicalWorkspaceRoot: string | null = null;
-  let canonicalWorkspaceRootPromise: Promise<string> | null = null;
-  const getCanonicalWorkspaceRoot = async (): Promise<string> => {
-    if (canonicalWorkspaceRoot) {
-      return canonicalWorkspaceRoot;
-    }
-
-    if (!canonicalWorkspaceRootPromise) {
-      canonicalWorkspaceRootPromise = realpath(policy.workspaceRoot)
-        .then((resolvedWorkspaceRoot) => {
-          canonicalWorkspaceRoot = resolvedWorkspaceRoot;
-          return resolvedWorkspaceRoot;
-        })
-        .finally(() => {
-          canonicalWorkspaceRootPromise = null;
-        });
-    }
-
-    return canonicalWorkspaceRootPromise;
-  };
-
-  const files = new FileService({ getCanonicalWorkspaceRoot, policy });
-  const output = new OutputService(policy);
+export function createToolRuntimeFactory({ tools }: ToolRuntimeFactoryOptions): ToolRuntimeFactory {
   const toolDefinitions = getToolDefinitions(tools);
   const toolMap = getToolMap(tools);
 
   const toolRuntimeFactory = (options: { signal?: AbortSignal } = {}): ToolRuntime => {
     const cancellation = new CancellationService({ signal: options.signal });
 
-    const runtimeServices: ToolRuntimeServices = {
+    const executionContext: ToolExecutionContext = {
       cancellation,
-      commands: new CommandService({
-        cancellation,
-        getDefaultCwd: getCanonicalWorkspaceRoot,
-        resolveCwd: (cwd, cwdToolName) => resolvePathInWorkspace(cwd, policy.workspaceRoot, { toolName: cwdToolName }),
-      }),
-      files,
-      output,
     };
 
     return {
-      ...runtimeServices,
+      ...executionContext,
       executeToolCall(toolCall: ModelToolCall): Promise<ToolExecutionResult> {
-        return executeToolCall(toolCall, toolMap, runtimeServices);
+        return executeToolCall(toolCall, toolMap, executionContext);
       },
       toolDefinitions,
     };
@@ -123,16 +86,16 @@ export function createToolRuntimeFactory({ policy, tools }: ToolRuntimeFactoryOp
   return toolRuntimeFactory;
 }
 
-export function createToolRuntime({ policy, signal, tools }: ToolRuntimeOptions): ToolRuntime {
-  return createToolRuntimeFactory({ policy, tools })({ signal });
+export function createToolRuntime({ signal, tools }: ToolRuntimeOptions): ToolRuntime {
+  return createToolRuntimeFactory({ tools })({ signal });
 }
 
 export type {
+  ToolExecutionContext,
   ToolRuntime,
   ToolRuntimeFactory,
   ToolRuntimeFactoryOptions,
   ToolRuntimeOptions,
-  ToolRuntimeServices,
   ToolExecutionPolicy,
   ToolFileAccess,
   ToolOutputLimitResult,

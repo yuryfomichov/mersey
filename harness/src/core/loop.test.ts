@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { ReadFileTool } from '../../tools/read-file.js';
 import { HarnessEventEmitter, type HarnessEventSink } from '../events/emitter.js';
 import { HarnessEventReporter } from '../events/reporter.js';
 import type { HarnessEvent } from '../events/types.js';
@@ -11,8 +12,7 @@ import type { HarnessPlugin } from '../plugins/types.js';
 import { FakeProvider } from '../providers/fake.js';
 import type { Message, SessionState } from '../sessions/types.js';
 import { withTempDir, writeWorkspaceFiles } from '../test/test-helpers.js';
-import { ReadFileTool } from '../tools/read-file.js';
-import { createToolRuntimeFactory, type ToolExecutionPolicy } from '../tools/runtime/index.js';
+import { createToolRuntimeFactory } from '../tools/runtime/index.js';
 import type { Tool } from '../tools/types.js';
 import { streamLoop } from './loop.js';
 
@@ -92,7 +92,6 @@ function createLoopInput(input: {
   sessionId: string;
   stream?: boolean;
   systemPrompt?: string;
-  toolExecutionPolicy: ToolExecutionPolicy;
   tools: Tool[];
 }): Parameters<typeof streamLoop>[0] {
   const reporter = createReporter({
@@ -115,7 +114,7 @@ function createLoopInput(input: {
     provider: input.provider,
     stream: input.stream ?? false,
     systemPrompt: input.systemPrompt,
-    toolRuntimeFactory: createToolRuntimeFactory({ policy: input.toolExecutionPolicy, tools: [...input.tools] }),
+    toolRuntimeFactory: createToolRuntimeFactory({ tools: [...input.tools] }),
   };
 }
 
@@ -146,7 +145,6 @@ test('streamLoop forwards systemPrompt to provider on every generate call includ
       provider,
       sessionId: session.id,
       systemPrompt: 'You are a helpful assistant.',
-      toolExecutionPolicy: { workspaceRoot: process.cwd() },
       tools: [],
     }),
   );
@@ -167,7 +165,6 @@ test('streamLoop omits systemPrompt from provider request when not provided', as
       history: session.messages,
       provider,
       sessionId: session.id,
-      toolExecutionPolicy: { workspaceRoot: process.cwd() },
       tools: [],
     }),
   );
@@ -188,7 +185,6 @@ test('streamLoop normalizes empty-string systemPrompt to undefined', async () =>
       provider,
       sessionId: session.id,
       systemPrompt: '   ',
-      toolExecutionPolicy: { workspaceRoot: process.cwd() },
       tools: [],
     }),
   );
@@ -223,7 +219,6 @@ test('streamLoop does not persist assistant tool calls when the tool iteration c
             },
           }),
           sessionId: session.id,
-          toolExecutionPolicy: { workspaceRoot: process.cwd() },
           tools: [],
         }),
       ),
@@ -250,7 +245,6 @@ test('streamLoop swallows event sink failures', async () => {
       eventSink: sink,
       provider,
       sessionId: session.id,
-      toolExecutionPolicy: { workspaceRoot: process.cwd() },
       tools: [],
     }),
   );
@@ -279,7 +273,6 @@ test('streamLoop owns fallback text when provider returns an empty non-tool repl
       history: session.messages,
       provider,
       sessionId: session.id,
-      toolExecutionPolicy: { workspaceRoot: process.cwd() },
       tools: [],
     }),
   );
@@ -328,8 +321,7 @@ test('streamLoop wires tool results back into the next provider request', async 
         history: [],
         provider,
         sessionId: 'tool-session',
-        toolExecutionPolicy: { workspaceRoot: rootDir },
-        tools: [new ReadFileTool()],
+        tools: [new ReadFileTool({ policy: { workspaceRoot: rootDir } })],
       }),
     );
 
@@ -389,8 +381,7 @@ test('streamLoop degrades malformed tool input into a normal tool error', async 
       history: [],
       provider,
       sessionId: 'tool-error-session',
-      toolExecutionPolicy: { workspaceRoot: process.cwd() },
-      tools: [new ReadFileTool()],
+      tools: [new ReadFileTool({ policy: { workspaceRoot: process.cwd() } })],
     }),
   );
 
@@ -433,7 +424,6 @@ test('streamLoop yields assistant deltas and final message while events stay coa
       provider,
       sessionId: session.id,
       stream: true,
-      toolExecutionPolicy: { workspaceRoot: process.cwd() },
       tools: [],
     }),
   );
@@ -512,7 +502,6 @@ test('streamLoop yields assistant_message_completed before tool execution after 
       provider,
       sessionId: session.id,
       stream: true,
-      toolExecutionPolicy: { workspaceRoot: process.cwd() },
       tools: [],
     }),
   );
@@ -563,7 +552,6 @@ test('streamLoop fails when streamed generation throws before any response compl
         provider,
         sessionId: session.id,
         stream: true,
-        toolExecutionPolicy: { workspaceRoot: process.cwd() },
         tools: [],
       }),
     ),
@@ -591,7 +579,6 @@ test('streamLoop fails when streamed generation emits only empty deltas before f
         provider,
         sessionId: session.id,
         stream: true,
-        toolExecutionPolicy: { workspaceRoot: process.cwd() },
         tools: [],
       }),
     ),
@@ -622,7 +609,6 @@ test('streamLoop keeps a completed streamed response when provider teardown fail
       provider,
       sessionId: session.id,
       stream: true,
-      toolExecutionPolicy: { workspaceRoot: process.cwd() },
       tools: [],
     }),
   );
@@ -651,7 +637,6 @@ test('streamLoop rejects multiple completed responses from one provider turn', a
         provider,
         sessionId: session.id,
         stream: true,
-        toolExecutionPolicy: { workspaceRoot: process.cwd() },
         tools: [],
       }),
     ),
@@ -682,7 +667,6 @@ test('streamLoop provider deny path hides non-exposed policy reason and reports 
         ],
         provider: new FakeProvider(),
         sessionId: 'provider-deny-private',
-        toolExecutionPolicy: { workspaceRoot: process.cwd() },
         tools: [],
       }),
     ),
@@ -718,7 +702,6 @@ test('streamLoop provider deny path can expose reason when explicitly allowed', 
         ],
         provider: new FakeProvider(),
         sessionId: 'provider-deny-exposed',
-        toolExecutionPolicy: { workspaceRoot: process.cwd() },
         tools: [],
       }),
     ),

@@ -80,7 +80,7 @@ pnpm cli -- --provider openai --cache
 pnpm ftv -- --provider openai --session-store filesystem --sessions-dir tmp/sessions
 ```
 
-`apps/cli` and `apps/ftv` both register a small set of tools from `harness` for file and command access, with app-side setup shared through `apps/helpers/cli/`.
+`apps/cli` and `apps/ftv` both register a small set of tools from `harness/tools/index.ts` for file and command access, with app-side setup shared through `apps/helpers/cli/`.
 
 ## Architecture Summary
 

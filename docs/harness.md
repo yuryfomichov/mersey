@@ -11,8 +11,9 @@ Key exports include:
 - `createHarness`
 - `Session`, `MemorySessionStore`, `FilesystemSessionStore`
 - provider types like `ProviderDefinition`, `ProviderName`, and `ModelProvider`
-- built-in tools like `ReadFileTool`, `WriteFileTool`, `EditFileTool`, `RunCommandTool`
 - event and plugin types
+
+Built-in tools are exported from `harness/tools/index.ts`.
 
 ## Minimal Example
 
@@ -99,29 +100,27 @@ Tools are registered as tool instances.
 Example:
 
 ```ts
-import { createHarness, EditFileTool, ReadFileTool, RunCommandTool, WriteFileTool } from '../harness/index.js';
+import { createHarness } from '../harness/index.js';
+import { EditFileTool, ReadFileTool, RunCommandTool, WriteFileTool } from '../harness/tools/index.js';
 
 const harness = createHarness({
   provider: { name: 'fake' },
-  toolExecutionPolicy: {
-    maxToolResultBytes: 16 * 1024,
-    workspaceRoot: process.cwd(),
-  },
   tools: [
-    new ReadFileTool(),
-    new WriteFileTool(),
-    new EditFileTool(),
+    new ReadFileTool({ policy: { maxToolResultBytes: 16 * 1024, workspaceRoot: process.cwd() } }),
+    new WriteFileTool({ policy: { maxToolResultBytes: 16 * 1024, workspaceRoot: process.cwd() } }),
+    new EditFileTool({ policy: { maxToolResultBytes: 16 * 1024, workspaceRoot: process.cwd() } }),
     new RunCommandTool({
       commandAllowlist: ['git', 'ls', 'pwd'],
       defaultTimeoutMs: 5_000,
       maxOutputBytes: 16 * 1024,
       maxTimeoutMs: 15_000,
+      policy: { maxToolResultBytes: 16 * 1024, workspaceRoot: process.cwd() },
     }),
   ],
 });
 ```
 
-The tool runtime enforces workspace and output limits through `harness/src/tools/runtime/`.
+Each tool owns its own runtime services and enforces workspace and output limits.
 
 ## Streaming
 
