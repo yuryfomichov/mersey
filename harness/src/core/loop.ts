@@ -99,6 +99,10 @@ function appendMessage(messages: Message[], message: Message): void {
   messages.push(message);
 }
 
+function toToolInputRecord(input: unknown): Record<string, unknown> {
+  return input && typeof input === 'object' && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
+}
+
 /**
  * Wraps a provider's streaming response in a simple async generator interface.
  *
@@ -262,9 +266,10 @@ export async function* streamLoop({
       const providerDecision = await pluginRunner.runBeforeProviderCall(providerCtx);
 
       if (providerDecision.continue === false) {
+        currentErrorType = 'provider';
         const exposeToModel = providerDecision.exposeToModel ?? false;
         observer.providerBlocked(currentIteration, providerDecision.reason, exposeToModel);
-        throw new Error(providerDecision.reason);
+        throw new Error(exposeToModel ? providerDecision.reason : 'Provider request blocked by policy.');
       }
 
       observer.providerRequested(currentIteration, transcript, provider, toolRuntime.toolDefinitions);
@@ -357,7 +362,7 @@ export async function* streamLoop({
           sessionId: observer.getSessionId(),
           toolCall: {
             id: toolCall.id,
-            input: toolCall.input as Record<string, unknown>,
+            input: toToolInputRecord(toolCall.input),
             name: toolCall.name,
           },
           turnId: observer.getTurnId(),

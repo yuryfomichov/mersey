@@ -7,7 +7,13 @@ import type { ModelResponse, ModelToolCall, ModelToolDefinition } from '../model
 import type { Message } from '../sessions/types.js';
 import type { ToolExecutionResult } from '../tools/types.js';
 import { HarnessEventPublisher } from './publisher.js';
-import { getDebugToolArgs, getResultDataKeys, getSafeToolArgs, sanitizeErrorMessage } from './telemetry.js';
+import {
+  getDebugToolArgs,
+  getResultDataKeys,
+  getSafeToolArgs,
+  sanitizeErrorMessage,
+  sanitizeHookErrorMessage,
+} from './telemetry.js';
 import type { HarnessEvent, HarnessEventListener, HookErrorEvent, TurnFailedEvent } from './types.js';
 
 export type HarnessObserverOptions = {
@@ -245,8 +251,10 @@ export class HarnessObserver {
   }
 
   hookError(pluginName: string, hookName: HookErrorEvent['hookName'], error: unknown): void {
+    void error;
+
     this.publishEvent({
-      errorMessage: error instanceof Error ? error.message : String(error),
+      errorMessage: sanitizeHookErrorMessage(),
       hookName,
       pluginName,
       sessionId: this.getSessionId(),

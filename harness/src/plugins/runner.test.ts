@@ -324,7 +324,7 @@ test('PluginRunner converts async onEvent errors into hook_error events', async 
   assert.equal(hookError?.type, 'hook_error');
   assert.equal(hookError?.type === 'hook_error' ? hookError.pluginName : undefined, 'plugin-a');
   assert.equal(hookError?.type === 'hook_error' ? hookError.hookName : undefined, 'onEvent');
-  assert.equal(hookError?.type === 'hook_error' ? hookError.errorMessage.includes('async plugin error') : false, true);
+  assert.equal(hookError?.type === 'hook_error' ? hookError.errorMessage : undefined, 'Plugin hook failed.');
 });
 
 test('PluginRunner avoids recursive hook_error storms for the same plugin', async () => {

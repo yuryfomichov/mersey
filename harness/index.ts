@@ -3,6 +3,7 @@ export type { CreateHarnessOptions, Harness } from './src/harness.js';
 
 export type { HarnessEvent, HarnessEventListener } from './src/events/types.js';
 export type { HarnessPlugin, HookDecision } from './src/plugins/types.js';
+export type { BeforeProviderCallContext } from './src/plugins/types.js';
 export type { BeforeToolCallContext } from './src/plugins/types.js';
 
 export { createJsonlFileLogger } from './src/logger/jsonl.js';
