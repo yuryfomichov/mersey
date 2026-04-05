@@ -1,4 +1,4 @@
-const DEFAULT_TOOL_RESULT_BYTES = 16 * 1024;
+const DEFAULT_TOOL_RESULT_BYTES = 32 * 1024;
 
 type LimitTextOptions = {
   truncationMarker?: string;
