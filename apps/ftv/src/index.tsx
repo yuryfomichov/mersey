@@ -10,6 +10,7 @@ import {
 } from '../../../harness/index.js';
 import { getBooleanFlag, getProviderName, getSessionId } from '../../helpers/cli/args.js';
 import { createDefaultTools, getProviderModel, getToolExecutionPolicy } from '../../helpers/cli/harness-config.js';
+import { createCliLoggers } from '../../helpers/cli/logging.js';
 import { getProviderDefinition } from '../../helpers/cli/provider-config.js';
 import {
   createSession,
@@ -17,6 +18,15 @@ import {
   getSessionStoreDefinition,
   type SessionStoreDefinition,
 } from '../../helpers/cli/session-store.js';
+import { createAwaitableToolApprovalPlugin, type ToolApprovalState } from './tool-approval-plugin.js';
+
+const approvalState: ToolApprovalState = {
+  decision: 'pending',
+  toolName: '',
+  toolCallId: '',
+};
+
+const toolApprovalPlugin = createAwaitableToolApprovalPlugin(approvalState, 1000, 60000);
 
 type AppState = {
   messages: Message[];
@@ -152,9 +162,15 @@ const ThinkingIndicator = ({ tool }: { tool: string | null }) => (
   </Box>
 );
 
-const StatusBar = ({ turnCount }: { turnCount: number }) => (
+const StatusBar = ({ turnCount, toolName }: { turnCount: number; toolName?: string }) => (
   <Box>
     <Text dimColor>turn: {turnCount} | q to quit</Text>
+    {toolName && (
+      <>
+        <Text dimColor> | </Text>
+        <Text color='yellow'>waiting: {toolName}</Text>
+      </>
+    )}
   </Box>
 );
 
@@ -231,6 +247,14 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
     input: '',
   });
 
+  const [, forceUpdate] = useState(0);
+
+  useEffect(() => {
+    if (!state.isThinking) return;
+    const interval = setInterval(() => forceUpdate((n) => n + 1), 200);
+    return () => clearInterval(interval);
+  }, [state.isThinking]);
+
   const [harness, setHarness] = useState<Harness | null>(null);
   const [ready, setReady] = useState(false);
   const [providerModel, setProviderModel] = useState<string | null>(null);
@@ -246,113 +270,129 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
     const session = createSession(sessionStoreDefinition, sessionId);
     const providerDef = getProviderDefinition(providerName, process.env, cache);
 
-    const h = createHarness({
-      debug,
-      provider: providerDef,
-      session,
-      toolExecutionPolicy: getToolExecutionPolicy(),
-      tools: createDefaultTools({ commandAllowlist: FTV_COMMAND_ALLOWLIST }),
-    });
-
-    setHarness(h);
-    setProviderModel(getProviderModel(providerDef));
-
-    let disposed = false;
-
-    const hydrateMessages = () => {
-      setState((s) => ({
-        ...s,
-        messages: [...session.messages],
-      }));
-    };
-
-    const updateUsage = async () => {
-      const [usageSnapshot, contextSize] = await Promise.all([h.session.getUsage(), h.session.getContextSize()]);
-
-      if (disposed) {
-        return;
-      }
-
-      setUsage({
-        cachedInputTokens: usageSnapshot.cachedInputTokens,
-        cacheWriteInputTokens: usageSnapshot.cacheWriteInputTokens,
-        contextSize,
-        outputTokens: usageSnapshot.outputTokens,
-        uncachedInputTokens: usageSnapshot.uncachedInputTokens,
+    createCliLoggers(sessionId).then(({ loggers }) => {
+      const h = createHarness({
+        debug,
+        loggers,
+        plugins: [toolApprovalPlugin],
+        provider: providerDef,
+        session,
+        toolExecutionPolicy: getToolExecutionPolicy(),
+        tools: createDefaultTools({ commandAllowlist: FTV_COMMAND_ALLOWLIST }),
       });
-    };
 
-    void h.session
-      .ensure()
-      .then(() => {
-        if (disposed) {
-          return;
-        }
+      setHarness(h);
+      setProviderModel(getProviderModel(providerDef));
 
-        hydrateMessages();
-        return updateUsage();
-      })
-      .catch((error: unknown) => {
-        if (disposed) {
-          return;
-        }
+      let disposed = false;
 
+      const hydrateMessages = () => {
         setState((s) => ({
           ...s,
-          isThinking: false,
-          streamingContent: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          messages: [...session.messages],
         }));
-      })
-      .finally(() => {
-        if (!disposed) {
-          setReady(true);
+      };
+
+      const updateUsage = async () => {
+        const [usageSnapshot, contextSize] = await Promise.all([h.session.getUsage(), h.session.getContextSize()]);
+
+        if (disposed) {
+          return;
+        }
+
+        setUsage({
+          cachedInputTokens: usageSnapshot.cachedInputTokens,
+          cacheWriteInputTokens: usageSnapshot.cacheWriteInputTokens,
+          contextSize,
+          outputTokens: usageSnapshot.outputTokens,
+          uncachedInputTokens: usageSnapshot.uncachedInputTokens,
+        });
+      };
+
+      void h.session
+        .ensure()
+        .then(() => {
+          if (disposed) {
+            return;
+          }
+
+          hydrateMessages();
+          return updateUsage();
+        })
+        .catch((error: unknown) => {
+          if (disposed) {
+            return;
+          }
+
+          setState((s) => ({
+            ...s,
+            isThinking: false,
+            streamingContent: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          }));
+        })
+        .finally(() => {
+          if (!disposed) {
+            setReady(true);
+          }
+        });
+
+      const unsubscribe = h.subscribe((event: HarnessEvent) => {
+        switch (event.type) {
+          case 'turn_started':
+            setState((s) => ({
+              ...s,
+              isThinking: true,
+              streamingContent: '',
+            }));
+            break;
+          case 'tool_started':
+            setState((s) => ({ ...s, currentTool: event.toolName }));
+            break;
+          case 'tool_finished':
+            setState((s) => ({ ...s, currentTool: null }));
+            break;
+          case 'turn_finished':
+            setState((s) => ({
+              ...s,
+              isThinking: false,
+              streamingContent: '',
+              turnCount: s.turnCount + 1,
+            }));
+            void updateUsage();
+            break;
+          case 'turn_failed':
+            setState((s) => ({
+              ...s,
+              isThinking: false,
+              streamingContent: `Error: ${event.errorMessage}`,
+            }));
+            void updateUsage();
+            break;
         }
       });
 
-    const unsubscribe = h.subscribe((event: HarnessEvent) => {
-      switch (event.type) {
-        case 'turn_started':
-          setState((s) => ({
-            ...s,
-            isThinking: true,
-            streamingContent: '',
-          }));
-          break;
-        case 'tool_started':
-          setState((s) => ({ ...s, currentTool: event.toolName }));
-          break;
-        case 'tool_finished':
-          setState((s) => ({ ...s, currentTool: null }));
-          break;
-        case 'turn_finished':
-          setState((s) => ({
-            ...s,
-            isThinking: false,
-            streamingContent: '',
-            turnCount: s.turnCount + 1,
-          }));
-          void updateUsage();
-          break;
-        case 'turn_failed':
-          setState((s) => ({
-            ...s,
-            isThinking: false,
-            streamingContent: `Error: ${event.errorMessage}`,
-          }));
-          void updateUsage();
-          break;
-      }
+      return () => {
+        disposed = true;
+        unsubscribe();
+      };
     });
-
-    return () => {
-      disposed = true;
-      unsubscribe();
-    };
   }, [cache, debug, providerName, sessionId, sessionStoreDefinition]);
 
   useInput((input, key) => {
     if (input === 'q' || input === 'Q') {
       exit();
+    }
+
+    if ((input === 'y' || input === 'Y') && state.isThinking && approvalState.decision === 'pending') {
+      approvalState.decision = 'approved';
+      forceUpdate((n) => n + 1);
+      return;
+    }
+
+    if ((input === 'n' || input === 'N') && state.isThinking && approvalState.decision === 'pending') {
+      approvalState.decision = 'denied';
+      forceUpdate((n) => n + 1);
+      return;
     }
 
     if (key.return && ready && state.input.trim() && !state.isThinking && harness) {
@@ -428,7 +468,10 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
       />
 
       <Box flexDirection='column' flexShrink={0} marginTop={1}>
-        <StatusBar turnCount={state.turnCount} />
+        <StatusBar
+          turnCount={state.turnCount}
+          toolName={approvalState.decision === 'pending' ? approvalState.toolName : undefined}
+        />
         <InputPanel input={state.input} isThinking={state.isThinking} ready={ready} />
       </Box>
     </Box>

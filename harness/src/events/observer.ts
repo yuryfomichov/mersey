@@ -20,7 +20,15 @@ export type HarnessObserverOptions = {
 type ErrorType = TurnFailedEvent['errorType'];
 type ProviderMetadata = Pick<ModelProvider, 'model' | 'name'>;
 
-function getMessageCountsByRole(messages: Message[]): {
+function getToolCallNames(toolCalls: { name: string }[] | undefined): string[] {
+  return toolCalls?.map((toolCall) => toolCall.name) ?? [];
+}
+
+function getToolDefinitionNames(toolDefinitions: ModelToolDefinition[] | undefined): string[] {
+  return toolDefinitions?.map((tool) => tool.name) ?? [];
+}
+
+export function getMessageCountsByRole(messages: readonly Message[]): {
   assistant: number;
   tool: number;
   user: number;
@@ -34,17 +42,9 @@ function getMessageCountsByRole(messages: Message[]): {
   );
 }
 
-function getToolCallNames(toolCalls: { name: string }[] | undefined): string[] {
-  return toolCalls?.map((toolCall) => toolCall.name) ?? [];
-}
-
-function getToolDefinitionNames(toolDefinitions: ModelToolDefinition[] | undefined): string[] {
-  return toolDefinitions?.map((tool) => tool.name) ?? [];
-}
-
 export class HarnessObserver {
   private readonly debug: boolean;
-  private readonly getSessionId: () => string;
+  readonly getSessionId: () => string;
   private readonly logger: HarnessLogger | undefined;
   private readonly providerName: string;
   private readonly runId = randomUUID();
@@ -218,6 +218,44 @@ export class HarnessObserver {
     this.emitToolTrace('tool_execution_started', iteration, toolCall, {});
   }
 
+  toolBlocked(iteration: number, toolCall: ModelToolCall, reason: string, exposeToModel: boolean): void {
+    this.publishEvent({
+      exposeToModel,
+      iteration,
+      reason,
+      sessionId: this.getSessionId(),
+      timestamp: new Date().toISOString(),
+      toolCallId: toolCall.id,
+      toolName: toolCall.name,
+      turnId: this.getTurnId(),
+      type: 'tool_blocked',
+    });
+  }
+
+  providerBlocked(iteration: number, reason: string, exposeToModel: boolean): void {
+    this.publishEvent({
+      exposeToModel,
+      iteration,
+      reason,
+      sessionId: this.getSessionId(),
+      timestamp: new Date().toISOString(),
+      turnId: this.getTurnId(),
+      type: 'provider_blocked',
+    });
+  }
+
+  hookError(pluginName: string, hookName: 'beforeProviderCall' | 'beforeToolCall', error: unknown): void {
+    this.publishEvent({
+      errorMessage: error instanceof Error ? error.message : String(error),
+      hookName,
+      pluginName,
+      sessionId: this.getSessionId(),
+      timestamp: new Date().toISOString(),
+      turnId: this.getTurnId(),
+      type: 'hook_error',
+    });
+  }
+
   turnFailed(iteration: number, errorType: ErrorType, error: unknown): void {
     this.publishEvent({
       durationMs: this.getDurationMs(),
@@ -265,6 +303,10 @@ export class HarnessObserver {
     return this.eventPublisher.subscribe(listener);
   }
 
+  getRunId(): string {
+    return this.runId;
+  }
+
   private clearTurn(): void {
     this.currentTurnId = null;
     this.currentTurnStartTime = null;
@@ -298,7 +340,7 @@ export class HarnessObserver {
     return Date.now() - this.getTurnStartTime();
   }
 
-  private getTurnId(): string {
+  getTurnId(): string {
     if (!this.currentTurnId) {
       this.currentTurnId = randomUUID();
     }

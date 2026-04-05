@@ -104,6 +104,7 @@ function createLoopInput(input: {
       sessionId: input.sessionId,
     }),
     options: input.options,
+    plugins: [],
     provider: input.provider,
     stream: input.stream ?? false,
     systemPrompt: input.systemPrompt,

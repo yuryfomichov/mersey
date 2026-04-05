@@ -52,6 +52,7 @@ function createStreamTurnFactory(input: {
     session,
     streamTurn: createTurnStreamFactory({
       observer,
+      plugins: [],
       provider,
       session,
       toolRuntimeFactory: createToolRuntimeFactory({
@@ -108,6 +109,7 @@ test('createTurnStreamFactory rejects iteration when the background turn throws 
       logger: undefined,
       providerName: provider.name,
     }),
+    plugins: [],
     provider,
     session,
     toolRuntimeFactory: createToolRuntimeFactory({ policy: { workspaceRoot: process.cwd() }, tools: [] }),

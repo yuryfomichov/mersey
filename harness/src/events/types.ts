@@ -8,9 +8,12 @@ export type HarnessEventBase = {
     | 'turn_started'
     | 'provider_requested'
     | 'provider_responded'
+    | 'provider_blocked'
     | 'tool_requested'
     | 'tool_started'
     | 'tool_finished'
+    | 'tool_blocked'
+    | 'hook_error'
     | 'turn_finished'
     | 'turn_failed';
 };
@@ -102,6 +105,29 @@ export type ToolFinishedEvent = HarnessEventBase & {
   toolName: string;
 };
 
+export type ToolBlockedEvent = HarnessEventBase & {
+  type: 'tool_blocked';
+  iteration: number;
+  reason: string;
+  exposeToModel: boolean;
+  toolCallId: string;
+  toolName: string;
+};
+
+export type ProviderBlockedEvent = HarnessEventBase & {
+  type: 'provider_blocked';
+  iteration: number;
+  reason: string;
+  exposeToModel: boolean;
+};
+
+export type HookErrorEvent = HarnessEventBase & {
+  type: 'hook_error';
+  pluginName: string;
+  hookName: 'beforeProviderCall' | 'beforeToolCall';
+  errorMessage: string;
+};
+
 export type TurnFinishedEvent = HarnessEventBase & {
   type: 'turn_finished';
   durationMs: number;
@@ -121,9 +147,12 @@ export type TurnFailedEvent = HarnessEventBase & {
 export type HarnessEvent =
   | ProviderRequestedEvent
   | ProviderRespondedEvent
+  | ProviderBlockedEvent
   | ToolFinishedEvent
   | ToolRequestedEvent
   | ToolStartedEvent
+  | ToolBlockedEvent
+  | HookErrorEvent
   | TurnFailedEvent
   | TurnFinishedEvent
   | TurnStartedEvent;
