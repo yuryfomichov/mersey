@@ -24,7 +24,7 @@ function truncateToBytes(value: string, maxBytes: number): string {
   while (slice.length > 0) {
     const text = slice.toString('utf8');
 
-    if (!text.includes('\ufffd')) {
+    if (!text.endsWith('\ufffd')) {
       return text;
     }
 
