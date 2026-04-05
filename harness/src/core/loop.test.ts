@@ -7,6 +7,7 @@ import { HarnessEventPublisher } from '../events/publisher.js';
 import type { HarnessEvent } from '../events/types.js';
 import type { ModelProvider } from '../models/provider.js';
 import { createEmptyModelUsage } from '../models/types.js';
+import { createPluginRunner } from '../plugins/runner.js';
 import { FakeProvider } from '../providers/fake.js';
 import type { Message, SessionState } from '../sessions/types.js';
 import { withTempDir, writeWorkspaceFiles } from '../test/test-helpers.js';
@@ -94,17 +95,23 @@ function createLoopInput(input: {
   toolExecutionPolicy: ToolExecutionPolicy;
   tools: Tool[];
 }): Parameters<typeof streamLoop>[0] {
+  const observer = createObserver({
+    debug: input.debug,
+    eventPublisher: input.eventPublisher,
+    provider: input.provider,
+    sessionId: input.sessionId,
+  });
+
   return {
     content: input.content,
     history: input.history,
-    observer: createObserver({
-      debug: input.debug,
-      eventPublisher: input.eventPublisher,
-      provider: input.provider,
-      sessionId: input.sessionId,
-    }),
+    observer,
     options: input.options,
-    plugins: [],
+    pluginRunner: createPluginRunner({
+      observer,
+      plugins: [],
+      runId: observer.getRunId(),
+    }),
     provider: input.provider,
     stream: input.stream ?? false,
     systemPrompt: input.systemPrompt,

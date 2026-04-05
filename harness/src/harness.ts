@@ -5,6 +5,7 @@ import type { HarnessEventListener } from './events/types.js';
 import { createFanoutLogger } from './logger/fanout.js';
 import type { HarnessLogger } from './logger/types.js';
 import type { ModelProvider } from './models/provider.js';
+import { createPluginRunner } from './plugins/runner.js';
 import type { HarnessPlugin } from './plugins/types.js';
 import { createProvider, type ProviderDefinition } from './providers/factory.js';
 import { MemorySessionStore } from './sessions/memory-store.js';
@@ -57,9 +58,14 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
     logger: createFanoutLogger(options.loggers),
     providerName: resolvedProvider.name,
   });
-  const streamTurn = createTurnStreamFactory({
+  const pluginRunner = createPluginRunner({
     observer,
     plugins: options.plugins ?? [],
+    runId: observer.getRunId(),
+  });
+  const streamTurn = createTurnStreamFactory({
+    observer,
+    pluginRunner,
     provider: resolvedProvider,
     session,
     systemPrompt: options.systemPrompt,

@@ -1,4 +1,5 @@
 import type { HarnessObserver } from '../events/observer.js';
+import type { HarnessEvent } from '../events/types.js';
 import type {
   BeforeProviderCallContext,
   BeforeToolCallContext,
@@ -16,26 +17,21 @@ export type PluginRunnerOptions = {
 };
 
 export class PluginRunner {
+  private readonly observer: HarnessObserver;
+  private readonly pluginsWithEvents: HarnessPlugin[];
   private readonly plugins: HarnessPlugin[];
   private readonly runId: string;
 
   constructor(options: PluginRunnerOptions) {
+    this.observer = options.observer;
     this.plugins = options.plugins;
+    this.pluginsWithEvents = this.plugins.filter((plugin) => Boolean(plugin.onEvent));
     this.runId = options.runId;
 
-    for (const plugin of this.plugins) {
-      if (plugin.onEvent) {
-        const pluginCtx: PluginEventContext = {
-          pluginName: plugin.name,
-          runId: this.runId,
-        };
-        const observer = options.observer;
-        observer.subscribe((event) => {
-          if (plugin.onEvent) {
-            void plugin.onEvent(event, pluginCtx);
-          }
-        });
-      }
+    if (this.pluginsWithEvents.length > 0) {
+      this.observer.subscribe((event) => {
+        this.deliverEvent(event);
+      });
     }
   }
 
@@ -51,7 +47,8 @@ export class PluginRunner {
         if (decision.continue === false) {
           return decision;
         }
-      } catch {
+      } catch (error: unknown) {
+        this.observer.hookError(plugin.name, 'beforeProviderCall', error);
         return {
           continue: false,
           reason: SANITIZED_ERROR_REASON,
@@ -74,7 +71,8 @@ export class PluginRunner {
         if (decision.continue === false) {
           return decision;
         }
-      } catch {
+      } catch (error: unknown) {
+        this.observer.hookError(plugin.name, 'beforeToolCall', error);
         return {
           continue: false,
           reason: SANITIZED_ERROR_REASON,
@@ -83,6 +81,47 @@ export class PluginRunner {
     }
 
     return { continue: true };
+  }
+
+  private deliverEvent(event: HarnessEvent): void {
+    for (const plugin of this.pluginsWithEvents) {
+      const pluginCtx: PluginEventContext = {
+        pluginName: plugin.name,
+        runId: this.runId,
+      };
+
+      this.runEventHook(plugin, pluginCtx, event);
+    }
+  }
+
+  private runEventHook(plugin: HarnessPlugin, pluginCtx: PluginEventContext, event: HarnessEvent): void {
+    if (!plugin.onEvent) {
+      return;
+    }
+
+    try {
+      const hookResult = plugin.onEvent(event, pluginCtx);
+
+      if (hookResult && typeof (hookResult as PromiseLike<unknown>).then === 'function') {
+        void Promise.resolve(hookResult).catch((error: unknown) => {
+          if (this.shouldEmitHookError(event)) {
+            this.observer.hookError(plugin.name, 'onEvent', error);
+          }
+        });
+      }
+    } catch (error: unknown) {
+      if (this.shouldEmitHookError(event)) {
+        this.observer.hookError(plugin.name, 'onEvent', error);
+      }
+    }
+  }
+
+  private shouldEmitHookError(event: HarnessEvent): boolean {
+    if (event.type === 'hook_error') {
+      return false;
+    }
+
+    return true;
   }
 }
 

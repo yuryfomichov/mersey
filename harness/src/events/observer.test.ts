@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { HarnessRuntimeTrace } from '../logger/types.js';
-import type { ModelToolCall } from '../models/types.js';
+import { createEmptyModelUsage, type ModelToolCall } from '../models/types.js';
 import { HarnessObserver } from './observer.js';
 import type { HarnessEvent } from './types.js';
 
@@ -140,7 +140,7 @@ test('HarnessObserver marks fallback provider responses in provider_responded ev
   });
 
   observer.turnStarted(5);
-  observer.providerResponded(1, { model: 'fake-model', name: 'fake' }, { text: '' }, 12);
+  observer.providerResponded(1, { model: 'fake-model', name: 'fake' }, { text: '', usage: createEmptyModelUsage() }, 12);
 
   const event = events[1];
 

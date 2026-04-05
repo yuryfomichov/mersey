@@ -1,8 +1,7 @@
 import { HarnessObserver, getMessageCountsByRole } from '../events/observer.js';
 import type { ModelProvider } from '../models/provider.js';
 import type { ModelMessage, ModelRequest, ModelResponse } from '../models/types.js';
-import { createPluginRunner } from '../plugins/runner.js';
-import type { HarnessPlugin } from '../plugins/types.js';
+import type { PluginRunner } from '../plugins/runner.js';
 import type { Message } from '../sessions/types.js';
 import type { ToolRuntimeFactory } from '../tools/runtime/index.js';
 
@@ -15,7 +14,7 @@ export type LoopInput = {
   history: readonly Message[];
   observer: HarnessObserver;
   options?: LoopOptions;
-  plugins: HarnessPlugin[];
+  pluginRunner: PluginRunner;
   provider: ModelProvider;
   signal?: AbortSignal;
   stream: boolean;
@@ -215,7 +214,7 @@ export async function* streamLoop({
   history,
   observer,
   options,
-  plugins,
+  pluginRunner,
   provider,
   signal,
   stream,
@@ -238,12 +237,6 @@ export async function* streamLoop({
   observer.turnStarted(content.length);
   const resolvedSystemPrompt = systemPrompt?.trim() ? systemPrompt : undefined;
   const getTranscript = (): Message[] => [...history, ...turnMessages];
-
-  const pluginRunner = createPluginRunner({
-    observer,
-    plugins,
-    runId: observer.getRunId(),
-  });
 
   try {
     throwIfAborted(signal);

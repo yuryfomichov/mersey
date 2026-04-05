@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import { HarnessObserver } from '../events/observer.js';
+import type { HarnessEvent } from '../events/types.js';
 import { PluginRunner, createPluginRunner } from './runner.js';
 import type { BeforeProviderCallContext, BeforeToolCallContext, HarnessPlugin } from './types.js';
 
@@ -98,6 +100,7 @@ test('PluginRunner.runBeforeProviderCall short-circuits on first deny', async ()
 });
 
 test('PluginRunner.runBeforeProviderCall fails closed on hook error', async () => {
+  const events: HarnessEvent[] = [];
   const plugins: HarnessPlugin[] = [
     {
       name: 'plugin-a',
@@ -113,7 +116,11 @@ test('PluginRunner.runBeforeProviderCall fails closed on hook error', async () =
     },
   ];
 
-  const { runner } = createPluginRunnerWithPlugins(plugins);
+  const { observer, runner } = createPluginRunnerWithPlugins(plugins);
+  observer.subscribe((event) => {
+    events.push(event);
+  });
+
   const ctx: BeforeProviderCallContext = {
     iteration: 1,
     messageCount: 1,
@@ -129,6 +136,11 @@ test('PluginRunner.runBeforeProviderCall fails closed on hook error', async () =
 
   assert.equal(decision.continue, false);
   assert.equal(decision.reason, 'Policy check failed');
+  const hookError = events.find((event) => event.type === 'hook_error');
+
+  assert.equal(hookError?.type, 'hook_error');
+  assert.equal(hookError?.type === 'hook_error' ? hookError.pluginName : undefined, 'plugin-a');
+  assert.equal(hookError?.type === 'hook_error' ? hookError.hookName : undefined, 'beforeProviderCall');
 });
 
 test('PluginRunner.runBeforeToolCall executes in registration order', async () => {
@@ -198,6 +210,7 @@ test('PluginRunner.runBeforeToolCall short-circuits on first deny', async () => 
 });
 
 test('PluginRunner.runBeforeToolCall fails closed on hook error', async () => {
+  const events: HarnessEvent[] = [];
   const plugins: HarnessPlugin[] = [
     {
       name: 'plugin-a',
@@ -213,7 +226,11 @@ test('PluginRunner.runBeforeToolCall fails closed on hook error', async () => {
     },
   ];
 
-  const { runner } = createPluginRunnerWithPlugins(plugins);
+  const { observer, runner } = createPluginRunnerWithPlugins(plugins);
+  observer.subscribe((event) => {
+    events.push(event);
+  });
+
   const ctx: BeforeToolCallContext = {
     iteration: 1,
     sessionId: 'test-session',
@@ -225,6 +242,11 @@ test('PluginRunner.runBeforeToolCall fails closed on hook error', async () => {
 
   assert.equal(decision.continue, false);
   assert.equal(decision.reason, 'Policy check failed');
+  const hookError = events.find((event) => event.type === 'hook_error');
+
+  assert.equal(hookError?.type, 'hook_error');
+  assert.equal(hookError?.type === 'hook_error' ? hookError.pluginName : undefined, 'plugin-a');
+  assert.equal(hookError?.type === 'hook_error' ? hookError.hookName : undefined, 'beforeToolCall');
 });
 
 test('PluginRunner delivers events to all plugins via observer subscription', async () => {
@@ -276,6 +298,94 @@ test('PluginRunner event delivery is best-effort and non-blocking', async () => 
       observer.turnStarted(10);
     }),
   );
+});
+
+test('PluginRunner converts async onEvent errors into hook_error events', async () => {
+  const events: HarnessEvent[] = [];
+  const plugins: HarnessPlugin[] = [
+    {
+      name: 'plugin-a',
+      async onEvent() {
+        throw new Error('async plugin error');
+      },
+    },
+  ];
+
+  const { observer } = createPluginRunnerWithPlugins(plugins);
+  observer.subscribe((event) => {
+    events.push(event);
+  });
+
+  observer.turnStarted(10);
+  await delay(0);
+
+  const hookError = events.find((event) => event.type === 'hook_error');
+
+  assert.equal(hookError?.type, 'hook_error');
+  assert.equal(hookError?.type === 'hook_error' ? hookError.pluginName : undefined, 'plugin-a');
+  assert.equal(hookError?.type === 'hook_error' ? hookError.hookName : undefined, 'onEvent');
+  assert.equal(hookError?.type === 'hook_error' ? hookError.errorMessage.includes('async plugin error') : false, true);
+});
+
+test('PluginRunner avoids recursive hook_error storms for the same plugin', async () => {
+  const events: HarnessEvent[] = [];
+  const plugins: HarnessPlugin[] = [
+    {
+      name: 'plugin-a',
+      onEvent() {
+        throw new Error('plugin-a onEvent failure');
+      },
+    },
+  ];
+
+  const { observer } = createPluginRunnerWithPlugins(plugins);
+  observer.subscribe((event) => {
+    events.push(event);
+  });
+
+  observer.turnStarted(10);
+  await delay(0);
+
+  const hookErrors = events.filter((event) => event.type === 'hook_error');
+
+  assert.equal(hookErrors.length, 1);
+  assert.equal(hookErrors[0]?.type, 'hook_error');
+  assert.equal(hookErrors[0]?.type === 'hook_error' ? hookErrors[0].pluginName : undefined, 'plugin-a');
+  assert.equal(hookErrors[0]?.type === 'hook_error' ? hookErrors[0].hookName : undefined, 'onEvent');
+});
+
+test('PluginRunner subscribes only when at least one plugin defines onEvent', () => {
+  const observerWithoutEvents = createTestObserver();
+  let subscribeCallsWithoutEvents = 0;
+  const originalSubscribeWithoutEvents = observerWithoutEvents.subscribe.bind(observerWithoutEvents);
+  observerWithoutEvents.subscribe = ((listener) => {
+    subscribeCallsWithoutEvents += 1;
+    return originalSubscribeWithoutEvents(listener);
+  }) as HarnessObserver['subscribe'];
+
+  createPluginRunner({
+    observer: observerWithoutEvents,
+    plugins: [{ name: 'policy-only', beforeToolCall: () => ({ continue: true }) }],
+    runId: 'run-without-events',
+  });
+
+  assert.equal(subscribeCallsWithoutEvents, 0);
+
+  const observerWithEvents = createTestObserver();
+  let subscribeCallsWithEvents = 0;
+  const originalSubscribeWithEvents = observerWithEvents.subscribe.bind(observerWithEvents);
+  observerWithEvents.subscribe = ((listener) => {
+    subscribeCallsWithEvents += 1;
+    return originalSubscribeWithEvents(listener);
+  }) as HarnessObserver['subscribe'];
+
+  createPluginRunner({
+    observer: observerWithEvents,
+    plugins: [{ name: 'event-plugin', onEvent: () => {} }],
+    runId: 'run-with-events',
+  });
+
+  assert.equal(subscribeCallsWithEvents, 1);
 });
 
 test('createPluginRunner creates PluginRunner with correct options', () => {

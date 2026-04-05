@@ -9,6 +9,8 @@ export type HookDecision =
       exposeToModel?: boolean;
     };
 
+export type HookName = 'beforeProviderCall' | 'beforeToolCall' | 'onEvent';
+
 export type BeforeProviderCallContext = {
   sessionId: string;
   turnId: string;

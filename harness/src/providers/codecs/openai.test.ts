@@ -56,6 +56,7 @@ test('getToolCalls rejects incomplete non-tool responses', () => {
 test('getTools adds strict object requirements to function schemas', () => {
   const request: ModelRequest = {
     messages: [{ content: 'hello', role: 'user' }],
+    stream: false,
     tools: [
       {
         description: 'Read a file.',
@@ -104,6 +105,7 @@ test('getTools adds strict object requirements to function schemas', () => {
 test('getTools requires every declared property for strict OpenAI schemas', () => {
   const request: ModelRequest = {
     messages: [{ content: 'hello', role: 'user' }],
+    stream: false,
     tools: [
       {
         description: 'Write a file.',
@@ -145,6 +147,7 @@ test('getInputItems preserves empty-string user messages', () => {
   assert.deepEqual(
     codec.getInputItems({
       messages: [{ content: '', role: 'user' }],
+      stream: false,
     }),
     [
       {
@@ -166,6 +169,7 @@ test('getInputItems skips empty assistant placeholder text while keeping tool ca
           toolCalls: [{ id: 'call_1', input: { path: 'note.txt' }, name: 'read_file' }],
         },
       ],
+      stream: false,
     }),
     [
       {

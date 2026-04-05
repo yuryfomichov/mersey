@@ -8,7 +8,7 @@ import type { Message } from '../sessions/types.js';
 import type { ToolExecutionResult } from '../tools/types.js';
 import { HarnessEventPublisher } from './publisher.js';
 import { getDebugToolArgs, getResultDataKeys, getSafeToolArgs, sanitizeErrorMessage } from './telemetry.js';
-import type { HarnessEvent, HarnessEventListener, TurnFailedEvent } from './types.js';
+import type { HarnessEvent, HarnessEventListener, HookErrorEvent, TurnFailedEvent } from './types.js';
 
 export type HarnessObserverOptions = {
   debug?: boolean;
@@ -244,7 +244,7 @@ export class HarnessObserver {
     });
   }
 
-  hookError(pluginName: string, hookName: 'beforeProviderCall' | 'beforeToolCall', error: unknown): void {
+  hookError(pluginName: string, hookName: HookErrorEvent['hookName'], error: unknown): void {
     this.publishEvent({
       errorMessage: error instanceof Error ? error.message : String(error),
       hookName,

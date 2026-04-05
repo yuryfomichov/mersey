@@ -5,6 +5,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { HarnessObserver } from '../events/observer.js';
 import type { ModelProvider } from '../models/provider.js';
 import { createEmptyModelUsage } from '../models/types.js';
+import { createPluginRunner } from '../plugins/runner.js';
+import type { HarnessPlugin } from '../plugins/types.js';
 import { FakeProvider } from '../providers/fake.js';
 import { MemorySessionStore } from '../sessions/memory-store.js';
 import { Session } from '../sessions/session.js';
@@ -34,6 +36,7 @@ async function collectChunks<T>(iterable: AsyncIterable<T>): Promise<T[]> {
 }
 
 function createStreamTurnFactory(input: {
+  plugins?: HarnessPlugin[];
   provider?: FakeProvider;
   sessionId?: string;
   sessionStore?: MemorySessionStore;
@@ -52,7 +55,11 @@ function createStreamTurnFactory(input: {
     session,
     streamTurn: createTurnStreamFactory({
       observer,
-      plugins: [],
+      pluginRunner: createPluginRunner({
+        observer,
+        plugins: input.plugins ?? [],
+        runId: observer.getRunId(),
+      }),
       provider,
       session,
       toolRuntimeFactory: createToolRuntimeFactory({
@@ -93,6 +100,28 @@ test('createTurnStreamFactory starts on first pull and ignores pre-consumption r
   });
 });
 
+test('createTurnStreamFactory emits one plugin event per turn across repeated turns', async () => {
+  const turnStartedIds: string[] = [];
+  const { streamTurn } = createStreamTurnFactory({
+    plugins: [
+      {
+        name: 'test-plugin',
+        onEvent(event) {
+          if (event.type === 'turn_started') {
+            turnStartedIds.push(event.turnId);
+          }
+        },
+      },
+    ],
+  });
+
+  await collectChunks(streamTurn('first', false));
+  await collectChunks(streamTurn('second', false));
+
+  assert.equal(turnStartedIds.length, 2);
+  assert.equal(new Set(turnStartedIds).size, 2);
+});
+
 test('createTurnStreamFactory rejects iteration when the background turn throws undefined', async () => {
   const session = createTestSession(new MemorySessionStore());
   const provider: ModelProvider = {
@@ -103,13 +132,19 @@ test('createTurnStreamFactory rejects iteration when the background turn throws 
       throw undefined;
     },
   };
+  const observer = new HarnessObserver({
+    getSessionId: () => session.id,
+    logger: undefined,
+    providerName: provider.name,
+  });
+
   const streamTurn = createTurnStreamFactory({
-    observer: new HarnessObserver({
-      getSessionId: () => session.id,
-      logger: undefined,
-      providerName: provider.name,
+    observer,
+    pluginRunner: createPluginRunner({
+      observer,
+      plugins: [],
+      runId: observer.getRunId(),
     }),
-    plugins: [],
     provider,
     session,
     toolRuntimeFactory: createToolRuntimeFactory({ policy: { workspaceRoot: process.cwd() }, tools: [] }),

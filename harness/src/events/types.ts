@@ -124,7 +124,7 @@ export type ProviderBlockedEvent = HarnessEventBase & {
 export type HookErrorEvent = HarnessEventBase & {
   type: 'hook_error';
   pluginName: string;
-  hookName: 'beforeProviderCall' | 'beforeToolCall';
+  hookName: 'beforeProviderCall' | 'beforeToolCall' | 'onEvent';
   errorMessage: string;
 };
 
