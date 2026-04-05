@@ -20,14 +20,14 @@ async function main(): Promise<void> {
   const session = createSession(sessionStoreDefinition, sessionId);
   const cli = createInterface({ input, output });
   const { logPaths, plugins } = await createCliLoggingPlugins(sessionId);
+  const toolExecutionPolicy = getToolExecutionPolicy();
   const harness = createHarness({
     debug,
     plugins,
     provider: providerDefinition,
     session,
     systemPrompt: 'You are a helpful assistant.',
-    toolExecutionPolicy: getToolExecutionPolicy(),
-    tools: createDefaultTools(),
+    tools: createDefaultTools({ toolExecutionPolicy }),
   });
   const providerModel = getProviderModel(providerDefinition);
 

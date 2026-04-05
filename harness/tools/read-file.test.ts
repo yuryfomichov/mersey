@@ -5,7 +5,16 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import { ReadFileTool } from './read-file.js';
-import { createToolRuntime } from './runtime/index.js';
+import type { ToolExecutionContext } from './services/index.js';
+
+function createToolExecutionContext(): ToolExecutionContext {
+  return {
+    cancellation: {
+      signal: () => undefined,
+      throwIfAborted: () => {},
+    },
+  };
+}
 
 test('ReadFileTool reads files relative to the workspace root', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
@@ -13,11 +22,8 @@ test('ReadFileTool reads files relative to the workspace root', async () => {
   try {
     await writeFile(join(rootDir, 'note.txt'), 'hello from file', 'utf8');
 
-    const tool = new ReadFileTool();
-    const result = await tool.execute(
-      { path: 'note.txt' },
-      createToolRuntime({ policy: { workspaceRoot: rootDir }, tools: [] }),
-    );
+    const tool = new ReadFileTool({ policy: { workspaceRoot: rootDir } });
+    const result = await tool.execute({ path: 'note.txt' }, createToolExecutionContext());
 
     assert.equal(typeof result, 'object');
     assert.equal(result.content, 'hello from file');
@@ -34,11 +40,8 @@ test('ReadFileTool allows in-workspace paths that start with two dots', async ()
   try {
     await writeFile(join(rootDir, '..note.txt'), 'hidden but valid', 'utf8');
 
-    const tool = new ReadFileTool();
-    const result = await tool.execute(
-      { path: '..note.txt' },
-      createToolRuntime({ policy: { workspaceRoot: rootDir }, tools: [] }),
-    );
+    const tool = new ReadFileTool({ policy: { workspaceRoot: rootDir } });
+    const result = await tool.execute({ path: '..note.txt' }, createToolExecutionContext());
 
     assert.equal(typeof result, 'object');
     assert.equal(result.content, 'hidden but valid');
@@ -53,11 +56,8 @@ test('ReadFileTool truncates large output to the shared result limit', async () 
   try {
     await writeFile(join(rootDir, 'note.txt'), 'abcdef', 'utf8');
 
-    const tool = new ReadFileTool();
-    const result = await tool.execute(
-      { path: 'note.txt' },
-      createToolRuntime({ policy: { maxToolResultBytes: 4, workspaceRoot: rootDir }, tools: [] }),
-    );
+    const tool = new ReadFileTool({ policy: { maxToolResultBytes: 4, workspaceRoot: rootDir } });
+    const result = await tool.execute({ path: 'note.txt' }, createToolExecutionContext());
 
     assert.equal(typeof result, 'object');
     assert.equal(result.content, 'abcd');
@@ -77,18 +77,18 @@ test('ReadFileTool rejects paths outside the workspace root', async () => {
     await mkdir(workspaceRoot);
     await writeFile(outsidePath, 'top secret', 'utf8');
 
-    const tool = new ReadFileTool();
+    const tool = new ReadFileTool({ policy: { workspaceRoot } });
 
     await assert.rejects(
-      () => tool.execute({ path: '../secret.txt' }, createToolRuntime({ policy: { workspaceRoot }, tools: [] })),
+      () => tool.execute({ path: '../secret.txt' }, createToolExecutionContext()),
       /read_file path must stay inside workspace root/,
     );
     await assert.rejects(
-      () => tool.execute({ path: outsidePath }, createToolRuntime({ policy: { workspaceRoot }, tools: [] })),
+      () => tool.execute({ path: outsidePath }, createToolExecutionContext()),
       /read_file path must stay inside workspace root/,
     );
     await assert.rejects(
-      () => tool.execute({ path: '../missing.txt' }, createToolRuntime({ policy: { workspaceRoot }, tools: [] })),
+      () => tool.execute({ path: '../missing.txt' }, createToolExecutionContext()),
       /read_file path must stay inside workspace root/,
     );
   } finally {
@@ -102,14 +102,10 @@ test('ReadFileTool rejects files larger than the shared policy limit', async () 
   try {
     await writeFile(join(rootDir, 'large.txt'), '1234567890', 'utf8');
 
-    const tool = new ReadFileTool();
+    const tool = new ReadFileTool({ policy: { maxReadBytes: 4, workspaceRoot: rootDir } });
 
     await assert.rejects(
-      () =>
-        tool.execute(
-          { path: 'large.txt' },
-          createToolRuntime({ policy: { maxReadBytes: 4, workspaceRoot: rootDir }, tools: [] }),
-        ),
+      () => tool.execute({ path: 'large.txt' }, createToolExecutionContext()),
       /read_file refuses files larger than 4 bytes/,
     );
   } finally {
@@ -123,20 +119,15 @@ test('ReadFileTool rejects denylisted paths from shared policy', async () => {
   try {
     await writeFile(join(rootDir, '.env'), 'SECRET=1', 'utf8');
 
-    const tool = new ReadFileTool();
+    const tool = new ReadFileTool({
+      policy: {
+        pathDenylist: [{ basename: '.env', reason: 'sensitive file' }],
+        workspaceRoot: rootDir,
+      },
+    });
 
     await assert.rejects(
-      () =>
-        tool.execute(
-          { path: '.env' },
-          createToolRuntime({
-            policy: {
-              pathDenylist: [{ basename: '.env', reason: 'sensitive file' }],
-              workspaceRoot: rootDir,
-            },
-            tools: [],
-          }),
-        ),
+      () => tool.execute({ path: '.env' }, createToolExecutionContext()),
       /read_file path is blocked by tool policy: \.env \(sensitive file\)/,
     );
   } finally {

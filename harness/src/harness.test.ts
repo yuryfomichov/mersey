@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 
+import { ReadFileTool } from '../tools/read-file.js';
 import type { HarnessEvent } from './events/types.js';
 import { createHarness, type CreateHarnessOptions } from './harness.js';
 import type { ModelProvider } from './models/provider.js';
@@ -12,7 +13,6 @@ import { Session } from './sessions/session.js';
 import type { SessionStore } from './sessions/store.js';
 import type { SessionState, StoredSessionState } from './sessions/types.js';
 import { withTempDir, writeWorkspaceFiles } from './test/test-helpers.js';
-import { ReadFileTool } from './tools/read-file.js';
 
 type TestHarnessOptions = Omit<CreateHarnessOptions, 'session'> & {
   session?: Session;
@@ -195,8 +195,7 @@ test('createHarness emits live events in stable order without leaking raw conten
       }),
       sessionId: 'events-session',
       sessionStore: new MemorySessionStore(),
-      toolExecutionPolicy: { workspaceRoot: rootDir },
-      tools: [new ReadFileTool()],
+      tools: [new ReadFileTool({ policy: { workspaceRoot: rootDir } })],
     });
 
     harness.subscribe((event) => {

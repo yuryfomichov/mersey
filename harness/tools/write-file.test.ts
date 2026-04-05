@@ -4,18 +4,27 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { createToolRuntime } from './runtime/index.js';
+import type { ToolExecutionContext } from './services/index.js';
 import { WriteFileTool } from './write-file.js';
+
+function createToolExecutionContext(): ToolExecutionContext {
+  return {
+    cancellation: {
+      signal: () => undefined,
+      throwIfAborted: () => {},
+    },
+  };
+}
 
 test('WriteFileTool writes files relative to the workspace root', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
 
   try {
-    const tool = new WriteFileTool();
+    const tool = new WriteFileTool({ policy: { workspaceRoot: rootDir } });
 
     const result = await tool.execute(
       { content: 'hello from write', path: 'notes/note.txt' },
-      createToolRuntime({ policy: { workspaceRoot: rootDir }, tools: [] }),
+      createToolExecutionContext(),
     );
     const content = await readFile(join(rootDir, 'notes/note.txt'), 'utf8');
 
@@ -35,14 +44,10 @@ test('WriteFileTool refuses to overwrite existing files by default', async () =>
     await mkdir(join(rootDir, 'notes'), { recursive: true });
     await writeFile(join(rootDir, 'notes/note.txt'), 'existing', 'utf8');
 
-    const tool = new WriteFileTool();
+    const tool = new WriteFileTool({ policy: { workspaceRoot: rootDir } });
 
     await assert.rejects(
-      () =>
-        tool.execute(
-          { content: 'replacement', path: 'notes/note.txt' },
-          createToolRuntime({ policy: { workspaceRoot: rootDir }, tools: [] }),
-        ),
+      () => tool.execute({ content: 'replacement', path: 'notes/note.txt' }, createToolExecutionContext()),
       /write_file refuses to overwrite existing files/,
     );
     assert.equal(await readFile(join(rootDir, 'notes/note.txt'), 'utf8'), 'existing');
@@ -58,11 +63,11 @@ test('WriteFileTool overwrites existing files when overwrite is true', async () 
     await mkdir(join(rootDir, 'notes'), { recursive: true });
     await writeFile(join(rootDir, 'notes/note.txt'), 'existing', 'utf8');
 
-    const tool = new WriteFileTool();
+    const tool = new WriteFileTool({ policy: { workspaceRoot: rootDir } });
 
     await tool.execute(
       { content: 'replacement', overwrite: true, path: 'notes/note.txt' },
-      createToolRuntime({ policy: { workspaceRoot: rootDir }, tools: [] }),
+      createToolExecutionContext(),
     );
 
     assert.equal(await readFile(join(rootDir, 'notes/note.txt'), 'utf8'), 'replacement');
@@ -78,22 +83,14 @@ test('WriteFileTool rejects paths outside the workspace root', async () => {
   try {
     await mkdir(workspaceRoot);
 
-    const tool = new WriteFileTool();
+    const tool = new WriteFileTool({ policy: { workspaceRoot } });
 
     await assert.rejects(
-      () =>
-        tool.execute(
-          { content: 'top secret', path: '../secret.txt' },
-          createToolRuntime({ policy: { workspaceRoot }, tools: [] }),
-        ),
+      () => tool.execute({ content: 'top secret', path: '../secret.txt' }, createToolExecutionContext()),
       /write_file path must stay inside workspace root/,
     );
     await assert.rejects(
-      () =>
-        tool.execute(
-          { content: 'top secret', path: join(rootDir, 'secret.txt') },
-          createToolRuntime({ policy: { workspaceRoot }, tools: [] }),
-        ),
+      () => tool.execute({ content: 'top secret', path: join(rootDir, 'secret.txt') }, createToolExecutionContext()),
       /write_file path must stay inside workspace root/,
     );
   } finally {
@@ -110,16 +107,12 @@ test('WriteFileTool rejects symlinked paths that escape the workspace root', asy
     await mkdir(workspaceRoot);
     await mkdir(outsideRoot);
 
-    const tool = new WriteFileTool();
+    const tool = new WriteFileTool({ policy: { workspaceRoot } });
 
     await symlink(outsideRoot, join(workspaceRoot, 'linked'), 'dir');
 
     await assert.rejects(
-      () =>
-        tool.execute(
-          { content: 'top secret', path: 'linked/secret.txt' },
-          createToolRuntime({ policy: { workspaceRoot }, tools: [] }),
-        ),
+      () => tool.execute({ content: 'top secret', path: 'linked/secret.txt' }, createToolExecutionContext()),
       /write_file path must stay inside workspace root/,
     );
   } finally {
@@ -131,14 +124,14 @@ test('WriteFileTool validates path and content inputs', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
 
   try {
-    const tool = new WriteFileTool();
+    const tool = new WriteFileTool({ policy: { workspaceRoot: rootDir } });
 
     await assert.rejects(
-      () => tool.execute({ content: 'hello' }, createToolRuntime({ policy: { workspaceRoot: rootDir }, tools: [] })),
+      () => tool.execute({ content: 'hello' }, createToolExecutionContext()),
       /write_file requires a string path/,
     );
     await assert.rejects(
-      () => tool.execute({ path: 'note.txt' }, createToolRuntime({ policy: { workspaceRoot: rootDir }, tools: [] })),
+      () => tool.execute({ path: 'note.txt' }, createToolExecutionContext()),
       /write_file requires string content/,
     );
   } finally {
@@ -150,14 +143,10 @@ test('WriteFileTool rejects content larger than the shared policy limit', async 
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
 
   try {
-    const tool = new WriteFileTool();
+    const tool = new WriteFileTool({ policy: { maxWriteBytes: 4, workspaceRoot: rootDir } });
 
     await assert.rejects(
-      () =>
-        tool.execute(
-          { content: '12345', path: 'note.txt' },
-          createToolRuntime({ policy: { maxWriteBytes: 4, workspaceRoot: rootDir }, tools: [] }),
-        ),
+      () => tool.execute({ content: '12345', path: 'note.txt' }, createToolExecutionContext()),
       /write_file refuses content larger than 4 bytes/,
     );
   } finally {
@@ -169,20 +158,15 @@ test('WriteFileTool supports tool-specific denylist rules in shared policy', asy
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
 
   try {
-    const tool = new WriteFileTool();
+    const tool = new WriteFileTool({
+      policy: {
+        pathDenylist: [{ basename: '.env', reason: 'sensitive file', tools: ['write_file'] }],
+        workspaceRoot: rootDir,
+      },
+    });
 
     await assert.rejects(
-      () =>
-        tool.execute(
-          { content: 'SECRET=1', path: '.env' },
-          createToolRuntime({
-            policy: {
-              pathDenylist: [{ basename: '.env', reason: 'sensitive file', tools: ['write_file'] }],
-              workspaceRoot: rootDir,
-            },
-            tools: [],
-          }),
-        ),
+      () => tool.execute({ content: 'SECRET=1', path: '.env' }, createToolExecutionContext()),
       /write_file path is blocked by tool policy: \.env \(sensitive file\)/,
     );
   } finally {

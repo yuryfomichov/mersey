@@ -2,9 +2,10 @@ import { readFile, writeFile } from 'node:fs/promises';
 
 import { z } from 'zod';
 
-import type { ModelToolInput } from '../models/types.js';
-import type { ToolRuntimeServices } from './runtime/index.js';
-import type { Tool, ToolExecuteResult } from './types.js';
+import { FileService } from './services/files/file-service.js';
+import type { ToolExecutionContext, ToolExecutionPolicy, ToolFileService } from './services/index.js';
+import type { Tool, ToolExecuteResult, ToolInput } from './types.js';
+import { createCanonicalWorkspaceRootGetter, resolveToolExecutionPolicy } from './utils/policy.js';
 import { parseToolInput, toToolInputSchema } from './utils/schema.js';
 
 function getMatchCount(content: string, oldText: string): number {
@@ -23,6 +24,10 @@ function getMatchCount(content: string, oldText: string): number {
   }
 }
 
+export type EditFileToolOptions = {
+  policy?: ToolExecutionPolicy;
+};
+
 export class EditFileTool implements Tool {
   private static readonly input = z.object({
     newText: z
@@ -38,16 +43,26 @@ export class EditFileTool implements Tool {
       .describe('Absolute path or a path relative to the workspace root.'),
   });
 
+  private readonly files: ToolFileService;
+
   readonly description = 'Edit a UTF-8 text file by replacing exactly one matching string.';
   readonly inputSchema = toToolInputSchema(EditFileTool.input);
   readonly name = 'edit_file';
 
-  async execute(input: ModelToolInput, runtime: ToolRuntimeServices): Promise<ToolExecuteResult> {
+  constructor(options: EditFileToolOptions = {}) {
+    const policy = resolveToolExecutionPolicy(options.policy);
+    const getCanonicalWorkspaceRoot = createCanonicalWorkspaceRootGetter(policy.workspaceRoot);
+
+    this.files = new FileService({ getCanonicalWorkspaceRoot, policy });
+  }
+
+  async execute(input: ToolInput, context: ToolExecutionContext): Promise<ToolExecuteResult> {
     const { newText, oldText, path } = parseToolInput(EditFileTool.input, input);
 
-    const resolvedPath = await runtime.files.resolveForRead(path, this.name);
-    await runtime.files.resolveForWrite(path, this.name);
-    await runtime.files.assertReadSize(resolvedPath, this.name);
+    context.cancellation.throwIfAborted();
+    const resolvedPath = await this.files.resolveForRead(path, this.name);
+    await this.files.resolveForWrite(path, this.name);
+    await this.files.assertReadSize(resolvedPath, this.name);
     const content = await readFile(resolvedPath, 'utf8');
     const matchCount = getMatchCount(content, oldText);
 
@@ -61,8 +76,10 @@ export class EditFileTool implements Tool {
 
     const nextContent = content.replace(oldText, newText);
 
-    runtime.files.assertWriteSize(nextContent, this.name);
+    this.files.assertWriteSize(nextContent, this.name);
     await writeFile(resolvedPath, nextContent, 'utf8');
+    context.cancellation.throwIfAborted();
+
     return {
       content: `Edited file: ${resolvedPath}`,
       data: {

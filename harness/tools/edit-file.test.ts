@@ -5,7 +5,16 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import { EditFileTool } from './edit-file.js';
-import { createToolRuntime } from './runtime/index.js';
+import type { ToolExecutionContext } from './services/index.js';
+
+function createToolExecutionContext(): ToolExecutionContext {
+  return {
+    cancellation: {
+      signal: () => undefined,
+      throwIfAborted: () => {},
+    },
+  };
+}
 
 test('EditFileTool replaces exactly one matching string', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
@@ -13,10 +22,10 @@ test('EditFileTool replaces exactly one matching string', async () => {
   try {
     await writeFile(join(rootDir, 'note.txt'), 'hello world', 'utf8');
 
-    const tool = new EditFileTool();
+    const tool = new EditFileTool({ policy: { workspaceRoot: rootDir } });
     const result = await tool.execute(
       { newText: 'mersey', oldText: 'world', path: 'note.txt' },
-      createToolRuntime({ policy: { workspaceRoot: rootDir }, tools: [] }),
+      createToolExecutionContext(),
     );
     const content = await readFile(join(rootDir, 'note.txt'), 'utf8');
 
@@ -37,22 +46,14 @@ test('EditFileTool rejects paths outside the workspace root', async () => {
     await writeFile(outsidePath, 'top secret', 'utf8');
     await mkdir(workspaceRoot);
 
-    const tool = new EditFileTool();
+    const tool = new EditFileTool({ policy: { workspaceRoot } });
 
     await assert.rejects(
-      () =>
-        tool.execute(
-          { newText: 'public', oldText: 'secret', path: '../secret.txt' },
-          createToolRuntime({ policy: { workspaceRoot }, tools: [] }),
-        ),
+      () => tool.execute({ newText: 'public', oldText: 'secret', path: '../secret.txt' }, createToolExecutionContext()),
       /edit_file path must stay inside workspace root/,
     );
     await assert.rejects(
-      () =>
-        tool.execute(
-          { newText: 'public', oldText: 'secret', path: outsidePath },
-          createToolRuntime({ policy: { workspaceRoot }, tools: [] }),
-        ),
+      () => tool.execute({ newText: 'public', oldText: 'secret', path: outsidePath }, createToolExecutionContext()),
       /edit_file path must stay inside workspace root/,
     );
   } finally {
@@ -66,22 +67,14 @@ test('EditFileTool requires oldText to match exactly once', async () => {
   try {
     await writeFile(join(rootDir, 'note.txt'), 'hello world world', 'utf8');
 
-    const tool = new EditFileTool();
+    const tool = new EditFileTool({ policy: { workspaceRoot: rootDir } });
 
     await assert.rejects(
-      () =>
-        tool.execute(
-          { newText: 'mersey', oldText: 'missing', path: 'note.txt' },
-          createToolRuntime({ policy: { workspaceRoot: rootDir }, tools: [] }),
-        ),
+      () => tool.execute({ newText: 'mersey', oldText: 'missing', path: 'note.txt' }, createToolExecutionContext()),
       /edit_file could not find oldText in file/,
     );
     await assert.rejects(
-      () =>
-        tool.execute(
-          { newText: 'mersey', oldText: 'world', path: 'note.txt' },
-          createToolRuntime({ policy: { workspaceRoot: rootDir }, tools: [] }),
-        ),
+      () => tool.execute({ newText: 'mersey', oldText: 'world', path: 'note.txt' }, createToolExecutionContext()),
       /edit_file requires oldText to match exactly once/,
     );
   } finally {
@@ -95,14 +88,10 @@ test('EditFileTool rejects overlapping oldText matches', async () => {
   try {
     await writeFile(join(rootDir, 'note.txt'), 'aaa', 'utf8');
 
-    const tool = new EditFileTool();
+    const tool = new EditFileTool({ policy: { workspaceRoot: rootDir } });
 
     await assert.rejects(
-      () =>
-        tool.execute(
-          { newText: 'b', oldText: 'aa', path: 'note.txt' },
-          createToolRuntime({ policy: { workspaceRoot: rootDir }, tools: [] }),
-        ),
+      () => tool.execute({ newText: 'b', oldText: 'aa', path: 'note.txt' }, createToolExecutionContext()),
       /edit_file requires oldText to match exactly once/,
     );
   } finally {
@@ -114,38 +103,22 @@ test('EditFileTool validates path and text inputs', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
 
   try {
-    const tool = new EditFileTool();
+    const tool = new EditFileTool({ policy: { workspaceRoot: rootDir } });
 
     await assert.rejects(
-      () =>
-        tool.execute(
-          { newText: 'mersey', oldText: 'world' },
-          createToolRuntime({ policy: { workspaceRoot: rootDir }, tools: [] }),
-        ),
+      () => tool.execute({ newText: 'mersey', oldText: 'world' }, createToolExecutionContext()),
       /edit_file requires a string path/,
     );
     await assert.rejects(
-      () =>
-        tool.execute(
-          { newText: 'mersey', path: 'note.txt' },
-          createToolRuntime({ policy: { workspaceRoot: rootDir }, tools: [] }),
-        ),
+      () => tool.execute({ newText: 'mersey', path: 'note.txt' }, createToolExecutionContext()),
       /edit_file requires string oldText/,
     );
     await assert.rejects(
-      () =>
-        tool.execute(
-          { oldText: 'world', path: 'note.txt' },
-          createToolRuntime({ policy: { workspaceRoot: rootDir }, tools: [] }),
-        ),
+      () => tool.execute({ oldText: 'world', path: 'note.txt' }, createToolExecutionContext()),
       /edit_file requires string newText/,
     );
     await assert.rejects(
-      () =>
-        tool.execute(
-          { newText: 'mersey', oldText: '', path: 'note.txt' },
-          createToolRuntime({ policy: { workspaceRoot: rootDir }, tools: [] }),
-        ),
+      () => tool.execute({ newText: 'mersey', oldText: '', path: 'note.txt' }, createToolExecutionContext()),
       /edit_file requires a non-empty oldText/,
     );
   } finally {
@@ -159,20 +132,15 @@ test('EditFileTool rejects denylisted writes from shared policy', async () => {
   try {
     await writeFile(join(rootDir, '.env'), 'SECRET=1', 'utf8');
 
-    const tool = new EditFileTool();
+    const tool = new EditFileTool({
+      policy: {
+        pathDenylist: [{ access: ['write'], basename: '.env', reason: 'sensitive file' }],
+        workspaceRoot: rootDir,
+      },
+    });
 
     await assert.rejects(
-      () =>
-        tool.execute(
-          { newText: 'SECRET=2', oldText: 'SECRET=1', path: '.env' },
-          createToolRuntime({
-            policy: {
-              pathDenylist: [{ access: ['write'], basename: '.env', reason: 'sensitive file' }],
-              workspaceRoot: rootDir,
-            },
-            tools: [],
-          }),
-        ),
+      () => tool.execute({ newText: 'SECRET=2', oldText: 'SECRET=1', path: '.env' }, createToolExecutionContext()),
       /edit_file path is blocked by tool policy: \.env \(sensitive file\)/,
     );
   } finally {
@@ -186,19 +154,18 @@ test('EditFileTool rejects files blocked for read access by shared policy', asyn
   try {
     await writeFile(join(rootDir, 'note.txt'), 'hello world', 'utf8');
 
-    const tool = new EditFileTool();
+    const tool = new EditFileTool({
+      policy: {
+        pathDenylist: [{ access: ['read'], basename: 'note.txt', reason: 'read blocked' }],
+        workspaceRoot: rootDir,
+      },
+    });
 
     await assert.rejects(
       () =>
         tool.execute(
           { newText: 'hello mersey', oldText: 'hello world', path: 'note.txt' },
-          createToolRuntime({
-            policy: {
-              pathDenylist: [{ access: ['read'], basename: 'note.txt', reason: 'read blocked' }],
-              workspaceRoot: rootDir,
-            },
-            tools: [],
-          }),
+          createToolExecutionContext(),
         ),
       /edit_file path is blocked by tool policy: note\.txt \(read blocked\)/,
     );

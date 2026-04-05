@@ -80,7 +80,7 @@ pnpm cli -- --provider openai --cache
 pnpm ftv -- --provider openai --session-store filesystem --sessions-dir tmp/sessions
 ```
 
-`apps/cli` and `apps/ftv` both register a small set of tools from `harness` for file and command access, with app-side setup shared through `apps/helpers/cli/`.
+`apps/cli` and `apps/ftv` both register a small set of tools from `harness/tools/index.ts` for file and command access, with app-side setup shared through `apps/helpers/cli/`.
 
 ## Architecture Summary
 
@@ -90,7 +90,7 @@ pnpm ftv -- --provider openai --session-store filesystem --sessions-dir tmp/sess
 - Shared app-side provider, session, tool, and logging plugin wiring lives under `apps/helpers/cli/` so apps do not depend on each other.
 - The turn loop depends on `ModelProvider`, not SDK-specific request or response types.
 - Provider-specific translation belongs in `harness/src/providers/` and `harness/src/providers/codecs/`.
-- Tool execution is routed through `harness/src/tools/runtime/`, which applies workspace and output policies.
+- Tool services (files, commands, output) are constructed by each built-in tool and enforce workspace and output policies directly.
 - Session stores are replaceable. The repo currently ships in-memory and filesystem-backed stores.
 
 ## Using Harness

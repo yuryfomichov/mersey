@@ -11,7 +11,6 @@ import { MemorySessionStore } from './sessions/memory-store.js';
 import { Session } from './sessions/session.js';
 import type { Message } from './sessions/types.js';
 import { createToolRuntimeFactory } from './tools/runtime/index.js';
-import type { ToolExecutionPolicy } from './tools/runtime/index.js';
 import type { Tool } from './tools/types.js';
 
 export type Harness = {
@@ -28,7 +27,6 @@ export type CreateHarnessOptions = {
   provider?: ProviderDefinition;
   session?: Session;
   systemPrompt?: string;
-  toolExecutionPolicy?: ToolExecutionPolicy;
   tools?: Tool[];
 };
 
@@ -45,10 +43,7 @@ function ensureProvider(options: Pick<CreateHarnessOptions, 'provider' | 'provid
 export function createHarness(options: CreateHarnessOptions = {}): Harness {
   const resolvedProvider = ensureProvider(options);
   const session = options.session ?? new Session({ id: 'local-session', store: new MemorySessionStore() });
-  const toolRuntimeFactory = createToolRuntimeFactory({
-    policy: options.toolExecutionPolicy ?? { workspaceRoot: process.cwd() },
-    tools: options.tools ?? [],
-  });
+  const toolRuntimeFactory = createToolRuntimeFactory({ tools: options.tools ?? [] });
   const eventEmitter = new HarnessEventEmitter();
 
   const reporter = new HarnessEventReporter({

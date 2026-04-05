@@ -330,6 +330,7 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
     let unsubscribe: (() => void) | undefined;
     const session = createSession(sessionStoreDefinition, sessionId);
     const providerDef = getProviderDefinition(providerName, process.env, cache);
+    const toolExecutionPolicy = getToolExecutionPolicy();
 
     void (async () => {
       try {
@@ -344,8 +345,7 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
           plugins: [...loggingPlugins, toolApprovalPlugin],
           provider: providerDef,
           session,
-          toolExecutionPolicy: getToolExecutionPolicy(),
-          tools: createDefaultTools({ commandAllowlist: FTV_COMMAND_ALLOWLIST }),
+          tools: createDefaultTools({ commandAllowlist: FTV_COMMAND_ALLOWLIST, toolExecutionPolicy }),
         });
 
         setHarness(h);
