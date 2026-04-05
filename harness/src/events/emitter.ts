@@ -7,11 +7,11 @@ export class HarnessEventEmitter {
   private readonly listeners = new Set<HarnessEventListener>();
 
   publish(event: HarnessEvent): void {
-    const eventSnapshot = snapshot(event);
-
     if (this.listeners.size === 0) {
       return;
     }
+
+    const eventSnapshot = snapshot(event);
 
     for (const listener of this.listeners) {
       try {

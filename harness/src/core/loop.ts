@@ -99,6 +99,10 @@ function appendMessage(messages: Message[], message: Message): void {
   messages.push(message);
 }
 
+function toToolInputRecord(input: unknown): Record<string, unknown> {
+  return input && typeof input === 'object' && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
+}
+
 /**
  * Wraps a provider's streaming response in a simple async generator interface.
  *
@@ -358,7 +362,7 @@ export async function* streamLoop({
           sessionId: reporter.getSessionId(),
           toolCall: {
             id: toolCall.id,
-            input: toolCall.input,
+            input: toToolInputRecord(toolCall.input),
             name: toolCall.name,
           },
           turnId: reporter.getTurnId(),

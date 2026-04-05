@@ -110,12 +110,8 @@ test('event logging plugins preserve write order under concurrent calls', async 
     const textPlugin = createTextEventLoggingPlugin({ path: textPath });
     const events: IterationStartedEvent[] = Array.from({ length: 50 }, (_, index) => createIterationEvent(index));
 
-    for (const event of events) {
-      await jsonlPlugin.onEvent?.(event, PLUGIN_CTX);
-    }
-    for (const event of events) {
-      await textPlugin.onEvent?.(event, PLUGIN_CTX);
-    }
+    await Promise.all(events.map((event) => jsonlPlugin.onEvent?.(event, PLUGIN_CTX)));
+    await Promise.all(events.map((event) => textPlugin.onEvent?.(event, PLUGIN_CTX)));
 
     const jsonlLines = (await readFile(jsonlPath, 'utf8')).trim().split('\n');
     const textLines = (await readFile(textPath, 'utf8')).trim().split('\n');

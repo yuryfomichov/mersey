@@ -204,10 +204,8 @@ export class HarnessEventReporter {
   }
 
   hookError(pluginName: string, hookName: HookErrorEvent['hookName'], error: unknown): void {
-    void error;
-
     this.eventEmitter.publish({
-      errorMessage: sanitizeHookErrorMessage(),
+      errorMessage: sanitizeHookErrorMessage(error),
       hookName,
       pluginName,
       sessionId: this.getSessionId(),
