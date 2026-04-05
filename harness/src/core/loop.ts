@@ -1,6 +1,7 @@
-import { HarnessObserver } from '../events/observer.js';
+import { HarnessObserver, getMessageCountsByRole } from '../events/observer.js';
 import type { ModelProvider } from '../models/provider.js';
 import type { ModelMessage, ModelRequest, ModelResponse } from '../models/types.js';
+import type { PluginRunner } from '../plugins/runner.js';
 import type { Message } from '../sessions/types.js';
 import type { ToolRuntimeFactory } from '../tools/runtime/index.js';
 
@@ -13,6 +14,7 @@ export type LoopInput = {
   history: readonly Message[];
   observer: HarnessObserver;
   options?: LoopOptions;
+  pluginRunner: PluginRunner;
   provider: ModelProvider;
   signal?: AbortSignal;
   stream: boolean;
@@ -95,6 +97,10 @@ function toModelMessages(messages: readonly Message[]): ModelMessage[] {
 
 function appendMessage(messages: Message[], message: Message): void {
   messages.push(message);
+}
+
+function toToolInputRecord(input: unknown): Record<string, unknown> {
+  return input && typeof input === 'object' && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
 }
 
 /**
@@ -212,6 +218,7 @@ export async function* streamLoop({
   history,
   observer,
   options,
+  pluginRunner,
   provider,
   signal,
   stream,
@@ -244,6 +251,27 @@ export async function* streamLoop({
 
       currentIteration += 1;
       observer.iterationStarted(currentIteration, transcript.length);
+
+      const providerCtx = {
+        iteration: currentIteration,
+        messageCount: transcript.length,
+        messageCountsByRole: getMessageCountsByRole(transcript),
+        model: provider.model,
+        providerName: provider.name,
+        sessionId: observer.getSessionId(),
+        toolDefinitionNames: toolRuntime.toolDefinitions?.map((t) => t.name) ?? [],
+        turnId: observer.getTurnId(),
+      };
+
+      const providerDecision = await pluginRunner.runBeforeProviderCall(providerCtx);
+
+      if (providerDecision.continue === false) {
+        currentErrorType = 'provider';
+        const exposeToModel = providerDecision.exposeToModel ?? false;
+        observer.providerBlocked(currentIteration, providerDecision.reason, exposeToModel);
+        throw new Error(exposeToModel ? providerDecision.reason : 'Provider request blocked by policy.');
+      }
+
       observer.providerRequested(currentIteration, transcript, provider, toolRuntime.toolDefinitions);
 
       currentErrorType = 'provider';
@@ -328,6 +356,36 @@ export async function* streamLoop({
       for (const toolCall of response.toolCalls) {
         throwIfAborted(signal);
         observer.toolRequested(currentIteration, toolCall);
+
+        const toolCtx = {
+          iteration: currentIteration,
+          sessionId: observer.getSessionId(),
+          toolCall: {
+            id: toolCall.id,
+            input: toToolInputRecord(toolCall.input),
+            name: toolCall.name,
+          },
+          turnId: observer.getTurnId(),
+        };
+
+        const toolDecision = await pluginRunner.runBeforeToolCall(toolCtx);
+
+        if (toolDecision.continue === false) {
+          const exposeToModel = toolDecision.exposeToModel ?? false;
+          observer.toolBlocked(currentIteration, toolCall, toolDecision.reason, exposeToModel);
+
+          appendMessage(turnMessages, {
+            content: exposeToModel ? toolDecision.reason : 'Tool call denied by policy.',
+            createdAt: new Date().toISOString(),
+            isError: true,
+            name: toolCall.name,
+            role: 'tool',
+            toolCallId: toolCall.id,
+          });
+
+          continue;
+        }
+
         observer.toolStarted(currentIteration, toolCall);
 
         currentErrorType = 'tool';

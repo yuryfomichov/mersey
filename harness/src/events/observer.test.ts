@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { HarnessRuntimeTrace } from '../logger/types.js';
-import type { ModelToolCall } from '../models/types.js';
+import { createEmptyModelUsage, type ModelToolCall } from '../models/types.js';
 import { HarnessObserver } from './observer.js';
 import type { HarnessEvent } from './types.js';
 
@@ -140,10 +140,36 @@ test('HarnessObserver marks fallback provider responses in provider_responded ev
   });
 
   observer.turnStarted(5);
-  observer.providerResponded(1, { model: 'fake-model', name: 'fake' }, { text: '' }, 12);
+  observer.providerResponded(
+    1,
+    { model: 'fake-model', name: 'fake' },
+    { text: '', usage: createEmptyModelUsage() },
+    12,
+  );
 
   const event = events[1];
 
   assert.equal(event?.type, 'provider_responded');
   assert.equal(event && event.type === 'provider_responded' ? event.usedFallbackText : undefined, true);
+});
+
+test('HarnessObserver sanitizes hook_error messages', () => {
+  const events: HarnessEvent[] = [];
+  const observer = new HarnessObserver({
+    getSessionId: () => 'session-1',
+    logger: undefined,
+    providerName: 'fake',
+  });
+
+  observer.subscribe((event) => {
+    events.push(event);
+  });
+
+  observer.turnStarted(5);
+  observer.hookError('plugin-a', 'onEvent', new Error('sensitive detail'));
+
+  const event = events.at(-1);
+
+  assert.equal(event?.type, 'hook_error');
+  assert.equal(event && event.type === 'hook_error' ? event.errorMessage : undefined, 'Plugin hook failed.');
 });

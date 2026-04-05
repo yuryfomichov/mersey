@@ -7,6 +7,8 @@ import { HarnessEventPublisher } from '../events/publisher.js';
 import type { HarnessEvent } from '../events/types.js';
 import type { ModelProvider } from '../models/provider.js';
 import { createEmptyModelUsage } from '../models/types.js';
+import { createPluginRunner } from '../plugins/runner.js';
+import type { HarnessPlugin } from '../plugins/types.js';
 import { FakeProvider } from '../providers/fake.js';
 import type { Message, SessionState } from '../sessions/types.js';
 import { withTempDir, writeWorkspaceFiles } from '../test/test-helpers.js';
@@ -87,6 +89,7 @@ function createLoopInput(input: {
   eventPublisher?: HarnessEventSink;
   history: readonly Message[];
   options?: Parameters<typeof streamLoop>[0]['options'];
+  plugins?: HarnessPlugin[];
   provider: Parameters<typeof streamLoop>[0]['provider'];
   sessionId: string;
   stream?: boolean;
@@ -94,16 +97,23 @@ function createLoopInput(input: {
   toolExecutionPolicy: ToolExecutionPolicy;
   tools: Tool[];
 }): Parameters<typeof streamLoop>[0] {
+  const observer = createObserver({
+    debug: input.debug,
+    eventPublisher: input.eventPublisher,
+    provider: input.provider,
+    sessionId: input.sessionId,
+  });
+
   return {
     content: input.content,
     history: input.history,
-    observer: createObserver({
-      debug: input.debug,
-      eventPublisher: input.eventPublisher,
-      provider: input.provider,
-      sessionId: input.sessionId,
-    }),
+    observer,
     options: input.options,
+    pluginRunner: createPluginRunner({
+      observer,
+      plugins: input.plugins ?? [],
+      runId: observer.getRunId(),
+    }),
     provider: input.provider,
     stream: input.stream ?? false,
     systemPrompt: input.systemPrompt,
@@ -648,5 +658,72 @@ test('streamLoop rejects multiple completed responses from one provider turn', a
       }),
     ),
     /Provider stream returned more than one completed response/,
+  );
+});
+
+test('streamLoop provider deny path hides non-exposed policy reason and reports provider error type', async () => {
+  const events: HarnessEvent[] = [];
+  const publisher = new HarnessEventPublisher();
+  publisher.subscribe((event) => {
+    events.push(event);
+  });
+
+  await assert.rejects(
+    collectFinalMessage(
+      createLoopInput({
+        content: 'hello',
+        eventPublisher: publisher,
+        history: [],
+        plugins: [
+          {
+            name: 'deny-provider',
+            beforeProviderCall() {
+              return { continue: false, reason: 'internal policy secret', exposeToModel: false };
+            },
+          },
+        ],
+        provider: new FakeProvider(),
+        sessionId: 'provider-deny-private',
+        toolExecutionPolicy: { workspaceRoot: process.cwd() },
+        tools: [],
+      }),
+    ),
+    /Provider request blocked by policy\./,
+  );
+
+  const providerBlocked = events.find((event) => event.type === 'provider_blocked');
+  assert.equal(providerBlocked?.type, 'provider_blocked');
+  assert.equal(
+    providerBlocked?.type === 'provider_blocked' ? providerBlocked.reason : undefined,
+    'internal policy secret',
+  );
+
+  const failed = events.find((event) => event.type === 'turn_failed');
+  assert.equal(failed?.type, 'turn_failed');
+  assert.equal(failed?.type === 'turn_failed' ? failed.errorType : undefined, 'provider');
+  assert.equal(failed?.type === 'turn_failed' ? failed.errorMessage : undefined, 'Provider request failed.');
+});
+
+test('streamLoop provider deny path can expose reason when explicitly allowed', async () => {
+  await assert.rejects(
+    collectFinalMessage(
+      createLoopInput({
+        content: 'hello',
+        history: [],
+        plugins: [
+          {
+            name: 'deny-provider',
+            beforeProviderCall() {
+              return { continue: false, reason: 'exposed policy reason', exposeToModel: true };
+            },
+          },
+        ],
+        provider: new FakeProvider(),
+        sessionId: 'provider-deny-exposed',
+        toolExecutionPolicy: { workspaceRoot: process.cwd() },
+        tools: [],
+      }),
+    ),
+    /exposed policy reason/,
   );
 });

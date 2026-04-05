@@ -1,5 +1,6 @@
 import { HarnessObserver } from '../events/observer.js';
 import type { ModelProvider } from '../models/provider.js';
+import type { PluginRunner } from '../plugins/runner.js';
 import { Session } from '../sessions/session.js';
 import type { Message } from '../sessions/types.js';
 import type { ToolRuntimeFactory } from '../tools/runtime/index.js';
@@ -13,6 +14,7 @@ import { streamLoop, type TurnChunk } from './loop.js';
 type TurnStreamOptions = {
   content: string;
   observer: HarnessObserver;
+  pluginRunner: PluginRunner;
   provider: ModelProvider;
   session: Session;
   stream: boolean;
@@ -20,7 +22,9 @@ type TurnStreamOptions = {
   toolRuntimeFactory: ToolRuntimeFactory;
 };
 
-export type TurnStreamFactoryOptions = Omit<TurnStreamOptions, 'content' | 'stream'>;
+export type TurnStreamFactoryOptions = Omit<TurnStreamOptions, 'content' | 'stream' | 'pluginRunner'> & {
+  pluginRunner: PluginRunner;
+};
 
 export type TurnStream = AsyncIterable<TurnChunk> & AsyncIterator<TurnChunk>;
 
@@ -55,6 +59,7 @@ export type TurnStreamFactory = (content: string, stream?: boolean) => TurnStrea
 function createTurnStream({
   content,
   observer,
+  pluginRunner,
   provider,
   session,
   stream,
@@ -82,6 +87,7 @@ function createTurnStream({
           content,
           history: session.messages,
           observer,
+          pluginRunner,
           provider,
           signal: abortController.signal,
           stream,

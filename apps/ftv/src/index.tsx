@@ -1,15 +1,18 @@
 import { Box, render, Text, useApp, useInput, useStdout } from 'ink';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   createHarness,
+  type BeforeToolCallContext,
   type Harness,
   type HarnessEvent,
+  type HookDecision,
   type Message,
   type ProviderName,
 } from '../../../harness/index.js';
 import { getBooleanFlag, getProviderName, getSessionId } from '../../helpers/cli/args.js';
 import { createDefaultTools, getProviderModel, getToolExecutionPolicy } from '../../helpers/cli/harness-config.js';
+import { createCliLoggers } from '../../helpers/cli/logging.js';
 import { getProviderDefinition } from '../../helpers/cli/provider-config.js';
 import {
   createSession,
@@ -17,6 +20,7 @@ import {
   getSessionStoreDefinition,
   type SessionStoreDefinition,
 } from '../../helpers/cli/session-store.js';
+import { createAwaitableToolApprovalPlugin } from './tool-approval-plugin.js';
 
 type AppState = {
   messages: Message[];
@@ -152,9 +156,15 @@ const ThinkingIndicator = ({ tool }: { tool: string | null }) => (
   </Box>
 );
 
-const StatusBar = ({ turnCount }: { turnCount: number }) => (
+const StatusBar = ({ turnCount, toolName }: { turnCount: number; toolName?: string }) => (
   <Box>
     <Text dimColor>turn: {turnCount} | q to quit</Text>
+    {toolName && (
+      <>
+        <Text dimColor> | </Text>
+        <Text color='yellow'>waiting: {toolName} (y/n)</Text>
+      </>
+    )}
   </Box>
 );
 
@@ -217,6 +227,13 @@ interface TuiAppProps {
 }
 
 const FTV_COMMAND_ALLOWLIST = ['git', 'ls', 'pwd', 'cat', 'head', 'grep', 'find', 'wc', 'sort', 'uniq'] as const;
+const TOOL_APPROVAL_TIMEOUT_MS = 60000;
+
+type PendingToolApproval = {
+  toolName: string;
+};
+
+type ToolApprovalResult = 'approved' | 'denied' | 'timed_out';
 
 const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition, sessionStoreLabel }: TuiAppProps) => {
   const { exit } = useApp();
@@ -230,6 +247,72 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
     turnCount: 0,
     input: '',
   });
+  const [pendingApproval, setPendingApproval] = useState<PendingToolApproval | null>(null);
+  const pendingApprovalResolverRef = useRef<{
+    resolve: (result: ToolApprovalResult) => void;
+    timeoutId: ReturnType<typeof setTimeout>;
+  } | null>(null);
+
+  const resolvePendingApproval = useCallback((result: ToolApprovalResult) => {
+    const pending = pendingApprovalResolverRef.current;
+
+    if (!pending) {
+      return;
+    }
+
+    pendingApprovalResolverRef.current = null;
+    clearTimeout(pending.timeoutId);
+    setPendingApproval(null);
+    pending.resolve(result);
+  }, []);
+
+  const blockAndAskUser = useCallback(
+    (ctx: BeforeToolCallContext): Promise<HookDecision> => {
+      if (pendingApprovalResolverRef.current) {
+        return Promise.resolve({
+          continue: false,
+          reason: 'Tool call denied while another approval is pending.',
+          exposeToModel: true,
+        });
+      }
+
+      setPendingApproval({
+        toolName: ctx.toolCall.name,
+      });
+
+      return new Promise<HookDecision>((resolve) => {
+        const timeoutId = setTimeout(() => {
+          resolvePendingApproval('timed_out');
+        }, TOOL_APPROVAL_TIMEOUT_MS);
+
+        pendingApprovalResolverRef.current = {
+          resolve: (result: ToolApprovalResult) => {
+            if (result === 'approved') {
+              resolve({ continue: true });
+              return;
+            }
+
+            resolve({
+              continue: false,
+              reason: result === 'timed_out' ? 'Tool call timed out.' : 'Tool call denied by user.',
+              exposeToModel: true,
+            });
+          },
+          timeoutId,
+        };
+      });
+    },
+    [resolvePendingApproval],
+  );
+
+  const toolApprovalPlugin = useMemo(() => createAwaitableToolApprovalPlugin({ blockAndAskUser }), [blockAndAskUser]);
+
+  useEffect(
+    () => () => {
+      resolvePendingApproval('denied');
+    },
+    [resolvePendingApproval],
+  );
 
   const [harness, setHarness] = useState<Harness | null>(null);
   const [ready, setReady] = useState(false);
@@ -243,56 +326,99 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
   });
 
   useEffect(() => {
+    let disposed = false;
+    let unsubscribe: (() => void) | undefined;
     const session = createSession(sessionStoreDefinition, sessionId);
     const providerDef = getProviderDefinition(providerName, process.env, cache);
 
-    const h = createHarness({
-      debug,
-      provider: providerDef,
-      session,
-      toolExecutionPolicy: getToolExecutionPolicy(),
-      tools: createDefaultTools({ commandAllowlist: FTV_COMMAND_ALLOWLIST }),
-    });
+    void (async () => {
+      try {
+        const { loggers } = await createCliLoggers(sessionId);
 
-    setHarness(h);
-    setProviderModel(getProviderModel(providerDef));
+        if (disposed) {
+          return;
+        }
 
-    let disposed = false;
+        const h = createHarness({
+          debug,
+          loggers,
+          plugins: [toolApprovalPlugin],
+          provider: providerDef,
+          session,
+          toolExecutionPolicy: getToolExecutionPolicy(),
+          tools: createDefaultTools({ commandAllowlist: FTV_COMMAND_ALLOWLIST }),
+        });
 
-    const hydrateMessages = () => {
-      setState((s) => ({
-        ...s,
-        messages: [...session.messages],
-      }));
-    };
+        setHarness(h);
+        setProviderModel(getProviderModel(providerDef));
 
-    const updateUsage = async () => {
-      const [usageSnapshot, contextSize] = await Promise.all([h.session.getUsage(), h.session.getContextSize()]);
+        const hydrateMessages = () => {
+          setState((s) => ({
+            ...s,
+            messages: [...session.messages],
+          }));
+        };
 
-      if (disposed) {
-        return;
-      }
+        const updateUsage = async () => {
+          const [usageSnapshot, contextSize] = await Promise.all([h.session.getUsage(), h.session.getContextSize()]);
 
-      setUsage({
-        cachedInputTokens: usageSnapshot.cachedInputTokens,
-        cacheWriteInputTokens: usageSnapshot.cacheWriteInputTokens,
-        contextSize,
-        outputTokens: usageSnapshot.outputTokens,
-        uncachedInputTokens: usageSnapshot.uncachedInputTokens,
-      });
-    };
+          if (disposed) {
+            return;
+          }
 
-    void h.session
-      .ensure()
-      .then(() => {
+          setUsage({
+            cachedInputTokens: usageSnapshot.cachedInputTokens,
+            cacheWriteInputTokens: usageSnapshot.cacheWriteInputTokens,
+            contextSize,
+            outputTokens: usageSnapshot.outputTokens,
+            uncachedInputTokens: usageSnapshot.uncachedInputTokens,
+          });
+        };
+
+        unsubscribe = h.subscribe((event: HarnessEvent) => {
+          switch (event.type) {
+            case 'turn_started':
+              setState((s) => ({
+                ...s,
+                isThinking: true,
+                streamingContent: '',
+              }));
+              break;
+            case 'tool_started':
+              setState((s) => ({ ...s, currentTool: event.toolName }));
+              break;
+            case 'tool_finished':
+              setState((s) => ({ ...s, currentTool: null }));
+              break;
+            case 'turn_finished':
+              setState((s) => ({
+                ...s,
+                isThinking: false,
+                streamingContent: '',
+                turnCount: s.turnCount + 1,
+              }));
+              void updateUsage();
+              break;
+            case 'turn_failed':
+              setState((s) => ({
+                ...s,
+                isThinking: false,
+                streamingContent: `Error: ${event.errorMessage}`,
+              }));
+              void updateUsage();
+              break;
+          }
+        });
+
+        await h.session.ensure();
+
         if (disposed) {
           return;
         }
 
         hydrateMessages();
-        return updateUsage();
-      })
-      .catch((error: unknown) => {
+        await updateUsage();
+      } catch (error: unknown) {
         if (disposed) {
           return;
         }
@@ -302,57 +428,32 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
           isThinking: false,
           streamingContent: `Error: ${error instanceof Error ? error.message : String(error)}`,
         }));
-      })
-      .finally(() => {
+      } finally {
         if (!disposed) {
           setReady(true);
         }
-      });
-
-    const unsubscribe = h.subscribe((event: HarnessEvent) => {
-      switch (event.type) {
-        case 'turn_started':
-          setState((s) => ({
-            ...s,
-            isThinking: true,
-            streamingContent: '',
-          }));
-          break;
-        case 'tool_started':
-          setState((s) => ({ ...s, currentTool: event.toolName }));
-          break;
-        case 'tool_finished':
-          setState((s) => ({ ...s, currentTool: null }));
-          break;
-        case 'turn_finished':
-          setState((s) => ({
-            ...s,
-            isThinking: false,
-            streamingContent: '',
-            turnCount: s.turnCount + 1,
-          }));
-          void updateUsage();
-          break;
-        case 'turn_failed':
-          setState((s) => ({
-            ...s,
-            isThinking: false,
-            streamingContent: `Error: ${event.errorMessage}`,
-          }));
-          void updateUsage();
-          break;
       }
-    });
+    })();
 
     return () => {
       disposed = true;
-      unsubscribe();
+      unsubscribe?.();
     };
-  }, [cache, debug, providerName, sessionId, sessionStoreDefinition]);
+  }, [cache, debug, providerName, sessionId, sessionStoreDefinition, toolApprovalPlugin]);
 
   useInput((input, key) => {
     if (input === 'q' || input === 'Q') {
       exit();
+    }
+
+    if ((input === 'y' || input === 'Y') && pendingApproval) {
+      resolvePendingApproval('approved');
+      return;
+    }
+
+    if ((input === 'n' || input === 'N') && pendingApproval) {
+      resolvePendingApproval('denied');
+      return;
     }
 
     if (key.return && ready && state.input.trim() && !state.isThinking && harness) {
@@ -428,7 +529,7 @@ const TuiApp = ({ cache, debug, providerName, sessionId, sessionStoreDefinition,
       />
 
       <Box flexDirection='column' flexShrink={0} marginTop={1}>
-        <StatusBar turnCount={state.turnCount} />
+        <StatusBar turnCount={state.turnCount} toolName={pendingApproval?.toolName} />
         <InputPanel input={state.input} isThinking={state.isThinking} ready={ready} />
       </Box>
     </Box>

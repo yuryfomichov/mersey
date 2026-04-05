@@ -116,3 +116,7 @@ export function sanitizeErrorMessage(errorType: 'provider' | 'tool' | 'runtime',
 
   return 'Runtime failed.';
 }
+
+export function sanitizeHookErrorMessage(): string {
+  return 'Plugin hook failed.';
+}
