@@ -1,7 +1,7 @@
 import { Box } from 'ink';
 import React from 'react';
 
-import type { Message } from '../../../../harness/index.js';
+import type { Message } from '../../../../harness/types.js';
 import { MessageList } from './message-list.js';
 
 interface ChatPanelProps {
@@ -13,7 +13,14 @@ interface ChatPanelProps {
   streamingContent: string;
 }
 
-export function ChatPanel({ contentWidth, currentTool, isThinking, maxBodyLines, messages, streamingContent }: ChatPanelProps) {
+export function ChatPanel({
+  contentWidth,
+  currentTool,
+  isThinking,
+  maxBodyLines,
+  messages,
+  streamingContent,
+}: ChatPanelProps) {
   return (
     <Box
       borderColor='cyan'
