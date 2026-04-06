@@ -1,7 +1,7 @@
 import { Text } from 'ink';
 import React from 'react';
 
-import type { Message } from '../../../../harness/index.js';
+import type { Message } from '../../../../harness/types.js';
 import { compactMessageText } from './utils.js';
 
 interface MessageItemProps {

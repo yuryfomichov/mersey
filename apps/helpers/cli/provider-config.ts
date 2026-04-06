@@ -1,4 +1,4 @@
-import type { ProviderDefinition, ProviderName } from '../../../harness/index.js';
+import type { ProviderDefinition, ProviderName } from '../../../harness/types.js';
 
 const ANTHROPIC_PROVIDER_CONFIG = {
   baseUrl: 'https://api.anthropic.com',

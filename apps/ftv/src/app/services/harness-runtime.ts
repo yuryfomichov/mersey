@@ -1,4 +1,5 @@
-import { createHarness, type Harness, type HarnessEvent, type ProviderName } from '../../../../../harness/index.js';
+import { createHarness } from '../../../../../harness/index.js';
+import { type Harness, type HarnessEvent, type ProviderName } from '../../../../../harness/types.js';
 import {
   createDefaultTools,
   getProviderModel,

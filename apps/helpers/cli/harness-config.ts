@@ -1,12 +1,6 @@
-import { type ProviderDefinition } from '../../../harness/index.js';
-import {
-  EditFileTool,
-  ReadFileTool,
-  RunCommandTool,
-  type Tool,
-  type ToolExecutionPolicy,
-  WriteFileTool,
-} from '../../../harness/tools/index.js';
+import { EditFileTool, ReadFileTool, RunCommandTool, WriteFileTool } from '../../../harness/tools/index.js';
+import { type Tool, type ToolExecutionPolicy } from '../../../harness/tools/types.js';
+import { type ProviderDefinition } from '../../../harness/types.js';
 
 export const DEFAULT_COMMAND_ALLOWLIST = ['git', 'ls', 'pwd'] as const;
 

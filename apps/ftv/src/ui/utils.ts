@@ -1,4 +1,4 @@
-import type { Message } from '../../../../harness/index.js';
+import type { Message } from '../../../../harness/types.js';
 
 export interface ChatLine {
   key: string;
@@ -27,7 +27,13 @@ export function getMessageKey(message: Message, index: number): string {
   return `${message.role}:${message.createdAt}:${index}`;
 }
 
-export function buildChatLines({ contentWidth, currentTool, isThinking, messages, streamingContent }: BuildChatLinesOptions): ChatLine[] {
+export function buildChatLines({
+  contentWidth,
+  currentTool,
+  isThinking,
+  messages,
+  streamingContent,
+}: BuildChatLinesOptions): ChatLine[] {
   const width = Math.max(1, contentWidth);
   const lines = messages.flatMap((message, index) => buildMessageLines(message, index, width));
 
@@ -59,11 +65,13 @@ function buildMessageLines(message: Message, index: number, width: number): Chat
   const keyBase = getMessageKey(message, index);
 
   if (message.role === 'user') {
-    return wrapPrefixedText('you: ', compactMessageText(message.content), width, ' '.repeat(5)).map((text, lineIndex) => ({
-      key: `${keyBase}:${lineIndex}`,
-      text,
-      color: 'green',
-    }));
+    return wrapPrefixedText('you: ', compactMessageText(message.content), width, ' '.repeat(5)).map(
+      (text, lineIndex) => ({
+        key: `${keyBase}:${lineIndex}`,
+        text,
+        color: 'green',
+      }),
+    );
   }
 
   if (message.role === 'assistant') {
@@ -88,9 +96,7 @@ function wrapPrefixedText(prefix: string, content: string, width: number, contin
 
   const firstLineWidth = Math.max(1, width - prefix.length);
   const continuationWidth = Math.max(1, width - continuationPrefix.length);
-  const wrapped = (content || ' ')
-    .split('\n')
-    .flatMap((line) => wrapText(line, firstLineWidth, continuationWidth));
+  const wrapped = (content || ' ').split('\n').flatMap((line) => wrapText(line, firstLineWidth, continuationWidth));
 
   return wrapped.map((line, index) => `${index === 0 ? prefix : continuationPrefix}${line}`);
 }

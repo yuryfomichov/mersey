@@ -7,7 +7,7 @@ import type {
   HarnessEvent,
   HookDecision,
   Message,
-} from '../../../../../harness/index.js';
+} from '../../../../../harness/types.js';
 import { TOOL_APPROVAL_TIMEOUT_MS } from '../constants.js';
 import { createHarnessRuntime, type HarnessRuntime } from '../services/harness-runtime.js';
 import {

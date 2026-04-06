@@ -1,7 +1,7 @@
 import { Box, Text } from 'ink';
 import React from 'react';
 
-import type { Message } from '../../../../harness/index.js';
+import type { Message } from '../../../../harness/types.js';
 import { buildChatLines } from './utils.js';
 
 interface MessageListProps {
@@ -13,7 +13,14 @@ interface MessageListProps {
   streamingContent: string;
 }
 
-export function MessageList({ contentWidth, currentTool, isThinking, maxLines, messages, streamingContent }: MessageListProps) {
+export function MessageList({
+  contentWidth,
+  currentTool,
+  isThinking,
+  maxLines,
+  messages,
+  streamingContent,
+}: MessageListProps) {
   const lines = buildChatLines({
     contentWidth,
     currentTool,

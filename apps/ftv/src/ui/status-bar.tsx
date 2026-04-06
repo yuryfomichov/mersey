@@ -14,7 +14,10 @@ export function StatusBar({ turnCount, toolName, toolSummary }: StatusBarProps) 
       {toolName && (
         <>
           <Text dimColor> | </Text>
-          <Text color='yellow'>waiting: {toolName}{toolSummary ? ` ${toolSummary}` : ''} (y/n)</Text>
+          <Text color='yellow'>
+            waiting: {toolName}
+            {toolSummary ? ` ${toolSummary}` : ''} (y/n)
+          </Text>
         </>
       )}
     </Box>

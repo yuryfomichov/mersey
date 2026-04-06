@@ -1,4 +1,4 @@
-import type { BeforeToolCallContext, HarnessPlugin, HookDecision } from '../../../harness/index.js';
+import type { BeforeToolCallContext, HarnessPlugin, HookDecision } from '../../../harness/types.js';
 
 export type BlockAndAskUser = (ctx: BeforeToolCallContext) => Promise<HookDecision> | HookDecision;
 
