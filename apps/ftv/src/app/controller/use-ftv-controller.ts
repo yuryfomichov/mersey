@@ -10,14 +10,20 @@ import type {
 } from '../../../../../harness/index.js';
 import { TOOL_APPROVAL_TIMEOUT_MS } from '../constants.js';
 import { createHarnessRuntime, type HarnessRuntime } from '../services/harness-runtime.js';
-import { type PendingToolApproval, type ToolApprovalResult, type UsageState } from '../types.js';
+import {
+  type PendingToolApproval,
+  type ProviderName,
+  type SessionStoreDefinition,
+  type ToolApprovalResult,
+  type UsageState,
+} from '../types.js';
 
 export interface UseFtvControllerOptions {
   cache: boolean;
   debug: boolean;
-  providerName: string;
+  providerName: ProviderName;
   sessionId: string;
-  sessionStoreDefinition: unknown;
+  sessionStoreDefinition: SessionStoreDefinition;
 }
 
 export interface FtvControllerState {
@@ -94,7 +100,13 @@ export function useFtvController(options: UseFtvControllerOptions): UseFtvContro
         });
       }
 
-      setState((s) => ({ ...s, pendingApproval: { toolName: ctx.toolCall.name } }));
+      setState((s) => ({
+        ...s,
+        pendingApproval: {
+          toolName: ctx.toolCall.name,
+          summary: formatToolApprovalSummary(ctx),
+        },
+      }));
 
       return new Promise<HookDecision>((resolve) => {
         const timeoutId = setTimeout(() => {
@@ -129,9 +141,9 @@ export function useFtvController(options: UseFtvControllerOptions): UseFtvContro
           {
             cache: options.cache,
             debug: options.debug,
-            providerName: options.providerName as never,
+            providerName: options.providerName,
             sessionId: options.sessionId,
-            sessionStoreDefinition: options.sessionStoreDefinition as never,
+            sessionStoreDefinition: options.sessionStoreDefinition,
             blockAndAskUser,
           },
           (event: HarnessEvent) => {
@@ -298,4 +310,42 @@ export function useFtvController(options: UseFtvControllerOptions): UseFtvContro
     actions: { setInput, approveTool, denyTool, submitMessage },
     exit,
   };
+}
+
+function formatToolApprovalSummary(ctx: BeforeToolCallContext): string | undefined {
+  const input = toToolInputRecord(ctx.toolCall.input);
+
+  switch (ctx.toolCall.name) {
+    case 'read_file':
+    case 'write_file':
+    case 'edit_file':
+      return formatPathSummary(input.path);
+    case 'run_command':
+      return formatCommandSummary(input.command, input.args, input.cwd);
+    default:
+      return undefined;
+  }
+}
+
+function toToolInputRecord(input: unknown): Record<string, unknown> {
+  return input && typeof input === 'object' ? (input as Record<string, unknown>) : {};
+}
+
+function formatPathSummary(path: unknown): string | undefined {
+  return typeof path === 'string' && path.length > 0 ? path : undefined;
+}
+
+function formatCommandSummary(command: unknown, args: unknown, cwd: unknown): string | undefined {
+  if (typeof command !== 'string' || command.length === 0) {
+    return undefined;
+  }
+
+  const argText = Array.isArray(args) ? args.filter((arg): arg is string => typeof arg === 'string').join(' ') : '';
+  const commandText = argText ? `${command} ${argText}` : command;
+
+  if (typeof cwd === 'string' && cwd.length > 0) {
+    return `${commandText} @ ${cwd}`;
+  }
+
+  return commandText;
 }

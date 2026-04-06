@@ -10,7 +10,8 @@ import { StatusBar } from '../ui/status-bar.js';
 import { useFtvController } from './controller/use-ftv-controller.js';
 import { type TuiAppProps } from './types.js';
 
-const MESSAGE_WINDOW_SIZE = 10;
+const NON_CHAT_ROWS = 12;
+const CHAT_CONTENT_WIDTH_PADDING = 4;
 
 export function FtvApp({
   cache,
@@ -22,6 +23,7 @@ export function FtvApp({
 }: TuiAppProps) {
   const { stdout } = useStdout();
   const rows = stdout.rows ?? 24;
+  const columns = stdout.columns ?? 80;
 
   const { state, actions, exit } = useFtvController({
     cache,
@@ -59,7 +61,8 @@ export function FtvApp({
     }
   });
 
-  const hasMoreMessages = state.messages.length > MESSAGE_WINDOW_SIZE;
+  const chatBodyMaxLines = Math.max(3, rows - NON_CHAT_ROWS);
+  const chatContentWidth = Math.max(16, columns - CHAT_CONTENT_WIDTH_PADDING);
 
   return (
     <Box flexDirection='column' height={rows}>
@@ -77,15 +80,20 @@ export function FtvApp({
       </Box>
 
       <ChatPanel
+        contentWidth={chatContentWidth}
         currentTool={state.currentTool}
-        hasMoreMessages={hasMoreMessages}
         isThinking={state.isThinking}
+        maxBodyLines={chatBodyMaxLines}
         messages={state.messages}
         streamingContent={state.streamingContent}
       />
 
       <Box flexDirection='column' flexShrink={0} marginTop={1}>
-        <StatusBar turnCount={state.turnCount} toolName={state.pendingApproval?.toolName} />
+        <StatusBar
+          turnCount={state.turnCount}
+          toolName={state.pendingApproval?.toolName}
+          toolSummary={state.pendingApproval?.summary}
+        />
         <InputPanel input={state.input} isThinking={state.isThinking} ready={state.ready} />
       </Box>
     </Box>

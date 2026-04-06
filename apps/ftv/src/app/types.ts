@@ -11,6 +11,7 @@ export interface UsageState {
 
 export interface PendingToolApproval {
   toolName: string;
+  summary?: string;
 }
 
 export type ToolApprovalResult = 'approved' | 'denied' | 'timed_out';
