@@ -10,10 +10,11 @@ Key exports include:
 
 - `createHarness`
 - `Session`, `MemorySessionStore`, `FilesystemSessionStore`
-- provider types like `ProviderDefinition`, `ProviderName`, and `ModelProvider`
+- provider-agnostic types like `ModelProvider`
 - event and plugin types
 
 Built-in tools are exported from `harness/tools/index.ts`.
+Built-in providers are exported from `harness/providers/index.ts`.
 
 ## Minimal Example
 
@@ -21,9 +22,10 @@ This is the smallest useful setup for app code inside this repo.
 
 ```ts
 import { createHarness } from '../harness/index.js';
+import { FakeProvider } from '../harness/providers/index.js';
 
 const harness = createHarness({
-  provider: { name: 'fake' },
+  providerInstance: new FakeProvider(),
 });
 
 const reply = await harness.sendMessage('hello');
@@ -37,28 +39,23 @@ console.log(reply.content);
 
 `harness` talks to models through the provider-agnostic `ModelProvider` interface.
 
-That keeps the loop independent from provider SDK details. Provider-specific request and response mapping belongs in `harness/src/providers/`.
+That keeps the loop independent from provider SDK details. Provider-specific request and response mapping belongs in `harness/providers/`.
 
-You can pass either:
+Apps construct provider instances outside core and pass them into `createHarness()`.
 
-- `providerInstance` when the app constructs a provider itself
-- `provider` when the app wants `createHarness()` to instantiate from a provider definition
-
-Example with a provider definition:
+Example with an OpenAI provider:
 
 ```ts
 import { createHarness } from '../harness/index.js';
+import { OpenAIProvider } from '../harness/providers/index.js';
 
 const harness = createHarness({
-  provider: {
-    name: 'openai',
-    config: {
-      apiKey: process.env.OPENAI_API_KEY!,
-      baseUrl: 'https://api.openai.com/v1',
-      model: 'gpt-5.4-mini',
-      maxTokens: 2048,
-    },
-  },
+  providerInstance: new OpenAIProvider({
+    apiKey: process.env.OPENAI_API_KEY!,
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-5.4-mini',
+    maxTokens: 2048,
+  }),
 });
 ```
 
@@ -75,6 +72,7 @@ The default session uses in-memory storage. Apps can inject a persistent store w
 
 ```ts
 import { createHarness, FilesystemSessionStore, Session } from '../harness/index.js';
+import { FakeProvider } from '../harness/providers/index.js';
 
 const session = new Session({
   id: 'local-session',
@@ -82,7 +80,7 @@ const session = new Session({
 });
 
 const harness = createHarness({
-  provider: { name: 'fake' },
+  providerInstance: new FakeProvider(),
   session,
 });
 
@@ -101,10 +99,11 @@ Example:
 
 ```ts
 import { createHarness } from '../harness/index.js';
+import { FakeProvider } from '../harness/providers/index.js';
 import { EditFileTool, ReadFileTool, RunCommandTool, WriteFileTool } from '../harness/tools/index.js';
 
 const harness = createHarness({
-  provider: { name: 'fake' },
+  providerInstance: new FakeProvider(),
   tools: [
     new ReadFileTool({ policy: { maxToolResultBytes: 16 * 1024, workspaceRoot: process.cwd() } }),
     new WriteFileTool({ policy: { maxToolResultBytes: 16 * 1024, workspaceRoot: process.cwd() } }),
@@ -127,8 +126,11 @@ Each tool owns its own runtime services and enforces workspace and output limits
 Apps that want incremental text output should consume `TurnChunk`s.
 
 ```ts
+import { createHarness } from '../harness/index.js';
+import { FakeProvider } from '../harness/providers/index.js';
+
 const harness = createHarness({
-  provider: { name: 'fake' },
+  providerInstance: new FakeProvider(),
 });
 
 for await (const chunk of harness.streamMessage('hello')) {
@@ -142,13 +144,13 @@ for await (const chunk of harness.streamMessage('hello')) {
 }
 ```
 
-Chunk types come from `harness/src/loop/loop.ts`:
+Chunk types come from `harness/src/core/loop.ts`:
 
 - `assistant_delta`
 - `assistant_message_completed`
 - `final_message`
 
-`harness/src/turn-stream.ts` handles session locking, abort behavior, loop execution, and persisting the resulting turn.
+`harness/src/core/turn-stream.ts` handles session locking, abort behavior, loop execution, and persisting the resulting turn.
 
 ## Events And Logging
 
@@ -168,10 +170,11 @@ The core harness is event-only. Logging is implemented through plugins that subs
 
 ```ts
 import { createHarness } from '../harness/index.js';
+import { FakeProvider } from '../harness/providers/index.js';
 import { createJsonlEventLoggingPlugin, createTextEventLoggingPlugin } from '../harness/plugins/index.js';
 
 const harness = createHarness({
-  provider: { name: 'fake' },
+  providerInstance: new FakeProvider(),
   plugins: [
     createJsonlEventLoggingPlugin({ path: 'logs/session.jsonl' }),
     createTextEventLoggingPlugin({ path: 'logs/session.log' }),
@@ -188,6 +191,6 @@ Keep the boundary between app code and `harness` sharp:
 - app code should own UI and input collection
 - app code should choose provider config, session storage, and tool registration
 - `harness` should own the turn loop, pause/resume semantics, tool execution, and session updates
-- provider-specific codecs should stay in `harness/src/providers/codecs/`
+- provider-specific codecs should stay in `harness/providers/codecs/`
 
 In practice, `apps/cli/src/index.ts` is the best reference for a minimal terminal integration, while `apps/ftv/src/index.tsx` shows the same `harness` contract driving an Ink UI. Shared app-side setup lives in `apps/helpers/cli/`.

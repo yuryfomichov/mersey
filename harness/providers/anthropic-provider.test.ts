@@ -3,9 +3,9 @@ import test from 'node:test';
 
 import Anthropic from '@anthropic-ai/sdk';
 
-import { createEmptyModelUsage } from '../models/types.js';
-import { collectEvents, collectResponse } from '../test/provider-test-helpers.js';
+import { createEmptyModelUsage } from '../src/models/types.js';
 import { AnthropicProvider } from './anthropic.js';
+import { collectEvents, collectResponse } from './test/provider-test-helpers.js';
 
 function createAnthropicMessage(content: Anthropic.Message['content']): Anthropic.Message {
   return {

@@ -10,10 +10,8 @@ export type {
   BeforeProviderCallContext,
   BeforeToolCallContext,
   HarnessPlugin,
-  HookName,
   HookDecision,
+  HookName,
   PluginEventContext,
 } from './src/plugins/types.js';
 export type { TurnChunk } from './src/core/loop.js';
-
-export type { ProviderDefinition, ProviderName } from './src/providers/factory.js';

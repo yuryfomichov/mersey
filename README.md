@@ -15,11 +15,10 @@ The repo is organized around a reusable `harness` package and thin apps that sit
 - `harness/`: reusable runtime for model turns, sessions, tools, and events
 - `harness/index.ts`: public package entry point for apps consuming `harness`
 - `harness/src/harness.ts`: implementation behind `createHarness()`
-- `harness/src/loop/`: provider-agnostic turn loop and tool iteration flow
-- `harness/src/turn-stream.ts`: stream-oriented wrapper around a session turn
+- `harness/src/core/`: provider-agnostic turn loop and streaming turn wrapper
 - `harness/src/models/`: provider contracts and shared request/response types
-- `harness/src/providers/`: provider implementations, codecs, and factory
-- `harness/src/tools/`: built-in tools and runtime services
+- `harness/providers/`: provider implementations, codecs, factory, and provider-facing types
+- `harness/tools/`: built-in tools and tool-owned services
 - `harness/src/sessions/`: session state and storage implementations
 - `harness/src/events/`: event emitter/reporter and safe telemetry
 - `harness/plugins/logging/`: built-in JSONL and text logging plugins
@@ -89,7 +88,7 @@ pnpm ftv -- --provider openai --session-store filesystem --sessions-dir tmp/sess
 - Logging is plugin-based: apps inject logging plugins through `createHarness({ plugins })`.
 - Shared app-side provider, session, tool, and logging plugin wiring lives under `apps/helpers/cli/` so apps do not depend on each other.
 - The turn loop depends on `ModelProvider`, not SDK-specific request or response types.
-- Provider-specific translation belongs in `harness/src/providers/` and `harness/src/providers/codecs/`.
+- Provider-specific translation belongs in `harness/providers/` and `harness/providers/codecs/`.
 - Tool services (files, commands, output) are constructed by each built-in tool and enforce workspace and output policies directly.
 - Session stores are replaceable. The repo currently ships in-memory and filesystem-backed stores.
 

@@ -16,15 +16,13 @@ Main goals:
   - shared runtime
 - `harness/src/harness.ts`
   - main app-facing entry point through `createHarness()`
-- `harness/src/loop/`
-  - provider-agnostic turn loop and tool iteration logic
-- `harness/src/turn-stream.ts`
-  - session-aware streaming wrapper around a turn
+- `harness/src/core/`
+  - provider-agnostic turn loop and session-aware streaming wrapper around a turn
 - `harness/src/models/`
   - provider-agnostic model contracts
-- `harness/src/providers/`
-  - provider implementations and factory
-- `harness/src/providers/codecs/`
+- `harness/providers/`
+  - provider implementations, factory, and provider-facing types
+- `harness/providers/codecs/`
   - provider-specific request/response translation
 - `harness/src/tools/runtime/`
   - workspace-safe file, command, cancellation, and output services
@@ -52,7 +50,7 @@ Main goals:
 - `harness/src/harness.ts` is the contract surface apps should build against first.
 - `harness/src/loop/loop.ts` should depend on `ModelProvider`, not SDK-specific request or response types.
 - `harness/src/turn-stream.ts` should stay responsible for session locking, turn execution, and persisting turn results.
-- Provider-specific request/response mapping belongs in `harness/src/providers/` and `harness/src/providers/codecs/`.
+- Provider-specific request/response mapping belongs in `harness/providers/` and `harness/providers/codecs/`.
 - Tool-specific workspace, command, and output policy belongs in `harness/src/tools/runtime/`, not in apps.
 - Apps should decide which tools are registered, but the runtime behavior should stay inside `harness`.
 - Session persistence details belong in `harness/src/sessions/` so apps can swap storage without changing loop behavior.
@@ -62,7 +60,7 @@ Main goals:
 
 ## Providers
 
-- Provider selection is string-based through `harness/src/providers/factory.ts`.
+- Provider selection is string-based through `harness/providers/factory.ts`.
 - Public providers wired through the factory today: `anthropic`, `minimax`, `openai`, `fake`.
 
 ## Commands

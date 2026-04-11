@@ -1,5 +1,5 @@
-import { parseProviderName } from '../../../harness/index.js';
-import { type ProviderName } from '../../../harness/types.js';
+import { parseProviderName } from '../../../harness/providers/index.js';
+import { type ProviderName } from '../../../harness/providers/types.js';
 
 export function getArgValue(args: string[], name: string): string | null {
   for (let index = 0; index < args.length; index += 1) {

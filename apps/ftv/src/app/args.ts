@@ -1,4 +1,4 @@
-import type { ProviderName } from '../../../../harness/types.js';
+import type { ProviderName } from '../../../../harness/providers/types.js';
 import { getBooleanFlag, getProviderName, getSessionId } from '../../../helpers/cli/args.js';
 import {
   getSessionStoreDefinition,

@@ -1,8 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { MessageParam, Tool } from '@anthropic-ai/sdk/resources/messages/messages';
 
-import type { ModelProvider } from '../models/provider.js';
-import type { ModelRequest, ModelStreamEvent } from '../models/types.js';
+import type { ModelProvider } from '../src/models/provider.js';
+import type { ModelRequest, ModelStreamEvent } from '../src/models/types.js';
 import { AnthropicCodec } from './codecs/anthropic.js';
 
 export type AnthropicLikeProviderConfig = {

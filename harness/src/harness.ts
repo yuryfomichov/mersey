@@ -6,7 +6,6 @@ import type { HarnessEventListener } from './events/types.js';
 import type { ModelProvider } from './models/provider.js';
 import { createPluginRunner } from './plugins/runner.js';
 import type { HarnessPlugin } from './plugins/types.js';
-import { createProvider, type ProviderDefinition } from './providers/factory.js';
 import { MemorySessionStore } from './sessions/memory-store.js';
 import { Session } from './sessions/session.js';
 import type { Message } from './sessions/types.js';
@@ -24,17 +23,16 @@ export type CreateHarnessOptions = {
   debug?: boolean;
   plugins?: HarnessPlugin[];
   providerInstance?: ModelProvider;
-  provider?: ProviderDefinition;
   session?: Session;
   systemPrompt?: string;
   tools?: Tool[];
 };
 
-function ensureProvider(options: Pick<CreateHarnessOptions, 'provider' | 'providerInstance'>): ModelProvider {
-  const provider = options.providerInstance ?? (options.provider ? createProvider(options.provider) : null);
+function ensureProvider(options: Pick<CreateHarnessOptions, 'providerInstance'>): ModelProvider {
+  const provider = options.providerInstance ?? null;
 
   if (!provider) {
-    throw new Error('Missing provider. Pass providerInstance or provider config to createHarness().');
+    throw new Error('Missing provider. Pass providerInstance to createHarness().');
   }
 
   return provider;

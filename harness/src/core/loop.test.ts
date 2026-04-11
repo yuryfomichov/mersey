@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { FakeProvider } from '../../providers/fake.js';
 import { ReadFileTool } from '../../tools/read-file.js';
 import { HarnessEventEmitter, type HarnessEventSink } from '../events/emitter.js';
 import { HarnessEventReporter } from '../events/reporter.js';
@@ -9,7 +10,6 @@ import type { ModelProvider } from '../models/provider.js';
 import { createEmptyModelUsage } from '../models/types.js';
 import { createPluginRunner } from '../plugins/runner.js';
 import type { HarnessPlugin } from '../plugins/types.js';
-import { FakeProvider } from '../providers/fake.js';
 import type { Message, SessionState } from '../sessions/types.js';
 import { withTempDir, writeWorkspaceFiles } from '../test/test-helpers.js';
 import { createToolRuntimeFactory } from '../tools/runtime/index.js';
