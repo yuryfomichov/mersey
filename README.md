@@ -19,7 +19,8 @@ The repo is organized around a reusable `harness` package and thin apps that sit
 - `harness/src/models/`: provider contracts and shared request/response types
 - `harness/providers/`: provider implementations, codecs, factory, and provider-facing types
 - `harness/tools/`: built-in tools and tool-owned services
-- `harness/src/sessions/`: session state and storage implementations
+- `harness/src/sessions/`: core session contracts and runtime-facing session interfaces
+- `harness/sessions/`: built-in `Session`, `MemorySessionStore`, and `FilesystemSessionStore`
 - `harness/src/events/`: event emitter/reporter and safe telemetry
 - `harness/plugins/logging/`: built-in JSONL and text logging plugins
 - `apps/helpers/cli/`: shared app-side wiring for provider, session, tool, and logging setup
