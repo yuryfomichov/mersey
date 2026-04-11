@@ -5,6 +5,6 @@ export type {
   ToolInput,
   ToolInputSchema,
   ToolResultData,
-} from '../src/tools/types.js';
+} from '../runtime/tools/types.js';
 
 export type { ToolExecutionPolicy } from './services/index.js';

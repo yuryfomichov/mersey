@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { createEmptyModelUsage } from '../src/models/types.js';
-import type { Message, SessionState, StoredSessionState } from '../src/sessions/types.js';
+import { createEmptyModelUsage } from '../runtime/models/types.js';
+import type { Message, SessionState, StoredSessionState } from '../runtime/sessions/types.js';
 import { MemorySessionStore } from './memory-store.js';
 import { Session } from './session.js';
 

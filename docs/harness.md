@@ -173,13 +173,13 @@ for await (const chunk of harness.streamMessage('hello')) {
 }
 ```
 
-Chunk types come from `harness/src/core/loop.ts`:
+Chunk types come from `harness/runtime/core/loop.ts`:
 
 - `assistant_delta`
 - `assistant_message_completed`
 - `final_message`
 
-`harness/src/core/turn-stream.ts` handles session locking, abort behavior, loop execution, and persisting the resulting turn.
+`harness/runtime/core/turn-stream.ts` handles session locking, abort behavior, loop execution, and persisting the resulting turn.
 
 ## Events And Logging
 
@@ -193,7 +193,7 @@ const unsubscribe = harness.subscribe((event) => {
 unsubscribe();
 ```
 
-The event stream includes turn lifecycle, provider calls, and tool execution. See `harness/src/events/types.ts` for the full event union.
+The event stream includes turn lifecycle, provider calls, and tool execution. See `harness/runtime/events/types.ts` for the full event union.
 
 The core harness is event-only. Logging is implemented through plugins that subscribe with `onEvent`.
 

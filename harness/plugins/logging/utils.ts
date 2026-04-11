@@ -1,4 +1,4 @@
-import type { HarnessEvent } from '../../src/events/types.js';
+import type { HarnessEvent } from '../../runtime/events/types.js';
 
 function hasUnsafeStringContent(value: string): boolean {
   for (const character of value) {

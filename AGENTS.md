@@ -14,23 +14,23 @@ Main goals:
 
 - `harness/`
   - shared runtime
-- `harness/src/harness.ts`
+- `harness/runtime/harness.ts`
   - main app-facing entry point through `createHarness()`
-- `harness/src/core/`
+- `harness/runtime/core/`
   - provider-agnostic turn loop and session-aware streaming wrapper around a turn
-- `harness/src/models/`
+- `harness/runtime/models/`
   - provider-agnostic model contracts
 - `harness/providers/`
   - provider implementations, factory, and provider-facing types
 - `harness/providers/codecs/`
   - provider-specific request/response translation
-- `harness/src/tools/runtime/`
+- `harness/runtime/tools/runtime/`
   - workspace-safe file, command, cancellation, and output services
-- `harness/src/sessions/`
+- `harness/runtime/sessions/`
   - core session contracts and runtime-facing session interface
 - `harness/sessions/`
   - built-in `Session`, `MemorySessionStore`, and `FilesystemSessionStore`
-- `harness/src/events/`
+- `harness/runtime/events/`
   - event emitter/reporter and safe telemetry
 - `harness/plugins/logging/`
   - built-in JSONL/text event logging plugins
@@ -49,15 +49,15 @@ Main goals:
 - CLI owns the user interaction loop.
 - `harness` owns the model turn loop, tool execution, session updates, and event emission.
 - The `harness` client contract is the most important interface in the repo and should stay as simple as possible for apps to connect to.
-- `harness/src/harness.ts` is the contract surface apps should build against first.
-- The turn-loop code in `harness/src/core/` should depend on `ModelProvider`, not SDK-specific request or response types.
-- The turn-streaming code in `harness/src/core/` should stay responsible for session locking, turn execution, and persisting turn results.
+- `harness/runtime/harness.ts` is the contract surface apps should build against first.
+- The turn-loop code in `harness/runtime/core/` should depend on `ModelProvider`, not SDK-specific request or response types.
+- The turn-streaming code in `harness/runtime/core/` should stay responsible for session locking, turn execution, and persisting turn results.
 - Provider-specific request/response mapping belongs in `harness/providers/` and `harness/providers/codecs/`.
-- Tool-specific workspace, command, and output policy belongs in `harness/src/tools/runtime/`, not in apps.
+- Tool-specific workspace, command, and output policy belongs in `harness/runtime/tools/runtime/`, not in apps.
 - Apps should decide which tools are registered, but the runtime behavior should stay inside `harness`.
 - `createHarness()` should receive provider and session instances from app-side wiring; core should not construct built-in sessions internally.
-- Core session contracts belong in `harness/src/sessions/`; built-in session implementations belong in `harness/sessions/` so apps can swap them without changing loop behavior.
-- Event shape and safe telemetry belong in `harness/src/events/` so apps can observe runtime behavior without coupling to implementation details.
+- Core session contracts belong in `harness/runtime/sessions/`; built-in session implementations belong in `harness/sessions/` so apps can swap them without changing loop behavior.
+- Event shape and safe telemetry belong in `harness/runtime/events/` so apps can observe runtime behavior without coupling to implementation details.
 - Logging is plugin-based and app-injected; core harness stays event-only.
 - Tool registration and behavior are unchanged in the logging refactor phase.
 

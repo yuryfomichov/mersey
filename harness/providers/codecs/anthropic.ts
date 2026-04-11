@@ -12,7 +12,7 @@ import {
   type ModelRequest,
   type ModelResponse,
   type ModelUsage,
-} from '../../src/models/types.js';
+} from '../../runtime/models/types.js';
 
 export class AnthropicCodec {
   getMessages(input: ModelRequest): MessageParam[] {

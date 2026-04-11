@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import Anthropic from '@anthropic-ai/sdk';
 
-import { createEmptyModelUsage } from '../src/models/types.js';
+import { createEmptyModelUsage } from '../runtime/models/types.js';
 import { AnthropicProvider } from './anthropic.js';
 import { collectEvents, collectResponse } from './test/provider-test-helpers.js';
 
@@ -14,6 +14,7 @@ function createAnthropicMessage(content: Anthropic.Message['content']): Anthropi
     id: 'msg_123',
     model: 'claude-test-model' as Anthropic.Message['model'],
     role: 'assistant',
+    stop_details: null,
     stop_reason: 'tool_use',
     stop_sequence: null,
     type: 'message',

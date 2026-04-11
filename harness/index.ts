@@ -1,1 +1,1 @@
-export { createHarness } from './src/harness.js';
+export { createHarness } from './runtime/harness.js';

@@ -1,5 +1,5 @@
-import type { HarnessEvent } from '../../src/events/types.js';
-import type { HarnessPlugin } from '../../src/plugins/types.js';
+import type { HarnessEvent } from '../../runtime/events/types.js';
+import type { HarnessPlugin } from '../../runtime/plugins/types.js';
 import { createQueuedLineWriter, type LoggingFileOptions } from './file.js';
 import { toEventTextLine } from './utils.js';
 

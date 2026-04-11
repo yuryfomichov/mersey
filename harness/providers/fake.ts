@@ -1,10 +1,10 @@
-import type { ModelProvider } from '../src/models/provider.js';
+import type { ModelProvider } from '../runtime/models/provider.js';
 import {
   createEmptyModelUsage,
   type ModelRequest,
   type ModelResponse,
   type ModelStreamEvent,
-} from '../src/models/types.js';
+} from '../runtime/models/types.js';
 
 type FakeProviderReply = string | ModelResponse | ((input: ModelRequest) => string | ModelResponse);
 type FakeProviderStreamReply =

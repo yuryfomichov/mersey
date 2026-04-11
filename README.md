@@ -14,14 +14,14 @@ The repo is organized around a reusable `harness` package and thin apps that sit
 
 - `harness/`: reusable runtime for model turns, sessions, tools, and events
 - `harness/index.ts`: public package entry point for apps consuming `harness`
-- `harness/src/harness.ts`: implementation behind `createHarness()`
-- `harness/src/core/`: provider-agnostic turn loop and streaming turn wrapper
-- `harness/src/models/`: provider contracts and shared request/response types
+- `harness/runtime/harness.ts`: implementation behind `createHarness()`
+- `harness/runtime/core/`: provider-agnostic turn loop and streaming turn wrapper
+- `harness/runtime/models/`: provider contracts and shared request/response types
 - `harness/providers/`: provider implementations, codecs, factory, and provider-facing types
 - `harness/tools/`: built-in tools and tool-owned services
-- `harness/src/sessions/`: core session contracts and runtime-facing session interfaces
+- `harness/runtime/sessions/`: core session contracts and runtime-facing session interfaces
 - `harness/sessions/`: built-in `Session`, `MemorySessionStore`, and `FilesystemSessionStore`
-- `harness/src/events/`: event emitter/reporter and safe telemetry
+- `harness/runtime/events/`: event emitter/reporter and safe telemetry
 - `harness/plugins/logging/`: built-in JSONL and text logging plugins
 - `apps/helpers/cli/`: shared app-side wiring for provider, session, tool, and logging setup
 - `apps/cli/`: thin terminal app over `harness`

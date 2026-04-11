@@ -1,6 +1,6 @@
-import { createEmptyModelUsage } from '../src/models/types.js';
-import type { SessionStore } from '../src/sessions/store.js';
-import type { Message, SessionState, StoredSessionState } from '../src/sessions/types.js';
+import { createEmptyModelUsage } from '../runtime/models/types.js';
+import type { SessionStore } from '../runtime/sessions/store.js';
+import type { Message, SessionState, StoredSessionState } from '../runtime/sessions/types.js';
 
 function cloneMessage<T extends Message>(message: T): T {
   return structuredClone(message);
