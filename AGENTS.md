@@ -27,7 +27,9 @@ Main goals:
 - `harness/src/tools/runtime/`
   - workspace-safe file, command, cancellation, and output services
 - `harness/src/sessions/`
-  - session types and storage implementations
+  - core session contracts and runtime-facing session interface
+- `harness/sessions/`
+  - built-in `Session`, `MemorySessionStore`, and `FilesystemSessionStore`
 - `harness/src/events/`
   - event emitter/reporter and safe telemetry
 - `harness/plugins/logging/`
@@ -53,7 +55,8 @@ Main goals:
 - Provider-specific request/response mapping belongs in `harness/providers/` and `harness/providers/codecs/`.
 - Tool-specific workspace, command, and output policy belongs in `harness/src/tools/runtime/`, not in apps.
 - Apps should decide which tools are registered, but the runtime behavior should stay inside `harness`.
-- Session persistence details belong in `harness/src/sessions/` so apps can swap storage without changing loop behavior.
+- `createHarness()` should receive provider and session instances from app-side wiring; core should not construct built-in sessions internally.
+- Core session contracts belong in `harness/src/sessions/`; built-in session implementations belong in `harness/sessions/` so apps can swap them without changing loop behavior.
 - Event shape and safe telemetry belong in `harness/src/events/` so apps can observe runtime behavior without coupling to implementation details.
 - Logging is plugin-based and app-injected; core harness stays event-only.
 - Tool registration and behavior are unchanged in the logging refactor phase.

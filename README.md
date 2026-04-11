@@ -85,12 +85,14 @@ pnpm ftv -- --provider openai --session-store filesystem --sessions-dir tmp/sess
 
 - Apps own interaction and presentation.
 - `harness` owns turn orchestration, tool execution, session state, and event emission.
-- Logging is plugin-based: apps inject logging plugins through `createHarness({ plugins })`.
+- Apps must inject both `providerInstance` and `session` into `createHarness()`.
+- Logging is plugin-based: apps inject logging plugins through `createHarness({ plugins, providerInstance, session })`.
 - Shared app-side provider, session, tool, and logging plugin wiring lives under `apps/helpers/cli/` so apps do not depend on each other.
 - The turn loop depends on `ModelProvider`, not SDK-specific request or response types.
 - Provider-specific translation belongs in `harness/providers/` and `harness/providers/codecs/`.
 - Tool services (files, commands, output) are constructed by each built-in tool and enforce workspace and output policies directly.
-- Session stores are replaceable. The repo currently ships in-memory and filesystem-backed stores.
+- Core depends on `HarnessSession` and `SessionStore` abstractions only.
+- Built-in session implementations ship under `harness/sessions/` and remain swappable.
 
 ## Using Harness
 

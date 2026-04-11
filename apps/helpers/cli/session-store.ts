@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 
-import { FilesystemSessionStore, MemorySessionStore, Session } from '../../../harness/index.js';
+import { FilesystemSessionStore, MemorySessionStore, Session } from '../../../harness/sessions/index.js';
 import type { SessionStore } from '../../../harness/types.js';
 import { getArgValue } from './args.js';
 

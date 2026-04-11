@@ -1,7 +1,7 @@
 import { HarnessEventReporter } from '../events/reporter.js';
 import type { ModelProvider } from '../models/provider.js';
 import type { PluginRunner } from '../plugins/runner.js';
-import { Session } from '../sessions/session.js';
+import type { HarnessSession } from '../sessions/runtime.js';
 import type { Message } from '../sessions/types.js';
 import type { ToolRuntimeFactory } from '../tools/runtime/index.js';
 import { snapshot } from '../utils/object.js';
@@ -16,7 +16,7 @@ type TurnStreamOptions = {
   reporter: HarnessEventReporter;
   pluginRunner: PluginRunner;
   provider: ModelProvider;
-  session: Session;
+  session: HarnessSession;
   stream: boolean;
   systemPrompt?: string;
   toolRuntimeFactory: ToolRuntimeFactory;

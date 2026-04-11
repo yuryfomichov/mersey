@@ -9,7 +9,7 @@ The main entry point is `createHarness()` from `harness/index.ts`.
 Key exports include:
 
 - `createHarness`
-- `Session`, `MemorySessionStore`, `FilesystemSessionStore`
+- `Session`, `MemorySessionStore`, `FilesystemSessionStore` from `harness/sessions/index.ts`
 - provider-agnostic types like `ModelProvider`
 - event and plugin types
 
@@ -23,9 +23,16 @@ This is the smallest useful setup for app code inside this repo.
 ```ts
 import { createHarness } from '../harness/index.js';
 import { FakeProvider } from '../harness/providers/index.js';
+import { MemorySessionStore, Session } from '../harness/sessions/index.js';
+
+const session = new Session({
+  id: 'local-session',
+  store: new MemorySessionStore(),
+});
 
 const harness = createHarness({
   providerInstance: new FakeProvider(),
+  session,
 });
 
 const reply = await harness.sendMessage('hello');
@@ -48,6 +55,12 @@ Example with an OpenAI provider:
 ```ts
 import { createHarness } from '../harness/index.js';
 import { OpenAIProvider } from '../harness/providers/index.js';
+import { MemorySessionStore, Session } from '../harness/sessions/index.js';
+
+const session = new Session({
+  id: 'local-session',
+  store: new MemorySessionStore(),
+});
 
 const harness = createHarness({
   providerInstance: new OpenAIProvider({
@@ -56,23 +69,25 @@ const harness = createHarness({
     model: 'gpt-5.4-mini',
     maxTokens: 2048,
   }),
+  session,
 });
 ```
 
 ### Session
 
-Each harness instance uses a `Session` to store:
+Each harness instance uses an injected `HarnessSession` to store:
 
 - message history
 - turn status
 - aggregated usage metrics
 - the last turn's token footprint
 
-The default session uses in-memory storage. Apps can inject a persistent store when they need history to survive process restarts.
+`createHarness()` does not construct sessions internally. Apps own session wiring and can choose a built-in or custom implementation.
 
 ```ts
-import { createHarness, FilesystemSessionStore, Session } from '../harness/index.js';
+import { createHarness } from '../harness/index.js';
 import { FakeProvider } from '../harness/providers/index.js';
+import { FilesystemSessionStore, Session } from '../harness/sessions/index.js';
 
 const session = new Session({
   id: 'local-session',
@@ -101,9 +116,16 @@ Example:
 import { createHarness } from '../harness/index.js';
 import { FakeProvider } from '../harness/providers/index.js';
 import { EditFileTool, ReadFileTool, RunCommandTool, WriteFileTool } from '../harness/tools/index.js';
+import { MemorySessionStore, Session } from '../harness/sessions/index.js';
+
+const session = new Session({
+  id: 'local-session',
+  store: new MemorySessionStore(),
+});
 
 const harness = createHarness({
   providerInstance: new FakeProvider(),
+  session,
   tools: [
     new ReadFileTool({ policy: { maxToolResultBytes: 16 * 1024, workspaceRoot: process.cwd() } }),
     new WriteFileTool({ policy: { maxToolResultBytes: 16 * 1024, workspaceRoot: process.cwd() } }),
@@ -128,9 +150,16 @@ Apps that want incremental text output should consume `TurnChunk`s.
 ```ts
 import { createHarness } from '../harness/index.js';
 import { FakeProvider } from '../harness/providers/index.js';
+import { MemorySessionStore, Session } from '../harness/sessions/index.js';
+
+const session = new Session({
+  id: 'local-session',
+  store: new MemorySessionStore(),
+});
 
 const harness = createHarness({
   providerInstance: new FakeProvider(),
+  session,
 });
 
 for await (const chunk of harness.streamMessage('hello')) {
@@ -172,6 +201,12 @@ The core harness is event-only. Logging is implemented through plugins that subs
 import { createHarness } from '../harness/index.js';
 import { FakeProvider } from '../harness/providers/index.js';
 import { createJsonlEventLoggingPlugin, createTextEventLoggingPlugin } from '../harness/plugins/index.js';
+import { MemorySessionStore, Session } from '../harness/sessions/index.js';
+
+const session = new Session({
+  id: 'local-session',
+  store: new MemorySessionStore(),
+});
 
 const harness = createHarness({
   providerInstance: new FakeProvider(),
@@ -179,6 +214,7 @@ const harness = createHarness({
     createJsonlEventLoggingPlugin({ path: 'logs/session.jsonl' }),
     createTextEventLoggingPlugin({ path: 'logs/session.log' }),
   ],
+  session,
 });
 ```
 

@@ -3,13 +3,12 @@ import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { FakeProvider } from '../providers/fake.js';
+import { MemorySessionStore, Session } from '../sessions/index.js';
 import { ReadFileTool } from '../tools/read-file.js';
 import type { HarnessEvent } from './events/types.js';
 import { createHarness, type CreateHarnessOptions } from './harness.js';
 import type { ModelProvider } from './models/provider.js';
 import { createEmptyModelUsage, type ModelRequest, type ModelStreamEvent } from './models/types.js';
-import { MemorySessionStore } from './sessions/memory-store.js';
-import { Session } from './sessions/session.js';
 import type { SessionStore } from './sessions/store.js';
 import type { SessionState, StoredSessionState } from './sessions/types.js';
 import { withTempDir, writeWorkspaceFiles } from './test/test-helpers.js';
@@ -41,7 +40,17 @@ function createTestHarness(options: TestHarnessOptions = {}) {
 }
 
 test('createHarness requires a provider', () => {
-  assert.throws(() => createHarness(), /Missing provider/);
+  assert.throws(() => createHarness({} as CreateHarnessOptions), /Missing provider/);
+});
+
+test('createHarness requires a session', () => {
+  assert.throws(
+    () =>
+      createHarness({
+        providerInstance: new FakeProvider(),
+      } as CreateHarnessOptions),
+    /Missing session\. Pass session to createHarness\(\)\./,
+  );
 });
 
 test('createHarness uses the injected provider and appends session history', async () => {
