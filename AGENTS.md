@@ -86,3 +86,5 @@ Main goals:
 - Prefer `FakeProvider` for non-network tests.
 - Do not use `git` or `gh` without explicit user permission.
 - Every change should keep all documentation files (AGENTS.md, README.md, etc.) in sync; verify docs reflect the current state after any refactoring.
+- Use conventional commits
+- When writing PR summaries, do not add a `Testing` section.
