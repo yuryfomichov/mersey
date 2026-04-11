@@ -4,6 +4,8 @@
 
 Mersey is a local coding agent prototype.
 
+OpenCode is the in-repo coding agent collaborator.
+
 Main goals:
 
 - keep `harness` reusable
