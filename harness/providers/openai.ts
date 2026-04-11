@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 
-import type { ModelProvider } from '../models/provider.js';
-import type { ModelRequest, ModelStreamEvent } from '../models/types.js';
+import type { ModelProvider } from '../src/models/provider.js';
+import type { ModelRequest, ModelStreamEvent } from '../src/models/types.js';
 import { OpenAICodec } from './codecs/openai.js';
 
 export type OpenAILikeProviderConfig = {

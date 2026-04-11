@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 
+import { FakeProvider } from '../providers/fake.js';
 import { ReadFileTool } from '../tools/read-file.js';
 import type { HarnessEvent } from './events/types.js';
 import { createHarness, type CreateHarnessOptions } from './harness.js';
 import type { ModelProvider } from './models/provider.js';
 import { createEmptyModelUsage, type ModelRequest, type ModelStreamEvent } from './models/types.js';
-import { FakeProvider } from './providers/fake.js';
 import { MemorySessionStore } from './sessions/memory-store.js';
 import { Session } from './sessions/session.js';
 import type { SessionStore } from './sessions/store.js';

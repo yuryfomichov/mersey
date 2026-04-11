@@ -7,7 +7,12 @@ import type {
   ToolUseBlock,
 } from '@anthropic-ai/sdk/resources/messages/messages';
 
-import { createEmptyModelUsage, type ModelRequest, type ModelResponse, type ModelUsage } from '../../models/types.js';
+import {
+  createEmptyModelUsage,
+  type ModelRequest,
+  type ModelResponse,
+  type ModelUsage,
+} from '../../src/models/types.js';
 
 export class AnthropicCodec {
   getMessages(input: ModelRequest): MessageParam[] {

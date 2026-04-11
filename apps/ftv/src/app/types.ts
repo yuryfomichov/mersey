@@ -1,4 +1,4 @@
-import type { ProviderName } from '../../../../harness/types.js';
+import type { ProviderName } from '../../../../harness/providers/types.js';
 import type { SessionStoreDefinition } from '../../../helpers/cli/session-store.js';
 
 export interface UsageState {

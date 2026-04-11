@@ -1,4 +1,4 @@
-import type { ModelProvider } from '../models/provider.js';
+import type { ModelProvider } from '../src/models/provider.js';
 import { AnthropicProvider } from './anthropic.js';
 import type { AnthropicConfig } from './anthropic.js';
 import { FakeProvider } from './fake.js';

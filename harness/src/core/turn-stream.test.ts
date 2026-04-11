@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 
+import { FakeProvider } from '../../providers/fake.js';
 import { HarnessEventReporter } from '../events/reporter.js';
 import type { ModelProvider } from '../models/provider.js';
 import { createEmptyModelUsage } from '../models/types.js';
 import { createPluginRunner } from '../plugins/runner.js';
 import type { HarnessPlugin } from '../plugins/types.js';
-import { FakeProvider } from '../providers/fake.js';
 import { MemorySessionStore } from '../sessions/memory-store.js';
 import { Session } from '../sessions/session.js';
 import type { SessionStore } from '../sessions/store.js';

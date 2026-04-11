@@ -1,5 +1,7 @@
 import { createHarness } from '../../../../../harness/index.js';
-import { type Harness, type HarnessEvent, type ProviderName } from '../../../../../harness/types.js';
+import { createProvider } from '../../../../../harness/providers/index.js';
+import { type ProviderName } from '../../../../../harness/providers/types.js';
+import { type Harness, type HarnessEvent } from '../../../../../harness/types.js';
 import {
   createDefaultTools,
   getProviderModel,
@@ -10,6 +12,7 @@ import { getProviderDefinition } from '../../../../helpers/cli/provider-config.j
 import { createSession, type SessionStoreDefinition } from '../../../../helpers/cli/session-store.js';
 import { createAwaitableToolApprovalPlugin, type BlockAndAskUser } from '../../tool-approval-plugin.js';
 import { FTV_COMMAND_ALLOWLIST } from '../constants.js';
+import { getSystemPrompt } from '../system-prompt.js';
 
 export interface HarnessRuntimeOptions {
   cache: boolean;
@@ -34,6 +37,7 @@ export async function createHarnessRuntime(
 
   const session = createSession(sessionStoreDefinition, sessionId);
   const providerDef = getProviderDefinition(providerName, process.env, cache);
+  const providerInstance = createProvider(providerDef);
   const toolExecutionPolicy = getToolExecutionPolicy();
   const toolApprovalPlugin = createAwaitableToolApprovalPlugin({ blockAndAskUser });
 
@@ -42,8 +46,9 @@ export async function createHarnessRuntime(
   const harness = createHarness({
     debug,
     plugins: [...loggingPlugins, toolApprovalPlugin],
-    provider: providerDef,
+    providerInstance,
     session,
+    systemPrompt: getSystemPrompt(),
     tools: createDefaultTools({ commandAllowlist: FTV_COMMAND_ALLOWLIST, toolExecutionPolicy }),
   });
 

@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import Anthropic from '@anthropic-ai/sdk';
 
-import { createEmptyModelUsage } from '../../models/types.js';
+import { createEmptyModelUsage } from '../../src/models/types.js';
 import { AnthropicCodec } from './anthropic.js';
 
 const codec = new AnthropicCodec();

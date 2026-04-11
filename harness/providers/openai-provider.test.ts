@@ -3,9 +3,9 @@ import test from 'node:test';
 
 import type OpenAI from 'openai';
 
-import { createEmptyModelUsage } from '../models/types.js';
-import { collectEvents, collectResponse } from '../test/provider-test-helpers.js';
+import { createEmptyModelUsage } from '../src/models/types.js';
 import { OpenAIProvider } from './openai.js';
+import { collectEvents, collectResponse } from './test/provider-test-helpers.js';
 
 function createResponse(overrides: Partial<OpenAI.Responses.Response>): OpenAI.Responses.Response {
   return {

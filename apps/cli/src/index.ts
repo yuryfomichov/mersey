@@ -2,6 +2,7 @@ import { argv, stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
 
 import { createHarness } from '../../../harness/index.js';
+import { createProvider } from '../../../harness/providers/index.js';
 import { getBooleanFlag, getProviderName, getSessionId } from '../../helpers/cli/args.js';
 import { createDefaultTools, getProviderModel, getToolExecutionPolicy } from '../../helpers/cli/harness-config.js';
 import { createCliLoggingPlugins } from '../../helpers/cli/logging.js';
@@ -15,6 +16,7 @@ async function main(): Promise<void> {
   const cache = getBooleanFlag(args, '--cache');
   const providerName = getProviderName(args);
   const providerDefinition = getProviderDefinition(providerName, process.env, cache);
+  const providerInstance = createProvider(providerDefinition);
   const sessionId = getSessionId(args) ?? 'local-session';
   const sessionStoreDefinition = getSessionStoreDefinition(args);
   const session = createSession(sessionStoreDefinition, sessionId);
@@ -24,7 +26,7 @@ async function main(): Promise<void> {
   const harness = createHarness({
     debug,
     plugins,
-    provider: providerDefinition,
+    providerInstance,
     session,
     systemPrompt: 'You are a helpful assistant.',
     tools: createDefaultTools({ toolExecutionPolicy }),
