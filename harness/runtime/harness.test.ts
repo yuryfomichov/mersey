@@ -13,7 +13,7 @@ import type { SessionStore } from './sessions/store.js';
 import type { SessionState, StoredSessionState } from './sessions/types.js';
 import { withTempDir, writeWorkspaceFiles } from './test/test-helpers.js';
 
-type TestHarnessOptions = Omit<CreateHarnessOptions, 'session'> & {
+type TestHarnessOptions = Omit<Partial<CreateHarnessOptions>, 'session'> & {
   session?: Session;
   sessionId?: string;
   sessionStore?: SessionStore;
@@ -34,6 +34,7 @@ function createTestHarness(options: TestHarnessOptions = {}) {
 
   return createHarness({
     ...rest,
+    providerInstance: rest.providerInstance ?? new FakeProvider(),
     session:
       providedSession ?? createTestSession(sessionStore ?? new MemorySessionStore(), sessionId ?? 'local-session'),
   });
@@ -46,9 +47,11 @@ test('createHarness requires a provider', () => {
 test('createHarness requires a session', () => {
   assert.throws(
     () =>
-      createHarness({
-        providerInstance: new FakeProvider(),
-      } as CreateHarnessOptions),
+      createHarness(
+        {
+          providerInstance: new FakeProvider(),
+        } as unknown as CreateHarnessOptions,
+      ),
     /Missing session\. Pass session to createHarness\(\)\./,
   );
 });

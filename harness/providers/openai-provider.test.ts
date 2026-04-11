@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import type OpenAI from 'openai';
 
-import { createEmptyModelUsage } from '../src/models/types.js';
+import { createEmptyModelUsage } from '../runtime/models/types.js';
 import { OpenAIProvider } from './openai.js';
 import { collectEvents, collectResponse } from './test/provider-test-helpers.js';
 

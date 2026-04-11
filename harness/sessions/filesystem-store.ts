@@ -1,9 +1,9 @@
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { createEmptyModelUsage } from '../src/models/types.js';
-import type { SessionStore } from '../src/sessions/store.js';
-import type { Message, SessionState, StoredSessionState } from '../src/sessions/types.js';
+import { createEmptyModelUsage } from '../runtime/models/types.js';
+import type { SessionStore } from '../runtime/sessions/store.js';
+import type { Message, SessionState, StoredSessionState } from '../runtime/sessions/types.js';
 import { assertValidSessionId } from './utils.js';
 
 export type FilesystemSessionStoreOptions = {

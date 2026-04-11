@@ -7,4 +7,4 @@ export type {
   ToolOutputLimitResult,
   ToolOutputService,
   ToolPathDenyRule,
-} from '../../src/tools/runtime/types.js';
+} from '../../runtime/tools/runtime/types.js';

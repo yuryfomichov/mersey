@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import type OpenAI from 'openai';
 
-import type { ModelRequest } from '../../src/models/types.js';
+import type { ModelRequest } from '../../runtime/models/types.js';
 import { OpenAICodec } from './openai.js';
 
 const codec = new OpenAICodec();

@@ -1,8 +1,8 @@
-import { createEmptyModelUsage, type ModelUsage } from '../src/models/types.js';
-import type { HarnessSession } from '../src/sessions/runtime.js';
-import type { SessionStore } from '../src/sessions/store.js';
-import type { Message, SessionState, StoredSessionState } from '../src/sessions/types.js';
-import { snapshot } from '../src/utils/object.js';
+import { createEmptyModelUsage, type ModelUsage } from '../runtime/models/types.js';
+import type { HarnessSession } from '../runtime/sessions/runtime.js';
+import type { SessionStore } from '../runtime/sessions/store.js';
+import type { Message, SessionState, StoredSessionState } from '../runtime/sessions/types.js';
+import { snapshot } from '../runtime/utils/object.js';
 
 function cloneMessage<T extends Message>(message: T): T {
   return structuredClone(message);

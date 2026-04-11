@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import type { IterationStartedEvent, TurnFailedEvent } from '../../src/events/types.js';
+import type { IterationStartedEvent, TurnFailedEvent } from '../../runtime/events/types.js';
 import { createJsonlEventLoggingPlugin } from './jsonl.js';
 import { createTextEventLoggingPlugin } from './text.js';
 
