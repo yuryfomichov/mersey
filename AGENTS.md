@@ -48,8 +48,8 @@ Main goals:
 - `harness` owns the model turn loop, tool execution, session updates, and event emission.
 - The `harness` client contract is the most important interface in the repo and should stay as simple as possible for apps to connect to.
 - `harness/src/harness.ts` is the contract surface apps should build against first.
-- `harness/src/loop/loop.ts` should depend on `ModelProvider`, not SDK-specific request or response types.
-- `harness/src/turn-stream.ts` should stay responsible for session locking, turn execution, and persisting turn results.
+- The turn-loop code in `harness/src/core/` should depend on `ModelProvider`, not SDK-specific request or response types.
+- The turn-streaming code in `harness/src/core/` should stay responsible for session locking, turn execution, and persisting turn results.
 - Provider-specific request/response mapping belongs in `harness/providers/` and `harness/providers/codecs/`.
 - Tool-specific workspace, command, and output policy belongs in `harness/src/tools/runtime/`, not in apps.
 - Apps should decide which tools are registered, but the runtime behavior should stay inside `harness`.
