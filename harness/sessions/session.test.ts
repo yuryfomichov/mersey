@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { createEmptyModelUsage } from '../models/types.js';
+import { createEmptyModelUsage } from '../src/models/types.js';
+import type { Message, SessionState, StoredSessionState } from '../src/sessions/types.js';
 import { MemorySessionStore } from './memory-store.js';
 import { Session } from './session.js';
-import type { Message, SessionState, StoredSessionState } from './types.js';
 
 test('Session snapshots tolerate cyclic message data', async () => {
   const cycle: Record<string, unknown> = {};

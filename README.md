@@ -19,7 +19,8 @@ The repo is organized around a reusable `harness` package and thin apps that sit
 - `harness/src/models/`: provider contracts and shared request/response types
 - `harness/providers/`: provider implementations, codecs, factory, and provider-facing types
 - `harness/tools/`: built-in tools and tool-owned services
-- `harness/src/sessions/`: session state and storage implementations
+- `harness/src/sessions/`: core session contracts and runtime-facing session interfaces
+- `harness/sessions/`: built-in `Session`, `MemorySessionStore`, and `FilesystemSessionStore`
 - `harness/src/events/`: event emitter/reporter and safe telemetry
 - `harness/plugins/logging/`: built-in JSONL and text logging plugins
 - `apps/helpers/cli/`: shared app-side wiring for provider, session, tool, and logging setup
@@ -85,12 +86,14 @@ pnpm ftv -- --provider openai --session-store filesystem --sessions-dir tmp/sess
 
 - Apps own interaction and presentation.
 - `harness` owns turn orchestration, tool execution, session state, and event emission.
-- Logging is plugin-based: apps inject logging plugins through `createHarness({ plugins })`.
+- Apps must inject both `providerInstance` and `session` into `createHarness()`.
+- Logging is plugin-based: apps inject logging plugins through `createHarness({ plugins, providerInstance, session })`.
 - Shared app-side provider, session, tool, and logging plugin wiring lives under `apps/helpers/cli/` so apps do not depend on each other.
 - The turn loop depends on `ModelProvider`, not SDK-specific request or response types.
 - Provider-specific translation belongs in `harness/providers/` and `harness/providers/codecs/`.
 - Tool services (files, commands, output) are constructed by each built-in tool and enforce workspace and output policies directly.
-- Session stores are replaceable. The repo currently ships in-memory and filesystem-backed stores.
+- Core depends on `HarnessSession` and `SessionStore` abstractions only.
+- Built-in session implementations ship under `harness/sessions/` and remain swappable.
 
 ## Using Harness
 

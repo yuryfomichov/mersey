@@ -6,14 +6,13 @@ import type { HarnessEventListener } from './events/types.js';
 import type { ModelProvider } from './models/provider.js';
 import { createPluginRunner } from './plugins/runner.js';
 import type { HarnessPlugin } from './plugins/types.js';
-import { MemorySessionStore } from './sessions/memory-store.js';
-import { Session } from './sessions/session.js';
+import type { HarnessSession } from './sessions/runtime.js';
 import type { Message } from './sessions/types.js';
 import { createToolRuntimeFactory } from './tools/runtime/index.js';
 import type { Tool } from './tools/types.js';
 
 export type Harness = {
-  session: Session;
+  session: HarnessSession;
   sendMessage(content: string): Promise<Message>;
   streamMessage(content: string): AsyncIterable<TurnChunk>;
   subscribe(listener: HarnessEventListener): () => void;
@@ -22,14 +21,14 @@ export type Harness = {
 export type CreateHarnessOptions = {
   debug?: boolean;
   plugins?: HarnessPlugin[];
-  providerInstance?: ModelProvider;
-  session?: Session;
+  providerInstance: ModelProvider;
+  session: HarnessSession;
   systemPrompt?: string;
   tools?: Tool[];
 };
 
-function ensureProvider(options: Pick<CreateHarnessOptions, 'providerInstance'>): ModelProvider {
-  const provider = options.providerInstance ?? null;
+function ensureProvider(options: CreateHarnessOptions | undefined): ModelProvider {
+  const provider = options?.providerInstance ?? null;
 
   if (!provider) {
     throw new Error('Missing provider. Pass providerInstance to createHarness().');
@@ -38,9 +37,19 @@ function ensureProvider(options: Pick<CreateHarnessOptions, 'providerInstance'>)
   return provider;
 }
 
-export function createHarness(options: CreateHarnessOptions = {}): Harness {
+function ensureSession(options: CreateHarnessOptions | undefined): HarnessSession {
+  const session = options?.session ?? null;
+
+  if (!session) {
+    throw new Error('Missing session. Pass session to createHarness().');
+  }
+
+  return session;
+}
+
+export function createHarness(options: CreateHarnessOptions): Harness {
   const resolvedProvider = ensureProvider(options);
-  const session = options.session ?? new Session({ id: 'local-session', store: new MemorySessionStore() });
+  const session = ensureSession(options);
   const toolRuntimeFactory = createToolRuntimeFactory({ tools: options.tools ?? [] });
   const eventEmitter = new HarnessEventEmitter();
 

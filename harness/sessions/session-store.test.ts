@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { createEmptyModelUsage } from '../models/types.js';
+import { createEmptyModelUsage } from '../src/models/types.js';
+import type { Message, SessionState, StoredSessionState } from '../src/sessions/types.js';
 import { FilesystemSessionStore } from './filesystem-store.js';
 import { MemorySessionStore } from './memory-store.js';
-import type { Message, SessionState, StoredSessionState } from './types.js';
 
 async function verifyStoreRoundTrip(store: {
   appendMessage(sessionId: string, message: Message): Promise<void>;
