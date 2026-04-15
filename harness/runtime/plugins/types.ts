@@ -1,6 +1,5 @@
 import type { HarnessEvent } from '../events/types.js';
 import type { ModelMessage, ModelRequest } from '../models/types.js';
-import type { Message } from '../sessions/types.js';
 
 export type HookDecision =
   | { continue: true }
@@ -23,14 +22,36 @@ export type BeforeProviderCallContext = {
   toolDefinitionNames: string[];
 };
 
+export type PrepareProviderRequestMessage =
+  | {
+      content: string;
+      role: 'user';
+    }
+  | {
+      content: string;
+      role: 'assistant';
+    }
+  | {
+      content: string;
+      isError?: boolean;
+      name: string;
+      role: 'tool';
+      toolCallId: string;
+    };
+
+export type PrepareProviderRequestUserMessage = {
+  content: string;
+  role: 'user';
+};
+
 export type PrepareProviderRequestContext = {
   sessionId: string;
   turnId: string;
   iteration: number;
   providerName: string;
   model: string;
-  transcript: readonly Readonly<Message>[];
-  userMessage: Readonly<Message>;
+  transcript: readonly Readonly<PrepareProviderRequestMessage>[];
+  userMessage: Readonly<PrepareProviderRequestUserMessage>;
   signal?: AbortSignal;
 };
 
@@ -63,7 +84,7 @@ export type HarnessPlugin = {
 
   beforeProviderCall?(ctx: BeforeProviderCallContext): Promise<HookDecision> | HookDecision;
   prepareProviderRequest?(
-    request: ModelRequest,
+    request: Readonly<ModelRequest>,
     ctx: PrepareProviderRequestContext,
   ): Promise<PrepareProviderRequestResult> | PrepareProviderRequestResult;
   beforeToolCall?(ctx: BeforeToolCallContext): Promise<HookDecision> | HookDecision;

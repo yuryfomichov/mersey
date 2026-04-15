@@ -227,7 +227,7 @@ Under the hood, `HarnessEventEmitter` owns immutable publish/subscribe delivery 
 - request-prep runs after `beforeProviderCall` allows the iteration
 - injected context is ephemeral for that provider call only
 - synthetic request messages are not persisted into session history
-- hook contexts receive immutable snapshots rather than live session objects
+- hook contexts receive immutable, request-prep-safe snapshots rather than live session objects
 
 This keeps retrieval or other request enrichment inside the runtime loop without pushing provider-specific logic into apps or providers.
 
@@ -243,7 +243,7 @@ const plugin = {
 };
 ```
 
-`prepareProviderRequest(request, ctx)` can return `prependMessages`, `appendMessages`, and `systemPrompt` overrides.
+`prepareProviderRequest(request, ctx)` receives a readonly request plus a simplified immutable transcript, and can return `prependMessages`, `appendMessages`, and `systemPrompt` overrides.
 
 ## Integration Boundaries
 

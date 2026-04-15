@@ -2,9 +2,10 @@ import { getMessageCountsByRole, HarnessEventReporter } from '../events/reporter
 import type { ModelProvider } from '../models/provider.js';
 import type { ModelMessage, ModelRequest, ModelResponse } from '../models/types.js';
 import type { PluginRunner } from '../plugins/runner.js';
+import type { PrepareProviderRequestMessage } from '../plugins/types.js';
 import type { Message } from '../sessions/types.js';
 import type { ToolRuntimeFactory } from '../tools/runtime/index.js';
-import { snapshot } from '../utils/object.js';
+import { freezeDeep } from '../utils/object.js';
 
 export type LoopOptions = {
   maxToolIterations?: number;
@@ -86,6 +87,32 @@ function toModelMessages(messages: readonly Message[]): ModelMessage[] {
         content: message.content,
         role: 'assistant',
         toolCalls: message.toolCalls,
+      };
+    }
+
+    return {
+      content: message.content,
+      role: 'user',
+    };
+  });
+}
+
+function toPrepareProviderRequestTranscript(messages: readonly Message[]): PrepareProviderRequestMessage[] {
+  return messages.map((message) => {
+    if (message.role === 'tool') {
+      return {
+        content: message.content,
+        isError: message.isError,
+        name: message.name,
+        role: 'tool',
+        toolCallId: message.toolCallId,
+      };
+    }
+
+    if (message.role === 'assistant') {
+      return {
+        content: message.content,
+        role: 'assistant',
       };
     }
 
@@ -291,9 +318,12 @@ export async function* streamLoop({
           providerName: provider.name,
           sessionId: reporter.getSessionId(),
           signal,
-          transcript: snapshot(transcript),
+          transcript: freezeDeep(toPrepareProviderRequestTranscript(transcript)),
           turnId: reporter.getTurnId(),
-          userMessage: snapshot(userMessage),
+          userMessage: freezeDeep({
+            content: userMessage.content,
+            role: 'user' as const,
+          }),
         });
       }
 

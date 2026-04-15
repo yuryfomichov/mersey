@@ -317,6 +317,42 @@ test('streamLoop skips request-prep snapshots when no request-prep hooks are reg
   assert.equal(finalMessage.content, 'reply:hello');
 });
 
+test('streamLoop tolerates uncloneable tool data when request-prep hooks are registered', async () => {
+  const session = createSession('request-prep-uncloneable-tool-data-session');
+  const provider = new FakeProvider();
+
+  session.messages.push({
+    content: 'tool output',
+    createdAt: new Date().toISOString(),
+    data: {
+      callback: () => 'not cloneable',
+    },
+    name: 'example_tool',
+    role: 'tool',
+    toolCallId: 'call-1',
+  });
+
+  const { finalMessage } = await collectLoopResult(
+    createLoopInput({
+      content: 'hello',
+      history: session.messages,
+      plugins: [
+        {
+          name: 'request-prep',
+          prepareProviderRequest() {
+            return {};
+          },
+        },
+      ],
+      provider,
+      sessionId: session.id,
+      tools: [],
+    }),
+  );
+
+  assert.equal(finalMessage.content, 'reply:hello');
+});
+
 test('streamLoop does not persist assistant tool calls when the tool iteration cap is exceeded', async () => {
   const session = createSession('tool-overflow-session');
 
