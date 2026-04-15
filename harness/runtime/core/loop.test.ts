@@ -212,14 +212,6 @@ test('streamLoop applies prepareProviderRequest changes without persisting retri
           name: 'retrieval',
           prepareProviderRequest() {
             return {
-              metadata: {
-                retrieval: {
-                  hitCount: 1,
-                  queryLength: 5,
-                  sourceCount: 1,
-                  sources: ['resume.md'],
-                },
-              },
               prependMessages: [
                 { content: 'Retrieved context\n\n[Source 1: resume.md]\nBuilt payments platform.', role: 'user' },
               ],

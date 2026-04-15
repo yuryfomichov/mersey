@@ -15,7 +15,6 @@ Key exports include:
 
 Built-in tools are exported from `harness/tools/index.ts`.
 Built-in providers are exported from `harness/providers/index.ts`.
-Built-in plugins are exported from `harness/plugins/index.ts`.
 
 ## Minimal Example
 
