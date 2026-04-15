@@ -195,6 +195,8 @@ unsubscribe();
 
 The event stream includes turn lifecycle, provider calls, and tool execution. See `harness/runtime/events/types.ts` for the full event union.
 
+When debug mode is enabled for a harness, `provider_requested` events also include the final request payload that will be sent to the model, so logging plugins can record the exact system prompt and messages after request-prep hooks run.
+
 The core harness is event-only. Logging is implemented through plugins that subscribe with `onEvent`.
 
 ```ts
@@ -230,6 +232,8 @@ Under the hood, `HarnessEventEmitter` owns immutable publish/subscribe delivery 
 - hook contexts receive immutable, request-prep-safe snapshots rather than live session objects
 
 This keeps retrieval or other request enrichment inside the runtime loop without pushing provider-specific logic into apps or providers.
+
+The generic retrieval contract lives under `harness/plugins/retrieval/`. Concrete backends, such as the built-in LanceDB integration, live under backend-specific submodules like `harness/plugins/retrieval/lancedb/`.
 
 ```ts
 const plugin = {

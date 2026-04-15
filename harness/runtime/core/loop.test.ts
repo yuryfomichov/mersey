@@ -907,3 +907,52 @@ test('streamLoop prepareProviderRequest hook errors fail closed and report provi
   assert.equal(failed?.type === 'turn_failed' ? failed.errorType : undefined, 'provider');
   assert.equal(failed?.type === 'turn_failed' ? failed.errorMessage : undefined, 'Provider request failed.');
 });
+
+test('streamLoop includes final prepared provider request in debug provider_requested events', async () => {
+  const events: HarnessEvent[] = [];
+  const eventSink = new HarnessEventEmitter();
+  eventSink.subscribe((event: HarnessEvent) => {
+    events.push(event);
+  });
+
+  await collectFinalMessage(
+    createLoopInput({
+      content: 'living',
+      debug: true,
+      eventSink,
+      history: [],
+      plugins: [
+        {
+          name: 'retrieval',
+          prepareProviderRequest(request) {
+            return {
+              prependMessages: [
+                {
+                  content: 'Retrieved context for the next answer. [Source 1: profile] Software engineer.',
+                  role: 'user',
+                },
+              ],
+              systemPrompt: `${request.systemPrompt ?? ''} Answer briefly.`.trim(),
+            };
+          },
+        },
+      ],
+      provider: new FakeProvider(),
+      sessionId: 'debug-provider-request',
+      systemPrompt: 'You are helpful.',
+      tools: [],
+    }),
+  );
+
+  const providerRequested = events.find((event) => event.type === 'provider_requested');
+
+  assert.equal(providerRequested?.type, 'provider_requested');
+  assert.deepEqual(providerRequested?.type === 'provider_requested' ? providerRequested.debugRequest : undefined, {
+    messages: [
+      { content: 'Retrieved context for the next answer. [Source 1: profile] Software engineer.', role: 'user' },
+      { content: 'living', role: 'user' },
+    ],
+    stream: false,
+    systemPrompt: 'You are helpful. Answer briefly.',
+  });
+});

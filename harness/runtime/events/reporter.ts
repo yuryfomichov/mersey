@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import type { ModelProvider } from '../models/provider.js';
-import type { ModelMessage, ModelResponse, ModelToolCall, ModelToolDefinition } from '../models/types.js';
+import type { ModelMessage, ModelRequest, ModelResponse, ModelToolCall, ModelToolDefinition } from '../models/types.js';
 import type { ToolExecutionResult } from '../tools/types.js';
 import { HarnessEventEmitter } from './emitter.js';
 import {
@@ -90,22 +90,20 @@ export class HarnessEventReporter {
     });
   }
 
-  providerRequested(
-    iteration: number,
-    messages: readonly ModelMessage[],
-    provider: ProviderMetadata,
-    toolDefinitions: ModelToolDefinition[] | undefined,
-  ): void {
+  providerRequested(iteration: number, request: Readonly<ModelRequest>, provider: ProviderMetadata): void {
+    const debugRequest = this.getDebugProviderRequest(request);
+
     this.eventEmitter.publish({
+      ...(debugRequest ? { debugRequest } : {}),
       iteration,
-      messageCount: messages.length,
-      messageCountsByRole: getMessageCountsByRole(messages),
+      messageCount: request.messages.length,
+      messageCountsByRole: getMessageCountsByRole(request.messages),
       model: provider.model,
       providerName: provider.name,
       sessionId: this.getSessionId(),
       timestamp: new Date().toISOString(),
-      toolDefinitionCount: toolDefinitions?.length ?? 0,
-      toolDefinitionNames: getToolDefinitionNames(toolDefinitions),
+      toolDefinitionCount: request.tools?.length ?? 0,
+      toolDefinitionNames: getToolDefinitionNames(request.tools),
       turnId: this.getTurnId(),
       type: 'provider_requested',
     });
@@ -282,6 +280,26 @@ export class HarnessEventReporter {
     return Date.now() - this.getTurnStartTime();
   }
 
+  private getDebugProviderRequest(request: Readonly<ModelRequest>):
+    | {
+        messages: ModelMessage[];
+        stream: boolean;
+        systemPrompt?: string;
+        tools?: ModelToolDefinition[];
+      }
+    | undefined {
+    if (!this.debug) {
+      return undefined;
+    }
+
+    return {
+      messages: request.messages.map(cloneModelMessage),
+      stream: request.stream,
+      ...(request.systemPrompt === undefined ? {} : { systemPrompt: request.systemPrompt }),
+      ...(request.tools ? { tools: request.tools.map(cloneToolDefinition) } : {}),
+    };
+  }
+
   private getTurnStartTime(): number {
     if (!this.currentTurnStartTime) {
       this.currentTurnStartTime = Date.now();
@@ -289,4 +307,86 @@ export class HarnessEventReporter {
 
     return this.currentTurnStartTime;
   }
+}
+
+function cloneModelMessage(message: ModelMessage): ModelMessage {
+  if (message.role === 'assistant') {
+    return {
+      ...message,
+      ...(message.toolCalls
+        ? {
+            toolCalls: message.toolCalls.map((toolCall) => ({
+              ...toolCall,
+              input: sanitizeDebugValue(toolCall.input) as typeof toolCall.input,
+            })),
+          }
+        : {}),
+    };
+  }
+
+  if (message.role === 'tool') {
+    return {
+      ...message,
+      ...(message.data ? { data: sanitizeDebugValue(message.data) as typeof message.data } : {}),
+    };
+  }
+
+  return {
+    ...message,
+  };
+}
+
+function cloneToolDefinition(tool: ModelToolDefinition): ModelToolDefinition {
+  return {
+    ...tool,
+    inputSchema: sanitizeDebugValue(tool.inputSchema) as ModelToolDefinition['inputSchema'],
+  };
+}
+
+function sanitizeDebugValue(value: unknown, seen: WeakSet<object> = new WeakSet<object>()): unknown {
+  if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+
+  if (typeof value === 'undefined') {
+    return '[undefined]';
+  }
+
+  if (typeof value === 'function' || typeof value === 'symbol') {
+    return `[${typeof value}]`;
+  }
+
+  if (typeof value !== 'object') {
+    return String(value);
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (value instanceof RegExp) {
+    return value.toString();
+  }
+
+  if (seen.has(value)) {
+    return '[circular]';
+  }
+
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => sanitizeDebugValue(entry, seen));
+  }
+
+  const sanitized: Record<string, unknown> = {};
+
+  for (const [key, nestedValue] of Object.entries(value)) {
+    sanitized[key] = sanitizeDebugValue(nestedValue, seen);
+  }
+
+  return sanitized;
 }

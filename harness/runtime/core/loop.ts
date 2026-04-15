@@ -328,7 +328,7 @@ export async function* streamLoop({
         });
       }
 
-      reporter.providerRequested(currentIteration, request.messages, provider, request.tools);
+      reporter.providerRequested(currentIteration, request, provider);
 
       throwIfAborted(signal);
       let response: ModelResponse | null = null;

@@ -1,4 +1,4 @@
-import type { ModelUsage } from '../models/types.js';
+import type { ModelMessage, ModelToolDefinition, ModelUsage } from '../models/types.js';
 
 export type HarnessEventBase = {
   sessionId: string;
@@ -41,7 +41,15 @@ export type TurnStartedEvent = HarnessTurnEventBase & {
   userMessageLength: number;
 };
 
+export type DebugProviderRequest = {
+  messages: ModelMessage[];
+  stream: boolean;
+  systemPrompt?: string;
+  tools?: ModelToolDefinition[];
+};
+
 export type ProviderRequestedEvent = HarnessTurnEventBase & {
+  debugRequest?: DebugProviderRequest;
   type: 'provider_requested';
   iteration: number;
   messageCount: number;

@@ -13,6 +13,129 @@ function createToolCall(input: Record<string, unknown>): ModelToolCall {
   };
 }
 
+test('HarnessEventReporter omits debug provider request payloads by default', () => {
+  const events: HarnessEvent[] = [];
+  const reporter = new HarnessEventReporter({
+    getSessionId: () => 'session-1',
+    providerName: 'fake',
+  });
+
+  reporter.subscribe((event) => {
+    events.push(event);
+  });
+
+  reporter.turnStarted(5);
+  reporter.providerRequested(
+    1,
+    {
+      messages: [{ content: 'hello', role: 'user' }],
+      stream: false,
+      systemPrompt: 'You are helpful.',
+      tools: [{ description: 'Read a file', inputSchema: { type: 'object' }, name: 'read_file' }],
+    },
+    { model: 'fake-model', name: 'fake' },
+  );
+
+  const event = events[1];
+
+  assert.equal(event?.type, 'provider_requested');
+  assert.deepEqual(event && event.type === 'provider_requested' ? event.debugRequest : undefined, undefined);
+});
+
+test('HarnessEventReporter includes final provider request payloads when debug is enabled', () => {
+  const events: HarnessEvent[] = [];
+  const reporter = new HarnessEventReporter({
+    debug: true,
+    getSessionId: () => 'session-1',
+    providerName: 'fake',
+  });
+
+  reporter.subscribe((event) => {
+    events.push(event);
+  });
+
+  reporter.turnStarted(5);
+  reporter.providerRequested(
+    1,
+    {
+      messages: [
+        { content: 'Retrieved context', role: 'user' },
+        { content: 'hello', role: 'user' },
+      ],
+      stream: false,
+      systemPrompt: 'You are helpful.',
+      tools: [{ description: 'Read a file', inputSchema: { properties: {}, type: 'object' }, name: 'read_file' }],
+    },
+    { model: 'fake-model', name: 'fake' },
+  );
+
+  const event = events[1];
+
+  assert.equal(event?.type, 'provider_requested');
+  assert.deepEqual(event && event.type === 'provider_requested' ? event.debugRequest : undefined, {
+    messages: [
+      { content: 'Retrieved context', role: 'user' },
+      { content: 'hello', role: 'user' },
+    ],
+    stream: false,
+    systemPrompt: 'You are helpful.',
+    tools: [{ description: 'Read a file', inputSchema: { properties: {}, type: 'object' }, name: 'read_file' }],
+  });
+});
+
+test('HarnessEventReporter sanitizes debug provider request payloads for event delivery', () => {
+  const events: HarnessEvent[] = [];
+  const reporter = new HarnessEventReporter({
+    debug: true,
+    getSessionId: () => 'session-1',
+    providerName: 'fake',
+  });
+
+  const circularSchema: Record<string, unknown> = { type: 'object' };
+  circularSchema.self = circularSchema;
+
+  reporter.subscribe((event) => {
+    events.push(event);
+  });
+
+  reporter.turnStarted(5);
+  reporter.providerRequested(
+    1,
+    {
+      messages: [
+        {
+          content: 'tool output',
+          data: { callback: () => 'not cloneable' },
+          name: 'example_tool',
+          role: 'tool',
+          toolCallId: 'call-1',
+        },
+      ],
+      stream: false,
+      tools: [{ description: 'Read a file', inputSchema: circularSchema as { type: 'object' }, name: 'read_file' }],
+    },
+    { model: 'fake-model', name: 'fake' },
+  );
+
+  const event = events[1];
+
+  assert.equal(event?.type, 'provider_requested');
+  assert.deepEqual(event && event.type === 'provider_requested' ? event.debugRequest : undefined, {
+    messages: [
+      {
+        content: 'tool output',
+        data: { callback: '[function]' },
+        name: 'example_tool',
+        role: 'tool',
+        toolCallId: 'call-1',
+      },
+    ],
+    stream: false,
+    tools: [{ description: 'Read a file', inputSchema: { self: '[circular]', type: 'object' }, name: 'read_file' }],
+  });
+  assert.doesNotThrow(() => JSON.stringify(event));
+});
+
 test('HarnessEventReporter emits session_started only once', async () => {
   const events: HarnessEvent[] = [];
   const reporter = new HarnessEventReporter({
