@@ -276,6 +276,7 @@ export async function* streamLoop({
 
     while (true) {
       const transcript = getTranscript();
+      const modelMessages = toModelMessages(transcript);
       const hasPrepareProviderRequestHooks = pluginRunner.hasPrepareProviderRequestHooks();
 
       currentIteration += 1;
@@ -284,7 +285,7 @@ export async function* streamLoop({
       const providerCtx = {
         iteration: currentIteration,
         messageCount: transcript.length,
-        messageCountsByRole: getMessageCountsByRole(toModelMessages(transcript)),
+        messageCountsByRole: getMessageCountsByRole(modelMessages),
         model: provider.model,
         providerName: provider.name,
         sessionId: reporter.getSessionId(),
@@ -302,7 +303,7 @@ export async function* streamLoop({
       }
 
       let request: ModelRequest = {
-        messages: toModelMessages(transcript),
+        messages: modelMessages,
         signal,
         stream,
         systemPrompt: resolvedSystemPrompt,

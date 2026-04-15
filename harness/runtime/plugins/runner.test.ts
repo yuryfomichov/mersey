@@ -6,7 +6,12 @@ import { HarnessEventReporter } from '../events/reporter.js';
 import type { HarnessEvent } from '../events/types.js';
 import type { ModelRequest } from '../models/types.js';
 import { PluginRunner, createPluginRunner } from './runner.js';
-import type { BeforeProviderCallContext, BeforeToolCallContext, HarnessPlugin } from './types.js';
+import type {
+  BeforeProviderCallContext,
+  BeforeToolCallContext,
+  HarnessPlugin,
+  PrepareProviderRequestContext,
+} from './types.js';
 
 function createTestReporter(): HarnessEventReporter {
   return new HarnessEventReporter({
@@ -41,10 +46,9 @@ function createBeforeProviderCallContext(): BeforeProviderCallContext {
   };
 }
 
-function createPrepareProviderRequestContext() {
+function createPrepareProviderRequestContext(): PrepareProviderRequestContext {
   const userMessage = {
     content: 'hello',
-    createdAt: new Date().toISOString(),
     role: 'user' as const,
   };
 
