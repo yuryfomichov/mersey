@@ -29,8 +29,8 @@ export type PrepareProviderRequestContext = {
   iteration: number;
   providerName: string;
   model: string;
-  transcript: Message[];
-  userMessage: Message;
+  transcript: readonly Readonly<Message>[];
+  userMessage: Readonly<Message>;
   signal?: AbortSignal;
 };
 

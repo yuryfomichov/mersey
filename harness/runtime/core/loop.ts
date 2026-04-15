@@ -249,8 +249,7 @@ export async function* streamLoop({
 
     while (true) {
       const transcript = getTranscript();
-      const transcriptSnapshot = snapshot(transcript);
-      const userMessageSnapshot = snapshot(userMessage);
+      const hasPrepareProviderRequestHooks = pluginRunner.hasPrepareProviderRequestHooks();
 
       currentIteration += 1;
       reporter.iterationStarted(currentIteration, transcript.length);
@@ -264,17 +263,6 @@ export async function* streamLoop({
         sessionId: reporter.getSessionId(),
         toolDefinitionNames: toolRuntime.toolDefinitions?.map((t) => t.name) ?? [],
         turnId: reporter.getTurnId(),
-      };
-
-      const prepareProviderRequestCtx = {
-        iteration: currentIteration,
-        model: provider.model,
-        providerName: provider.name,
-        sessionId: reporter.getSessionId(),
-        signal,
-        transcript: transcriptSnapshot,
-        turnId: reporter.getTurnId(),
-        userMessage: userMessageSnapshot,
       };
 
       const providerDecision = await pluginRunner.runBeforeProviderCall(providerCtx);
@@ -295,7 +283,19 @@ export async function* streamLoop({
       };
 
       currentErrorType = 'provider';
-      request = await pluginRunner.runPrepareProviderRequest(request, prepareProviderRequestCtx);
+
+      if (hasPrepareProviderRequestHooks) {
+        request = await pluginRunner.runPrepareProviderRequest(request, {
+          iteration: currentIteration,
+          model: provider.model,
+          providerName: provider.name,
+          sessionId: reporter.getSessionId(),
+          signal,
+          transcript: snapshot(transcript),
+          turnId: reporter.getTurnId(),
+          userMessage: snapshot(userMessage),
+        });
+      }
 
       reporter.providerRequested(currentIteration, request.messages, provider, request.tools);
 

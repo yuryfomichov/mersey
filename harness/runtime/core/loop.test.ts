@@ -262,7 +262,7 @@ test('streamLoop passes immutable snapshots to request-prep hooks', async () => 
             }
 
             try {
-              ctx.userMessage.role = 'assistant';
+              (ctx.userMessage as Message).role = 'assistant';
             } catch {
               userMessageMutationFailed = true;
             }
@@ -286,6 +286,35 @@ test('streamLoop passes immutable snapshots to request-prep hooks', async () => 
       { content: 'reply:hello', role: 'assistant' },
     ],
   );
+});
+
+test('streamLoop skips request-prep snapshots when no request-prep hooks are registered', async () => {
+  const session = createSession('no-request-prep-snapshots-session');
+  const provider = new FakeProvider();
+
+  session.messages.push({
+    content: 'tool output',
+    createdAt: new Date().toISOString(),
+    data: {
+      callback: () => 'not cloneable',
+    },
+    name: 'example_tool',
+    role: 'tool',
+    toolCallId: 'call-1',
+  });
+
+  const { finalMessage } = await collectLoopResult(
+    createLoopInput({
+      content: 'hello',
+      history: session.messages,
+      plugins: [],
+      provider,
+      sessionId: session.id,
+      tools: [],
+    }),
+  );
+
+  assert.equal(finalMessage.content, 'reply:hello');
 });
 
 test('streamLoop does not persist assistant tool calls when the tool iteration cap is exceeded', async () => {

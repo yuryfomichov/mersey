@@ -231,6 +231,20 @@ Under the hood, `HarnessEventEmitter` owns immutable publish/subscribe delivery 
 
 This keeps retrieval or other request enrichment inside the runtime loop without pushing provider-specific logic into apps or providers.
 
+```ts
+const plugin = {
+  name: 'request-prep',
+  prepareProviderRequest(request, ctx) {
+    return {
+      prependMessages: [{ role: 'user', content: `Context for: ${ctx.userMessage.content}` }],
+      systemPrompt: request.systemPrompt,
+    };
+  },
+};
+```
+
+`prepareProviderRequest(request, ctx)` can return `prependMessages`, `appendMessages`, and `systemPrompt` overrides.
+
 ## Integration Boundaries
 
 Keep the boundary between app code and `harness` sharp:

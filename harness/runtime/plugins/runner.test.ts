@@ -198,6 +198,25 @@ test('PluginRunner.runPrepareProviderRequest executes in registration order and 
   assert.equal(decision.systemPrompt, 'Be helpful.\nUse context.');
 });
 
+test('PluginRunner.runPrepareProviderRequest reuses the original request when hooks make no changes', async () => {
+  const plugins: HarnessPlugin[] = [
+    {
+      name: 'plugin-a',
+      prepareProviderRequest() {
+        return {};
+      },
+    },
+  ];
+
+  const { runner } = createPluginRunnerWithPlugins(plugins);
+  const request = createBaseRequest();
+  const decision = await runner.runPrepareProviderRequest(request, {
+    ...createPrepareProviderRequestContext(),
+  });
+
+  assert.equal(decision, request);
+});
+
 test('PluginRunner.runPrepareProviderRequest allows hooks to explicitly clear systemPrompt', async () => {
   const plugins: HarnessPlugin[] = [
     {
