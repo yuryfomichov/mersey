@@ -1,10 +1,13 @@
 import type { HarnessEventReporter } from '../events/reporter.js';
 import type { HarnessEvent } from '../events/types.js';
+import type { ModelRequest } from '../models/types.js';
 import type {
   BeforeProviderCallContext,
   BeforeToolCallContext,
   HookDecision,
   HarnessPlugin,
+  PrepareProviderRequestContext,
+  PrepareProviderRequestResult,
   PluginEventContext,
 } from './types.js';
 
@@ -57,6 +60,27 @@ export class PluginRunner {
     }
 
     return { continue: true };
+  }
+
+  async runPrepareProviderRequest(request: ModelRequest, ctx: PrepareProviderRequestContext): Promise<ModelRequest> {
+    let nextRequest = request;
+
+    for (const plugin of this.plugins) {
+      if (!plugin.prepareProviderRequest) {
+        continue;
+      }
+
+      try {
+        const prepared = await plugin.prepareProviderRequest(nextRequest, ctx);
+
+        nextRequest = applyPreparedRequest(nextRequest, prepared);
+      } catch (error: unknown) {
+        this.reporter.hookError(plugin.name, 'prepareProviderRequest', error);
+        throw new Error(SANITIZED_ERROR_REASON);
+      }
+    }
+
+    return nextRequest;
   }
 
   async runBeforeToolCall(ctx: BeforeToolCallContext): Promise<HookDecision> {
@@ -125,6 +149,17 @@ export class PluginRunner {
 
     return true;
   }
+}
+
+function applyPreparedRequest(request: ModelRequest, prepared: PrepareProviderRequestResult): ModelRequest {
+  const messages = [...(prepared.prependMessages ?? []), ...request.messages, ...(prepared.appendMessages ?? [])];
+  const systemPrompt = Object.hasOwn(prepared, 'systemPrompt') ? prepared.systemPrompt : request.systemPrompt;
+
+  return {
+    ...request,
+    messages,
+    systemPrompt,
+  };
 }
 
 export function createPluginRunner(options: PluginRunnerOptions): PluginRunner {

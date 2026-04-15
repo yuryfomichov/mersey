@@ -47,11 +47,9 @@ test('createHarness requires a provider', () => {
 test('createHarness requires a session', () => {
   assert.throws(
     () =>
-      createHarness(
-        {
-          providerInstance: new FakeProvider(),
-        } as unknown as CreateHarnessOptions,
-      ),
+      createHarness({
+        providerInstance: new FakeProvider(),
+      } as unknown as CreateHarnessOptions),
     /Missing session\. Pass session to createHarness\(\)\./,
   );
 });

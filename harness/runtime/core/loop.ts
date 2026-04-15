@@ -4,6 +4,7 @@ import type { ModelMessage, ModelRequest, ModelResponse } from '../models/types.
 import type { PluginRunner } from '../plugins/runner.js';
 import type { Message } from '../sessions/types.js';
 import type { ToolRuntimeFactory } from '../tools/runtime/index.js';
+import { snapshot } from '../utils/object.js';
 
 export type LoopOptions = {
   maxToolIterations?: number;
@@ -248,6 +249,8 @@ export async function* streamLoop({
 
     while (true) {
       const transcript = getTranscript();
+      const transcriptSnapshot = snapshot(transcript);
+      const userMessageSnapshot = snapshot(userMessage);
 
       currentIteration += 1;
       reporter.iterationStarted(currentIteration, transcript.length);
@@ -255,12 +258,23 @@ export async function* streamLoop({
       const providerCtx = {
         iteration: currentIteration,
         messageCount: transcript.length,
-        messageCountsByRole: getMessageCountsByRole(transcript),
+        messageCountsByRole: getMessageCountsByRole(toModelMessages(transcript)),
         model: provider.model,
         providerName: provider.name,
         sessionId: reporter.getSessionId(),
         toolDefinitionNames: toolRuntime.toolDefinitions?.map((t) => t.name) ?? [],
         turnId: reporter.getTurnId(),
+      };
+
+      const prepareProviderRequestCtx = {
+        iteration: currentIteration,
+        model: provider.model,
+        providerName: provider.name,
+        sessionId: reporter.getSessionId(),
+        signal,
+        transcript: transcriptSnapshot,
+        turnId: reporter.getTurnId(),
+        userMessage: userMessageSnapshot,
       };
 
       const providerDecision = await pluginRunner.runBeforeProviderCall(providerCtx);
@@ -272,9 +286,19 @@ export async function* streamLoop({
         throw new Error(exposeToModel ? providerDecision.reason : 'Provider request blocked by policy.');
       }
 
-      reporter.providerRequested(currentIteration, transcript, provider, toolRuntime.toolDefinitions);
+      let request: ModelRequest = {
+        messages: toModelMessages(transcript),
+        signal,
+        stream,
+        systemPrompt: resolvedSystemPrompt,
+        tools: toolRuntime.toolDefinitions,
+      };
 
       currentErrorType = 'provider';
+      request = await pluginRunner.runPrepareProviderRequest(request, prepareProviderRequestCtx);
+
+      reporter.providerRequested(currentIteration, request.messages, provider, request.tools);
+
       throwIfAborted(signal);
       let response: ModelResponse | null = null;
       let streamedAssistantDelta = false;
@@ -283,13 +307,7 @@ export async function* streamLoop({
         iteration: currentIteration,
         reporter,
         provider,
-        request: {
-          messages: toModelMessages(transcript),
-          signal,
-          stream,
-          systemPrompt: resolvedSystemPrompt,
-          tools: toolRuntime.toolDefinitions,
-        },
+        request,
         signal,
       })) {
         throwIfAborted(signal);

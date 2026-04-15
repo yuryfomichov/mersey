@@ -193,6 +193,109 @@ test('streamLoop normalizes empty-string systemPrompt to undefined', async () =>
   assert.equal(provider.requests[0].systemPrompt, undefined);
 });
 
+test('streamLoop applies prepareProviderRequest changes without persisting retrieval context', async () => {
+  const session = createSession('request-prep-session');
+  const events: HarnessEvent[] = [];
+  const eventSink = new HarnessEventEmitter();
+  eventSink.subscribe((event: HarnessEvent) => {
+    events.push(event);
+  });
+  const provider = new FakeProvider();
+
+  const { finalMessage, turnMessages } = await collectLoopResult(
+    createLoopInput({
+      content: 'hello',
+      eventSink,
+      history: session.messages,
+      plugins: [
+        {
+          name: 'retrieval',
+          prepareProviderRequest() {
+            return {
+              metadata: {
+                retrieval: {
+                  hitCount: 1,
+                  queryLength: 5,
+                  sourceCount: 1,
+                  sources: ['resume.md'],
+                },
+              },
+              prependMessages: [
+                { content: 'Retrieved context\n\n[Source 1: resume.md]\nBuilt payments platform.', role: 'user' },
+              ],
+            };
+          },
+        },
+      ],
+      provider,
+      sessionId: session.id,
+      tools: [],
+    }),
+  );
+
+  assert.equal(finalMessage.content, 'reply:hello');
+  assert.deepEqual(provider.requests[0]?.messages, [
+    { content: 'Retrieved context\n\n[Source 1: resume.md]\nBuilt payments platform.', role: 'user' },
+    { content: 'hello', role: 'user' },
+  ]);
+  assert.deepEqual(
+    turnMessages.map((message) => ({ content: message.content, role: message.role })),
+    [
+      { content: 'hello', role: 'user' },
+      { content: 'reply:hello', role: 'assistant' },
+    ],
+  );
+  assert.equal(
+    events.some((event) => event.type === 'hook_error'),
+    false,
+  );
+});
+
+test('streamLoop passes immutable snapshots to request-prep hooks', async () => {
+  let transcriptMutationFailed = false;
+  let userMessageMutationFailed = false;
+
+  const { turnMessages } = await collectLoopResult(
+    createLoopInput({
+      content: 'hello',
+      history: [],
+      plugins: [
+        {
+          name: 'immutability-check',
+          prepareProviderRequest(_request, ctx) {
+            try {
+              (ctx.transcript[0] as Message).content = 'mutated';
+            } catch {
+              transcriptMutationFailed = true;
+            }
+
+            try {
+              ctx.userMessage.role = 'assistant';
+            } catch {
+              userMessageMutationFailed = true;
+            }
+
+            return {};
+          },
+        },
+      ],
+      provider: new FakeProvider(),
+      sessionId: 'immutability-session',
+      tools: [],
+    }),
+  );
+
+  assert.equal(transcriptMutationFailed, true);
+  assert.equal(userMessageMutationFailed, true);
+  assert.deepEqual(
+    turnMessages.map((message) => ({ content: message.content, role: message.role })),
+    [
+      { content: 'hello', role: 'user' },
+      { content: 'reply:hello', role: 'assistant' },
+    ],
+  );
+});
+
 test('streamLoop does not persist assistant tool calls when the tool iteration cap is exceeded', async () => {
   const session = createSession('tool-overflow-session');
 
@@ -707,4 +810,43 @@ test('streamLoop provider deny path can expose reason when explicitly allowed', 
     ),
     /exposed policy reason/,
   );
+});
+
+test('streamLoop prepareProviderRequest hook errors fail closed and report provider error type', async () => {
+  const events: HarnessEvent[] = [];
+  const eventSink = new HarnessEventEmitter();
+  eventSink.subscribe((event: HarnessEvent) => {
+    events.push(event);
+  });
+
+  await assert.rejects(
+    collectFinalMessage(
+      createLoopInput({
+        content: 'hello',
+        eventSink,
+        history: [],
+        plugins: [
+          {
+            name: 'retrieval',
+            prepareProviderRequest() {
+              throw new Error('retrieval failure');
+            },
+          },
+        ],
+        provider: new FakeProvider(),
+        sessionId: 'prepare-provider-request-deny',
+        tools: [],
+      }),
+    ),
+    /Policy check failed/,
+  );
+
+  const hookError = events.find((event) => event.type === 'hook_error');
+  assert.equal(hookError?.type, 'hook_error');
+  assert.equal(hookError?.type === 'hook_error' ? hookError.hookName : undefined, 'prepareProviderRequest');
+
+  const failed = events.find((event) => event.type === 'turn_failed');
+  assert.equal(failed?.type, 'turn_failed');
+  assert.equal(failed?.type === 'turn_failed' ? failed.errorType : undefined, 'provider');
+  assert.equal(failed?.type === 'turn_failed' ? failed.errorMessage : undefined, 'Provider request failed.');
 });
