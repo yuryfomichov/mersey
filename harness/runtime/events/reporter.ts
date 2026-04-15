@@ -1,8 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import type { ModelProvider } from '../models/provider.js';
-import type { ModelResponse, ModelToolCall, ModelToolDefinition } from '../models/types.js';
-import type { Message } from '../sessions/types.js';
+import type { ModelMessage, ModelResponse, ModelToolCall, ModelToolDefinition } from '../models/types.js';
 import type { ToolExecutionResult } from '../tools/types.js';
 import { HarnessEventEmitter } from './emitter.js';
 import {
@@ -32,7 +31,7 @@ function getToolDefinitionNames(toolDefinitions: ModelToolDefinition[] | undefin
   return toolDefinitions?.map((tool) => tool.name) ?? [];
 }
 
-export function getMessageCountsByRole(messages: readonly Message[]): {
+export function getMessageCountsByRole(messages: readonly ModelMessage[]): {
   assistant: number;
   tool: number;
   user: number;
@@ -93,7 +92,7 @@ export class HarnessEventReporter {
 
   providerRequested(
     iteration: number,
-    messages: Message[],
+    messages: readonly ModelMessage[],
     provider: ProviderMetadata,
     toolDefinitions: ModelToolDefinition[] | undefined,
   ): void {

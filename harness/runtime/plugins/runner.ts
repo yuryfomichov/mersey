@@ -1,10 +1,13 @@
 import type { HarnessEventReporter } from '../events/reporter.js';
 import type { HarnessEvent } from '../events/types.js';
+import type { ModelRequest } from '../models/types.js';
 import type {
   BeforeProviderCallContext,
   BeforeToolCallContext,
   HookDecision,
   HarnessPlugin,
+  PrepareProviderRequestContext,
+  PrepareProviderRequestResult,
   PluginEventContext,
 } from './types.js';
 
@@ -16,7 +19,12 @@ export type PluginRunnerOptions = {
   runId: string;
 };
 
+type PrepareProviderRequestPlugin = HarnessPlugin & {
+  prepareProviderRequest: NonNullable<HarnessPlugin['prepareProviderRequest']>;
+};
+
 export class PluginRunner {
+  private readonly pluginsWithPrepareProviderRequest: PrepareProviderRequestPlugin[];
   private readonly reporter: HarnessEventReporter;
   private readonly pluginsWithEvents: HarnessPlugin[];
   private readonly plugins: HarnessPlugin[];
@@ -25,6 +33,7 @@ export class PluginRunner {
   constructor(options: PluginRunnerOptions) {
     this.reporter = options.reporter;
     this.plugins = options.plugins;
+    this.pluginsWithPrepareProviderRequest = this.plugins.filter(hasPrepareProviderRequestHook);
     this.pluginsWithEvents = this.plugins.filter((plugin) => Boolean(plugin.onEvent));
     this.runId = options.runId;
 
@@ -57,6 +66,29 @@ export class PluginRunner {
     }
 
     return { continue: true };
+  }
+
+  hasPrepareProviderRequestHooks(): boolean {
+    return this.pluginsWithPrepareProviderRequest.length > 0;
+  }
+
+  async runPrepareProviderRequest(request: ModelRequest, ctx: PrepareProviderRequestContext): Promise<ModelRequest> {
+    let nextRequest = request;
+
+    for (const plugin of this.pluginsWithPrepareProviderRequest) {
+      const prepareProviderRequest = plugin.prepareProviderRequest;
+
+      try {
+        const prepared = await prepareProviderRequest(nextRequest, ctx);
+
+        nextRequest = applyPreparedRequest(nextRequest, prepared);
+      } catch (error: unknown) {
+        this.reporter.hookError(plugin.name, 'prepareProviderRequest', error);
+        throw new Error(SANITIZED_ERROR_REASON);
+      }
+    }
+
+    return nextRequest;
   }
 
   async runBeforeToolCall(ctx: BeforeToolCallContext): Promise<HookDecision> {
@@ -127,6 +159,34 @@ export class PluginRunner {
   }
 }
 
+function applyPreparedRequest(request: ModelRequest, prepared: PrepareProviderRequestResult): ModelRequest {
+  const prependMessages = prepared.prependMessages ?? [];
+  const appendMessages = prepared.appendMessages ?? [];
+  const hasMessageChanges = prependMessages.length > 0 || appendMessages.length > 0;
+  const hasSystemPromptOverride = Object.hasOwn(prepared, 'systemPrompt');
+
+  if (!hasMessageChanges && !hasSystemPromptOverride) {
+    return request;
+  }
+
+  const messages = hasMessageChanges ? [...prependMessages, ...request.messages, ...appendMessages] : request.messages;
+  const systemPrompt = hasSystemPromptOverride ? prepared.systemPrompt : request.systemPrompt;
+
+  if (messages === request.messages && systemPrompt === request.systemPrompt) {
+    return request;
+  }
+
+  return {
+    ...request,
+    messages,
+    systemPrompt,
+  };
+}
+
 export function createPluginRunner(options: PluginRunnerOptions): PluginRunner {
   return new PluginRunner(options);
+}
+
+function hasPrepareProviderRequestHook(plugin: HarnessPlugin): plugin is PrepareProviderRequestPlugin {
+  return Boolean(plugin.prepareProviderRequest);
 }

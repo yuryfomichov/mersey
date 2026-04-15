@@ -220,12 +220,38 @@ const harness = createHarness({
 
 Under the hood, `HarnessEventEmitter` owns immutable publish/subscribe delivery and `HarnessEventReporter` owns typed event construction, turn/session IDs, timing, and sanitization.
 
+## Request Preparation Hooks
+
+`harness` supports a request-prep hook that can enrich the outbound `ModelRequest` just before each provider call.
+
+- request-prep runs after `beforeProviderCall` allows the iteration
+- injected context is ephemeral for that provider call only
+- synthetic request messages are not persisted into session history
+- hook contexts receive immutable, request-prep-safe snapshots rather than live session objects
+
+This keeps retrieval or other request enrichment inside the runtime loop without pushing provider-specific logic into apps or providers.
+
+```ts
+const plugin = {
+  name: 'request-prep',
+  prepareProviderRequest(request, ctx) {
+    return {
+      prependMessages: [{ role: 'user', content: `Context for: ${ctx.userMessage.content}` }],
+      systemPrompt: request.systemPrompt,
+    };
+  },
+};
+```
+
+`prepareProviderRequest(request, ctx)` receives a readonly request plus a simplified immutable transcript, and can return `prependMessages`, `appendMessages`, and `systemPrompt` overrides.
+
 ## Integration Boundaries
 
 Keep the boundary between app code and `harness` sharp:
 
 - app code should own UI and input collection
 - app code should choose provider config, session storage, and tool registration
+- app code can choose which request-prep plugins to register
 - `harness` should own the turn loop, pause/resume semantics, tool execution, and session updates
 - provider-specific codecs should stay in `harness/providers/codecs/`
 

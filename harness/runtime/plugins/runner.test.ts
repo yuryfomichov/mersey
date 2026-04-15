@@ -4,8 +4,14 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import { HarnessEventReporter } from '../events/reporter.js';
 import type { HarnessEvent } from '../events/types.js';
+import type { ModelRequest } from '../models/types.js';
 import { PluginRunner, createPluginRunner } from './runner.js';
-import type { BeforeProviderCallContext, BeforeToolCallContext, HarnessPlugin } from './types.js';
+import type {
+  BeforeProviderCallContext,
+  BeforeToolCallContext,
+  HarnessPlugin,
+  PrepareProviderRequestContext,
+} from './types.js';
 
 function createTestReporter(): HarnessEventReporter {
   return new HarnessEventReporter({
@@ -25,6 +31,46 @@ function createPluginRunnerWithPlugins(plugins: HarnessPlugin[]): {
     runId: 'test-run-id',
   });
   return { reporter, runner };
+}
+
+function createBeforeProviderCallContext(): BeforeProviderCallContext {
+  return {
+    iteration: 1,
+    messageCount: 1,
+    messageCountsByRole: { user: 1, assistant: 0, tool: 0 },
+    model: 'test-model',
+    providerName: 'test-provider',
+    sessionId: 'test-session',
+    toolDefinitionNames: [],
+    turnId: 'test-turn',
+  };
+}
+
+function createPrepareProviderRequestContext(): PrepareProviderRequestContext {
+  const userMessage = {
+    content: 'hello',
+    role: 'user' as const,
+  };
+
+  return {
+    iteration: 1,
+    model: 'test-model',
+    providerName: 'test-provider',
+    sessionId: 'test-session',
+    signal: undefined,
+    transcript: [userMessage],
+    turnId: 'test-turn',
+    userMessage,
+  };
+}
+
+function createBaseRequest(): ModelRequest {
+  return {
+    messages: [{ content: 'hello', role: 'user' }],
+    stream: false,
+    systemPrompt: 'Be helpful.',
+    tools: [],
+  };
 }
 
 test('PluginRunner.runBeforeProviderCall executes in registration order', async () => {
@@ -47,16 +93,7 @@ test('PluginRunner.runBeforeProviderCall executes in registration order', async 
   ];
 
   const { runner } = createPluginRunnerWithPlugins(plugins);
-  const ctx: BeforeProviderCallContext = {
-    iteration: 1,
-    messageCount: 1,
-    messageCountsByRole: { user: 1, assistant: 0, tool: 0 },
-    model: 'test-model',
-    providerName: 'test-provider',
-    sessionId: 'test-session',
-    toolDefinitionNames: [],
-    turnId: 'test-turn',
-  };
+  const ctx = createBeforeProviderCallContext();
 
   await runner.runBeforeProviderCall(ctx);
 
@@ -83,16 +120,7 @@ test('PluginRunner.runBeforeProviderCall short-circuits on first deny', async ()
   ];
 
   const { runner } = createPluginRunnerWithPlugins(plugins);
-  const ctx: BeforeProviderCallContext = {
-    iteration: 1,
-    messageCount: 1,
-    messageCountsByRole: { user: 1, assistant: 0, tool: 0 },
-    model: 'test-model',
-    providerName: 'test-provider',
-    sessionId: 'test-session',
-    toolDefinitionNames: [],
-    turnId: 'test-turn',
-  };
+  const ctx = createBeforeProviderCallContext();
 
   const decision = await runner.runBeforeProviderCall(ctx);
 
@@ -123,16 +151,7 @@ test('PluginRunner.runBeforeProviderCall fails closed on hook error', async () =
     events.push(event);
   });
 
-  const ctx: BeforeProviderCallContext = {
-    iteration: 1,
-    messageCount: 1,
-    messageCountsByRole: { user: 1, assistant: 0, tool: 0 },
-    model: 'test-model',
-    providerName: 'test-provider',
-    sessionId: 'test-session',
-    toolDefinitionNames: [],
-    turnId: 'test-turn',
-  };
+  const ctx = createBeforeProviderCallContext();
 
   const decision = await runner.runBeforeProviderCall(ctx);
 
@@ -143,6 +162,123 @@ test('PluginRunner.runBeforeProviderCall fails closed on hook error', async () =
   assert.equal(hookError?.type, 'hook_error');
   assert.equal(hookError?.type === 'hook_error' ? hookError.pluginName : undefined, 'plugin-a');
   assert.equal(hookError?.type === 'hook_error' ? hookError.hookName : undefined, 'beforeProviderCall');
+});
+
+test('PluginRunner.runPrepareProviderRequest executes in registration order and merges request changes', async () => {
+  const callOrder: string[] = [];
+  const plugins: HarnessPlugin[] = [
+    {
+      name: 'plugin-a',
+      prepareProviderRequest(request) {
+        callOrder.push('plugin-a');
+        return {
+          prependMessages: [{ content: 'context', role: 'user' }],
+          systemPrompt: `${request.systemPrompt}\nUse context.`,
+        };
+      },
+    },
+    {
+      name: 'plugin-b',
+      prepareProviderRequest() {
+        callOrder.push('plugin-b');
+        return {
+          appendMessages: [{ content: 'closing note', role: 'assistant' }],
+        };
+      },
+    },
+  ];
+
+  const { runner } = createPluginRunnerWithPlugins(plugins);
+  const decision = await runner.runPrepareProviderRequest(createBaseRequest(), {
+    ...createPrepareProviderRequestContext(),
+  });
+
+  assert.deepEqual(callOrder, ['plugin-a', 'plugin-b']);
+  assert.deepEqual(decision.messages, [
+    { content: 'context', role: 'user' },
+    { content: 'hello', role: 'user' },
+    { content: 'closing note', role: 'assistant' },
+  ]);
+  assert.equal(decision.systemPrompt, 'Be helpful.\nUse context.');
+});
+
+test('PluginRunner.runPrepareProviderRequest reuses the original request when hooks make no changes', async () => {
+  const plugins: HarnessPlugin[] = [
+    {
+      name: 'plugin-a',
+      prepareProviderRequest() {
+        return {};
+      },
+    },
+  ];
+
+  const { runner } = createPluginRunnerWithPlugins(plugins);
+  const request = createBaseRequest();
+  const decision = await runner.runPrepareProviderRequest(request, {
+    ...createPrepareProviderRequestContext(),
+  });
+
+  assert.equal(decision, request);
+});
+
+test('PluginRunner.runPrepareProviderRequest allows hooks to explicitly clear systemPrompt', async () => {
+  const plugins: HarnessPlugin[] = [
+    {
+      name: 'plugin-a',
+      prepareProviderRequest() {
+        return {
+          systemPrompt: undefined,
+        };
+      },
+    },
+  ];
+
+  const { runner } = createPluginRunnerWithPlugins(plugins);
+  const decision = await runner.runPrepareProviderRequest(createBaseRequest(), {
+    ...createPrepareProviderRequestContext(),
+  });
+
+  assert.equal(decision.systemPrompt, undefined);
+});
+
+test('PluginRunner.runPrepareProviderRequest fails closed on hook error', async () => {
+  const callOrder: string[] = [];
+  const events: HarnessEvent[] = [];
+  const plugins: HarnessPlugin[] = [
+    {
+      name: 'plugin-a',
+      prepareProviderRequest() {
+        callOrder.push('plugin-a');
+        throw new Error('internal error');
+      },
+    },
+    {
+      name: 'plugin-b',
+      prepareProviderRequest() {
+        callOrder.push('plugin-b');
+        return {};
+      },
+    },
+  ];
+
+  const { reporter, runner } = createPluginRunnerWithPlugins(plugins);
+  reporter.subscribe((event) => {
+    events.push(event);
+  });
+
+  await assert.rejects(
+    runner.runPrepareProviderRequest(createBaseRequest(), {
+      ...createPrepareProviderRequestContext(),
+    }),
+    /Policy check failed/,
+  );
+
+  assert.deepEqual(callOrder, ['plugin-a']);
+  const hookError = events.find((event) => event.type === 'hook_error');
+
+  assert.equal(hookError?.type, 'hook_error');
+  assert.equal(hookError?.type === 'hook_error' ? hookError.pluginName : undefined, 'plugin-a');
+  assert.equal(hookError?.type === 'hook_error' ? hookError.hookName : undefined, 'prepareProviderRequest');
 });
 
 test('PluginRunner.runBeforeToolCall executes in registration order', async () => {

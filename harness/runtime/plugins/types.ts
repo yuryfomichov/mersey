@@ -1,4 +1,5 @@
 import type { HarnessEvent } from '../events/types.js';
+import type { ModelMessage, ModelRequest } from '../models/types.js';
 
 export type HookDecision =
   | { continue: true }
@@ -8,7 +9,7 @@ export type HookDecision =
       exposeToModel?: boolean;
     };
 
-export type HookName = 'beforeProviderCall' | 'beforeToolCall' | 'onEvent';
+export type HookName = 'beforeProviderCall' | 'prepareProviderRequest' | 'beforeToolCall' | 'onEvent';
 
 export type BeforeProviderCallContext = {
   sessionId: string;
@@ -19,6 +20,45 @@ export type BeforeProviderCallContext = {
   messageCount: number;
   messageCountsByRole: { user: number; assistant: number; tool: number };
   toolDefinitionNames: string[];
+};
+
+export type PrepareProviderRequestMessage =
+  | {
+      content: string;
+      role: 'user';
+    }
+  | {
+      content: string;
+      role: 'assistant';
+    }
+  | {
+      content: string;
+      isError?: boolean;
+      name: string;
+      role: 'tool';
+      toolCallId: string;
+    };
+
+export type PrepareProviderRequestUserMessage = {
+  content: string;
+  role: 'user';
+};
+
+export type PrepareProviderRequestContext = {
+  sessionId: string;
+  turnId: string;
+  iteration: number;
+  providerName: string;
+  model: string;
+  transcript: readonly Readonly<PrepareProviderRequestMessage>[];
+  userMessage: Readonly<PrepareProviderRequestUserMessage>;
+  signal?: AbortSignal;
+};
+
+export type PrepareProviderRequestResult = {
+  appendMessages?: ModelMessage[];
+  prependMessages?: ModelMessage[];
+  systemPrompt?: string;
 };
 
 export type BeforeToolCallContext = {
@@ -43,6 +83,10 @@ export type HarnessPlugin = {
   name: string;
 
   beforeProviderCall?(ctx: BeforeProviderCallContext): Promise<HookDecision> | HookDecision;
+  prepareProviderRequest?(
+    request: Readonly<ModelRequest>,
+    ctx: PrepareProviderRequestContext,
+  ): Promise<PrepareProviderRequestResult> | PrepareProviderRequestResult;
   beforeToolCall?(ctx: BeforeToolCallContext): Promise<HookDecision> | HookDecision;
 
   onEvent?(event: HarnessEvent, ctx: PluginEventContext): Promise<void> | void;

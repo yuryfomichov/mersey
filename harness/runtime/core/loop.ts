@@ -2,8 +2,10 @@ import { getMessageCountsByRole, HarnessEventReporter } from '../events/reporter
 import type { ModelProvider } from '../models/provider.js';
 import type { ModelMessage, ModelRequest, ModelResponse } from '../models/types.js';
 import type { PluginRunner } from '../plugins/runner.js';
+import type { PrepareProviderRequestMessage } from '../plugins/types.js';
 import type { Message } from '../sessions/types.js';
 import type { ToolRuntimeFactory } from '../tools/runtime/index.js';
+import { freezeDeep } from '../utils/object.js';
 
 export type LoopOptions = {
   maxToolIterations?: number;
@@ -85,6 +87,32 @@ function toModelMessages(messages: readonly Message[]): ModelMessage[] {
         content: message.content,
         role: 'assistant',
         toolCalls: message.toolCalls,
+      };
+    }
+
+    return {
+      content: message.content,
+      role: 'user',
+    };
+  });
+}
+
+function toPrepareProviderRequestTranscript(messages: readonly Message[]): PrepareProviderRequestMessage[] {
+  return messages.map((message) => {
+    if (message.role === 'tool') {
+      return {
+        content: message.content,
+        isError: message.isError,
+        name: message.name,
+        role: 'tool',
+        toolCallId: message.toolCallId,
+      };
+    }
+
+    if (message.role === 'assistant') {
+      return {
+        content: message.content,
+        role: 'assistant',
       };
     }
 
@@ -248,6 +276,8 @@ export async function* streamLoop({
 
     while (true) {
       const transcript = getTranscript();
+      const modelMessages = toModelMessages(transcript);
+      const hasPrepareProviderRequestHooks = pluginRunner.hasPrepareProviderRequestHooks();
 
       currentIteration += 1;
       reporter.iterationStarted(currentIteration, transcript.length);
@@ -255,7 +285,7 @@ export async function* streamLoop({
       const providerCtx = {
         iteration: currentIteration,
         messageCount: transcript.length,
-        messageCountsByRole: getMessageCountsByRole(transcript),
+        messageCountsByRole: getMessageCountsByRole(modelMessages),
         model: provider.model,
         providerName: provider.name,
         sessionId: reporter.getSessionId(),
@@ -272,9 +302,34 @@ export async function* streamLoop({
         throw new Error(exposeToModel ? providerDecision.reason : 'Provider request blocked by policy.');
       }
 
-      reporter.providerRequested(currentIteration, transcript, provider, toolRuntime.toolDefinitions);
+      let request: ModelRequest = {
+        messages: modelMessages,
+        signal,
+        stream,
+        systemPrompt: resolvedSystemPrompt,
+        tools: toolRuntime.toolDefinitions,
+      };
 
       currentErrorType = 'provider';
+
+      if (hasPrepareProviderRequestHooks) {
+        request = await pluginRunner.runPrepareProviderRequest(request, {
+          iteration: currentIteration,
+          model: provider.model,
+          providerName: provider.name,
+          sessionId: reporter.getSessionId(),
+          signal,
+          transcript: freezeDeep(toPrepareProviderRequestTranscript(transcript)),
+          turnId: reporter.getTurnId(),
+          userMessage: freezeDeep({
+            content: userMessage.content,
+            role: 'user' as const,
+          }),
+        });
+      }
+
+      reporter.providerRequested(currentIteration, request.messages, provider, request.tools);
+
       throwIfAborted(signal);
       let response: ModelResponse | null = null;
       let streamedAssistantDelta = false;
@@ -283,13 +338,7 @@ export async function* streamLoop({
         iteration: currentIteration,
         reporter,
         provider,
-        request: {
-          messages: toModelMessages(transcript),
-          signal,
-          stream,
-          systemPrompt: resolvedSystemPrompt,
-          tools: toolRuntime.toolDefinitions,
-        },
+        request,
         signal,
       })) {
         throwIfAborted(signal);
