@@ -79,13 +79,21 @@ function createTurnStream({
     started = true;
 
     backgroundTask = session.runExclusive(async () => {
+      let turnId: string | null = null;
+      const unsubscribe = reporter.subscribe((event) => {
+        if (event.type === 'turn_started') {
+          turnId = event.turnId;
+        }
+      });
+
       try {
         await session.ensure();
+        const historyBeforeTurn = snapshot(session.messages);
         reporter.sessionStarted();
 
         const iterator = streamLoop({
           content,
-          history: session.messages,
+          history: historyBeforeTurn,
           reporter,
           pluginRunner,
           provider,
@@ -109,9 +117,23 @@ function createTurnStream({
 
         await session.commit(turnMessages);
         queue.end();
+
+        if (turnId) {
+          pluginRunner.runAfterTurnCommitted({
+            historyBeforeTurn,
+            model: provider.model,
+            provider,
+            providerName: provider.name,
+            sessionId: session.id,
+            turnId,
+            turnMessages: snapshot(turnMessages),
+          });
+        }
       } catch (error: unknown) {
         queue.fail(error);
         throw error;
+      } finally {
+        unsubscribe();
       }
     });
 

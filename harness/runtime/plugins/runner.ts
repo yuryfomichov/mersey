@@ -2,6 +2,7 @@ import type { HarnessEventReporter } from '../events/reporter.js';
 import type { HarnessEvent } from '../events/types.js';
 import type { ModelRequest } from '../models/types.js';
 import type {
+  AfterTurnCommittedContext,
   BeforeProviderCallContext,
   BeforeToolCallContext,
   HookDecision,
@@ -23,7 +24,13 @@ type PrepareProviderRequestPlugin = HarnessPlugin & {
   prepareProviderRequest: NonNullable<HarnessPlugin['prepareProviderRequest']>;
 };
 
+type AfterTurnCommittedPlugin = HarnessPlugin & {
+  afterTurnCommitted: NonNullable<HarnessPlugin['afterTurnCommitted']>;
+};
+
 export class PluginRunner {
+  private readonly afterTurnCommittedQueues = new Map<string, Promise<void>>();
+  private readonly pluginsWithAfterTurnCommitted: AfterTurnCommittedPlugin[];
   private readonly pluginsWithPrepareProviderRequest: PrepareProviderRequestPlugin[];
   private readonly reporter: HarnessEventReporter;
   private readonly pluginsWithEvents: HarnessPlugin[];
@@ -33,6 +40,7 @@ export class PluginRunner {
   constructor(options: PluginRunnerOptions) {
     this.reporter = options.reporter;
     this.plugins = options.plugins;
+    this.pluginsWithAfterTurnCommitted = this.plugins.filter(hasAfterTurnCommittedHook);
     this.pluginsWithPrepareProviderRequest = this.plugins.filter(hasPrepareProviderRequestHook);
     this.pluginsWithEvents = this.plugins.filter((plugin) => Boolean(plugin.onEvent));
     this.runId = options.runId;
@@ -115,6 +123,35 @@ export class PluginRunner {
     return { continue: true };
   }
 
+  runAfterTurnCommitted(ctx: AfterTurnCommittedContext): void {
+    if (this.pluginsWithAfterTurnCommitted.length === 0) {
+      return;
+    }
+
+    const previous = this.afterTurnCommittedQueues.get(ctx.sessionId) ?? Promise.resolve();
+    const scheduled = previous
+      .catch(() => {})
+      .then(async () => {
+        for (const plugin of this.pluginsWithAfterTurnCommitted) {
+          try {
+            await plugin.afterTurnCommitted(ctx);
+          } catch (error: unknown) {
+            this.reporter.hookError(plugin.name, 'afterTurnCommitted', error, {
+              sessionId: ctx.sessionId,
+              turnId: ctx.turnId,
+            });
+          }
+        }
+      });
+
+    this.afterTurnCommittedQueues.set(ctx.sessionId, scheduled);
+    void scheduled.finally(() => {
+      if (this.afterTurnCommittedQueues.get(ctx.sessionId) === scheduled) {
+        this.afterTurnCommittedQueues.delete(ctx.sessionId);
+      }
+    });
+  }
+
   private deliverEvent(event: HarnessEvent): void {
     for (const plugin of this.pluginsWithEvents) {
       const pluginCtx: PluginEventContext = {
@@ -139,13 +176,19 @@ export class PluginRunner {
       if (hookResult && typeof (hookResult as PromiseLike<unknown>).then === 'function') {
         void Promise.resolve(hookResult).catch((error: unknown) => {
           if (this.shouldEmitHookError(event)) {
-            this.reporter.hookError(plugin.name, 'onEvent', error);
+            this.reporter.hookError(plugin.name, 'onEvent', error, {
+              sessionId: pluginCtx.sessionId,
+              turnId: pluginCtx.turnId,
+            });
           }
         });
       }
     } catch (error: unknown) {
       if (this.shouldEmitHookError(event)) {
-        this.reporter.hookError(plugin.name, 'onEvent', error);
+        this.reporter.hookError(plugin.name, 'onEvent', error, {
+          sessionId: pluginCtx.sessionId,
+          turnId: pluginCtx.turnId,
+        });
       }
     }
   }
@@ -160,16 +203,21 @@ export class PluginRunner {
 }
 
 function applyPreparedRequest(request: ModelRequest, prepared: PrepareProviderRequestResult): ModelRequest {
+  const hasMessageReplacement = prepared.messages !== undefined;
   const prependMessages = prepared.prependMessages ?? [];
   const appendMessages = prepared.appendMessages ?? [];
-  const hasMessageChanges = prependMessages.length > 0 || appendMessages.length > 0;
+  const hasMessageChanges = hasMessageReplacement || prependMessages.length > 0 || appendMessages.length > 0;
   const hasSystemPromptOverride = Object.hasOwn(prepared, 'systemPrompt');
 
   if (!hasMessageChanges && !hasSystemPromptOverride) {
     return request;
   }
 
-  const messages = hasMessageChanges ? [...prependMessages, ...request.messages, ...appendMessages] : request.messages;
+  const baseMessages = hasMessageReplacement ? (prepared.messages ?? []) : request.messages;
+  const messages =
+    prependMessages.length > 0 || appendMessages.length > 0
+      ? [...prependMessages, ...baseMessages, ...appendMessages]
+      : baseMessages;
   const systemPrompt = hasSystemPromptOverride ? prepared.systemPrompt : request.systemPrompt;
 
   if (messages === request.messages && systemPrompt === request.systemPrompt) {
@@ -189,4 +237,8 @@ export function createPluginRunner(options: PluginRunnerOptions): PluginRunner {
 
 function hasPrepareProviderRequestHook(plugin: HarnessPlugin): plugin is PrepareProviderRequestPlugin {
   return Boolean(plugin.prepareProviderRequest);
+}
+
+function hasAfterTurnCommittedHook(plugin: HarnessPlugin): plugin is AfterTurnCommittedPlugin {
+  return Boolean(plugin.afterTurnCommitted);
 }

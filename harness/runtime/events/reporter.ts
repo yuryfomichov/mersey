@@ -200,14 +200,22 @@ export class HarnessEventReporter {
     });
   }
 
-  hookError(pluginName: string, hookName: HookErrorEvent['hookName'], error: unknown): void {
+  hookError(
+    pluginName: string,
+    hookName: HookErrorEvent['hookName'],
+    error: unknown,
+    overrides: {
+      sessionId?: string;
+      turnId?: string;
+    } = {},
+  ): void {
     this.eventEmitter.publish({
       errorMessage: sanitizeHookErrorMessage(error),
       hookName,
       pluginName,
-      sessionId: this.getSessionId(),
+      sessionId: overrides.sessionId ?? this.getSessionId(),
       timestamp: new Date().toISOString(),
-      turnId: this.getTurnId(),
+      turnId: overrides.turnId ?? this.getTurnId(),
       type: 'hook_error',
     });
   }
