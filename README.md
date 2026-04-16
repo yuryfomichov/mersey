@@ -23,8 +23,11 @@ The repo is organized around a reusable `harness` package and thin apps that sit
 - `harness/sessions/`: built-in `Session`, `MemorySessionStore`, and `FilesystemSessionStore`
 - `harness/runtime/events/`: event emitter/reporter and safe telemetry
 - `harness/plugins/logging/`: built-in JSONL and text logging plugins
+- `harness/plugins/retrieval/`: backend-agnostic request-prep retrieval contract and helpers
+- `harness/plugins/retrieval/lancedb/`: built-in LanceDB retrieval backend and index helpers
 - `apps/helpers/cli/`: shared app-side wiring for provider, session, tool, and logging setup
 - `apps/cli/`: thin terminal app over `harness`
+- `apps/rag-cli/`: thin RAG-backed CLI over `harness`
 - `apps/ftv/`: thin Ink TUI app over `harness`
 - `docs/`: additional project documentation
 
@@ -48,6 +51,7 @@ pnpm build
 pnpm cli -- --provider fake
 pnpm cli -- --provider minimax
 pnpm cli -- --provider openai
+pnpm rag-cli -- --provider openai
 pnpm ftv -- --provider openai
 ```
 
@@ -71,10 +75,23 @@ Useful flags:
 - `--stream`
 - `--debug`
 
+When `--debug` is enabled, event logs also include the final provider request payload for each `provider_requested` event, including debug-only request messages and system prompt after request-prep hooks run.
+
+RAG flags for `apps/rag-cli`:
+
+- `--rag`
+- `--rag-dir <path>`
+- `--rag-index-dir <path>`
+- `--rebuild-rag`
+- `--rag-top-k <n>`
+- `--rag-max-context-chars <n>`
+
 Examples:
 
 ```bash
 pnpm cli -- --provider fake --stream
+pnpm rag-cli -- --stream
+pnpm rag-cli -- --provider openai --rebuild-rag
 pnpm cli -- --provider openai --session-store filesystem --sessions-dir tmp/sessions
 pnpm cli -- --provider openai --cache
 pnpm ftv -- --provider openai --session-store filesystem --sessions-dir tmp/sessions
@@ -82,12 +99,19 @@ pnpm ftv -- --provider openai --session-store filesystem --sessions-dir tmp/sess
 
 `apps/cli` and `apps/ftv` both register a small set of tools from `harness/tools/index.ts` for file and command access, with app-side setup shared through `apps/helpers/cli/`.
 
+`apps/rag-cli` reads markdown data from `./apps/rag-cli/data` by default when RAG is enabled.
+
+RAG indexes are reused across restarts by default. Pass `--rebuild-rag` to rebuild the LanceDB index from the current markdown files.
+
+`apps/rag-cli` uses the same interactive shell but disables tools and turns on RAG by default unless `--rag=false` is passed.
+
 ## Architecture Summary
 
 - Apps own interaction and presentation.
 - `harness` owns turn orchestration, tool execution, session state, and event emission.
 - Apps must inject both `providerInstance` and `session` into `createHarness()`.
 - Logging is plugin-based: apps inject logging plugins through `createHarness({ plugins, providerInstance, session })`.
+- Retrieval is also plugin-based: request-prep plugins can inject ephemeral RAG context without persisting it into session messages.
 - Shared app-side provider, session, tool, and logging plugin wiring lives under `apps/helpers/cli/` so apps do not depend on each other.
 - The turn loop depends on `ModelProvider`, not SDK-specific request or response types.
 - Provider-specific translation belongs in `harness/providers/` and `harness/providers/codecs/`.
@@ -104,6 +128,7 @@ See `docs/harness.md` for the main integration guide, including:
 - registering tools
 - consuming streaming turn chunks
 - subscribing to events
+- wiring request-prep plugins such as the built-in LanceDB retrieval backend
 
 ## Development
 

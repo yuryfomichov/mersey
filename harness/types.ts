@@ -13,6 +13,8 @@ export type {
   HarnessPlugin,
   HookDecision,
   PluginEventContext,
+  PrepareProviderRequestContext,
+  PrepareProviderRequestResult,
 } from './runtime/plugins/types.js';
 
 export type { TurnChunk } from './runtime/core/loop.js';

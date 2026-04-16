@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import type { IterationStartedEvent, TurnFailedEvent } from '../../runtime/events/types.js';
+import type { IterationStartedEvent, ProviderRequestedEvent, TurnFailedEvent } from '../../runtime/events/types.js';
 import { createJsonlEventLoggingPlugin } from './jsonl.js';
 import { createTextEventLoggingPlugin } from './text.js';
 
@@ -29,6 +29,30 @@ function createTurnFailedEvent(): TurnFailedEvent {
     timestamp: '2026-03-31T12:00:01.000Z',
     turnId: 'turn-1',
     type: 'turn_failed',
+  };
+}
+
+function createProviderRequestedDebugEvent(): ProviderRequestedEvent {
+  return {
+    debugRequest: {
+      messages: [
+        { content: 'Retrieved context', role: 'user' },
+        { content: 'living', role: 'user' },
+      ],
+      stream: false,
+      systemPrompt: 'Answer briefly.',
+    },
+    iteration: 1,
+    messageCount: 2,
+    messageCountsByRole: { assistant: 0, tool: 0, user: 2 },
+    model: 'fake-model',
+    providerName: 'fake',
+    sessionId: 'session-1',
+    timestamp: '2026-03-31T12:00:02.000Z',
+    toolDefinitionCount: 0,
+    toolDefinitionNames: [],
+    turnId: 'turn-1',
+    type: 'provider_requested',
   };
 }
 
@@ -95,6 +119,35 @@ test('createTextEventLoggingPlugin escapes control characters onto one line', as
       '2026-03-31T12:00:01.000Z turn_failed durationMs=1 errorMessage="line1\\nline2\\rline3" errorType=runtime iteration=1 sessionId=session-1 turnId=turn-1',
     );
     assert.equal(line.split('\n').length, 1);
+  } finally {
+    await rm(rootDir, { force: true, recursive: true });
+  }
+});
+
+test('event logging plugins write debug provider request payloads when present', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'mersey-plugin-logger-'));
+
+  try {
+    const jsonlPath = join(rootDir, 'runtime.jsonl');
+    const textPath = join(rootDir, 'runtime.log');
+    const jsonlPlugin = createJsonlEventLoggingPlugin({ path: jsonlPath });
+    const textPlugin = createTextEventLoggingPlugin({ path: textPath });
+    const event = createProviderRequestedDebugEvent();
+
+    await jsonlPlugin.onEvent?.(event, PLUGIN_CTX);
+    await textPlugin.onEvent?.(event, PLUGIN_CTX);
+
+    const jsonlContents = await readFile(jsonlPath, 'utf8');
+    const textContents = await readFile(textPath, 'utf8');
+
+    assert.match(
+      jsonlContents,
+      /"debugRequest":\{"messages":\[\{"content":"Retrieved context","role":"user"\},\{"content":"living","role":"user"\}\],"stream":false,"systemPrompt":"Answer briefly\."\}/,
+    );
+    assert.match(
+      textContents,
+      /debugRequest=\{"messages":\[\{"content":"Retrieved context","role":"user"\},\{"content":"living","role":"user"\}\],"stream":false,"systemPrompt":"Answer briefly\."\}/,
+    );
   } finally {
     await rm(rootDir, { force: true, recursive: true });
   }

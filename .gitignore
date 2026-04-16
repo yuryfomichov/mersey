@@ -5,3 +5,4 @@ specs/
 tmp/
 .opencode/
 logs/
+apps/rag-cli/data/

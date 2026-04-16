@@ -11,12 +11,15 @@
     "format:check": "oxfmt --check .",
     "lint": "oxlint harness apps",
     "lint:fix": "oxlint --fix harness apps",
-    "cli": "node --env-file=.env dist/apps/cli/src/index.js",
-    "ftv": "node --env-file=.env dist/apps/ftv/src/index.js"
+    "cli": "node --env-file=.env --import tsx apps/cli/src/index.ts",
+    "rag-cli": "node --env-file=.env --import tsx apps/rag-cli/src/index.ts",
+    "ftv": "node --env-file=.env --import tsx apps/ftv/src/index.tsx"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.82.0",
     "@inkjs/ui": "2.0.0",
+    "@lancedb/lancedb": "0.27.2",
+    "apache-arrow": "18.0.0",
     "ink": "6.8.0",
     "openai": "6.33.0",
     "react": "19.2.4",

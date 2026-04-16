@@ -34,10 +34,16 @@ Main goals:
   - event emitter/reporter and safe telemetry
 - `harness/plugins/logging/`
   - built-in JSONL/text event logging plugins
+- `harness/plugins/retrieval/`
+  - backend-agnostic request-prep retrieval contract and helpers
+- `harness/plugins/retrieval/lancedb/`
+  - built-in LanceDB retrieval backend and index helpers
 - `apps/helpers/cli/`
   - shared app-side wiring for provider, session, tool, and logging setup
 - `apps/cli/`
   - thin terminal app over `harness`
+- `apps/rag-cli/`
+  - thin RAG-backed terminal app over `harness`
 - `apps/ftv/`
   - thin Ink TUI app over `harness`
 
@@ -59,6 +65,7 @@ Main goals:
 - Core session contracts belong in `harness/runtime/sessions/`; built-in session implementations belong in `harness/sessions/` so apps can swap them without changing loop behavior.
 - Event shape and safe telemetry belong in `harness/runtime/events/` so apps can observe runtime behavior without coupling to implementation details.
 - Logging is plugin-based and app-injected; core harness stays event-only.
+- Retrieval context injection should happen through request-prep plugins around provider request creation, not inside providers or apps.
 - Tool registration and behavior are unchanged in the logging refactor phase.
 
 ## Providers
@@ -75,6 +82,7 @@ Main goals:
 - `pnpm cli -- --provider anthropic`
 - `pnpm cli -- --provider minimax`
 - `pnpm cli -- --provider openai`
+- `pnpm rag-cli -- --provider openai`
 - `pnpm cli -- --provider fake`
 
 ## Notes
