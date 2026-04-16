@@ -54,10 +54,14 @@ export function createLanceDbRetrievalPlugin(options: LanceDbRetrievalPluginOpti
     maxContextChars: options.maxContextChars,
     name: options.name ?? 'lancedb-retrieval',
     async retrieve(query: string, _ctx: PrepareProviderRequestContext): Promise<RetrievedChunk[]> {
-      const db = await connect(options.dbPath);
-      const table = await db.openTable(tableName);
       const vector = await options.embedQuery(query);
       ensureVector(vector, 'query embedding');
+      if (isZeroVector(vector)) {
+        return [];
+      }
+
+      const db = await connect(options.dbPath);
+      const table = await db.openTable(tableName);
       const rows = (await table
         .vectorSearch(vector)
         .limit(options.topK ?? 5)
@@ -91,6 +95,10 @@ function ensureVector(vector: number[], label: string): void {
   if (!Array.isArray(vector) || vector.length === 0 || vector.some((value) => typeof value !== 'number')) {
     throw new Error(`${label} must be a non-empty numeric vector.`);
   }
+}
+
+function isZeroVector(vector: number[]): boolean {
+  return vector.every((value) => value === 0);
 }
 
 function createRows(documents: LanceDbIndexDocument[], vectors: number[][]): LanceDbRow[] {

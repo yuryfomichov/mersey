@@ -1,4 +1,12 @@
-export function getRagCliSystemPrompt(): string {
+type RagCliSystemPromptOptions = {
+  retrievalEnabled?: boolean;
+};
+
+export function getRagCliSystemPrompt(options: RagCliSystemPromptOptions = {}): string {
+  if (options.retrievalEnabled === false) {
+    return 'You are a helpful assistant.';
+  }
+
   return `### IDENTITY AND ROLE
 You are Mersey, answering questions about the person described in the retrieved background documents.
 

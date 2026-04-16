@@ -93,6 +93,7 @@ test('HarnessEventReporter sanitizes debug provider request payloads for event d
 
   const circularSchema: Record<string, unknown> = { type: 'object' };
   circularSchema.self = circularSchema;
+  const sharedValue = { kind: 'shared' };
 
   reporter.subscribe((event) => {
     events.push(event);
@@ -105,7 +106,7 @@ test('HarnessEventReporter sanitizes debug provider request payloads for event d
       messages: [
         {
           content: 'tool output',
-          data: { callback: () => 'not cloneable' },
+          data: { callback: () => 'not cloneable', first: sharedValue, second: sharedValue },
           name: 'example_tool',
           role: 'tool',
           toolCallId: 'call-1',
@@ -124,7 +125,7 @@ test('HarnessEventReporter sanitizes debug provider request payloads for event d
     messages: [
       {
         content: 'tool output',
-        data: { callback: '[function]' },
+        data: { callback: '[function]', first: { kind: 'shared' }, second: { kind: 'shared' } },
         name: 'example_tool',
         role: 'tool',
         toolCallId: 'call-1',

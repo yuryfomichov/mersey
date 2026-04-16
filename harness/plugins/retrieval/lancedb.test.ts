@@ -108,6 +108,29 @@ test('createRetrievalPlugin skips backend retrieval when topK is zero', async ()
   assert.deepEqual(result, {});
 });
 
+test('LanceDB retrieval plugin skips search when the query embedding is all zeros', async () => {
+  const plugin = createLanceDbRetrievalPlugin({
+    dbPath: '/path/that/should/not/be/opened',
+    embedQuery: async () => [0, 0, 0],
+    topK: 1,
+  });
+
+  const result = await plugin.prepareProviderRequest?.(
+    {
+      messages: [{ content: 'R', role: 'user' }],
+      stream: false,
+      systemPrompt: 'Be helpful.',
+      tools: [],
+    },
+    {
+      ...createPrepareContext(),
+      userMessage: { content: 'R', role: 'user' },
+    },
+  );
+
+  assert.deepEqual(result, {});
+});
+
 test('LanceDB retrieval plugin injects indexed context without persisting it to session history', async () => {
   await withTempDir(async (rootDir) => {
     const dbPath = join(rootDir, 'rag-db');

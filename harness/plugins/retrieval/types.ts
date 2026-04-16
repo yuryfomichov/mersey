@@ -13,7 +13,7 @@ export type RetrievalPluginOptions = {
   formatChunks?(
     chunks: RetrievedChunk[],
     ctx: PrepareProviderRequestContext,
-  ): PrepareProviderRequestResult | Promise<PrepareProviderRequestResult>;
+  ): PrepareProviderRequestResult | undefined | Promise<PrepareProviderRequestResult | undefined>;
   maxContextChars?: number;
   name?: string;
   retrieve(query: string, ctx: PrepareProviderRequestContext): Promise<RetrievedChunk[]>;

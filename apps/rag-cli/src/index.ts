@@ -29,12 +29,13 @@ async function main(): Promise<void> {
     defaultIndexDir: join('tmp', 'rag', 'rag-cli-data'),
   });
   const ragResult = await createMarkdownRagPlugin(ragDefinition);
+  const retrievalEnabled = Boolean(ragResult.plugin);
   const harness = createHarness({
     debug,
     plugins: [...loggingPlugins, ...(ragResult.plugin ? [ragResult.plugin] : [])],
     providerInstance,
     session,
-    systemPrompt: getRagCliSystemPrompt(),
+    systemPrompt: getRagCliSystemPrompt({ retrievalEnabled }),
     tools: [],
   });
   const providerModel = getProviderModel(providerDefinition);

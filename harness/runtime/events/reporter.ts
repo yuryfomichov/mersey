@@ -11,7 +11,7 @@ import {
   sanitizeErrorMessage,
   sanitizeHookErrorMessage,
 } from './telemetry.js';
-import type { HarnessEventListener, HookErrorEvent, TurnFailedEvent } from './types.js';
+import type { DebugProviderRequest, HarnessEventListener, HookErrorEvent, TurnFailedEvent } from './types.js';
 
 export type HarnessEventReporterOptions = {
   debug?: boolean;
@@ -280,14 +280,7 @@ export class HarnessEventReporter {
     return Date.now() - this.getTurnStartTime();
   }
 
-  private getDebugProviderRequest(request: Readonly<ModelRequest>):
-    | {
-        messages: ModelMessage[];
-        stream: boolean;
-        systemPrompt?: string;
-        tools?: ModelToolDefinition[];
-      }
-    | undefined {
+  private getDebugProviderRequest(request: Readonly<ModelRequest>): DebugProviderRequest | undefined {
     if (!this.debug) {
       return undefined;
     }
@@ -343,7 +336,7 @@ function cloneToolDefinition(tool: ModelToolDefinition): ModelToolDefinition {
   };
 }
 
-function sanitizeDebugValue(value: unknown, seen: WeakSet<object> = new WeakSet<object>()): unknown {
+function sanitizeDebugValue(value: unknown, ancestors: WeakSet<object> = new WeakSet<object>()): unknown {
   if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     return value;
   }
@@ -372,21 +365,24 @@ function sanitizeDebugValue(value: unknown, seen: WeakSet<object> = new WeakSet<
     return value.toString();
   }
 
-  if (seen.has(value)) {
+  if (ancestors.has(value)) {
     return '[circular]';
   }
 
-  seen.add(value);
+  ancestors.add(value);
 
   if (Array.isArray(value)) {
-    return value.map((entry) => sanitizeDebugValue(entry, seen));
+    const sanitizedArray = value.map((entry) => sanitizeDebugValue(entry, ancestors));
+    ancestors.delete(value);
+    return sanitizedArray;
   }
 
   const sanitized: Record<string, unknown> = {};
 
   for (const [key, nestedValue] of Object.entries(value)) {
-    sanitized[key] = sanitizeDebugValue(nestedValue, seen);
+    sanitized[key] = sanitizeDebugValue(nestedValue, ancestors);
   }
 
+  ancestors.delete(value);
   return sanitized;
 }

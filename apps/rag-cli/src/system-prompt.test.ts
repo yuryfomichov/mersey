@@ -17,3 +17,10 @@ test('getRagCliSystemPrompt uses a generic subject description', () => {
   );
   assert.doesNotMatch(prompt, /Yury/);
 });
+
+test('getRagCliSystemPrompt falls back to a generic assistant prompt when retrieval is disabled', () => {
+  const prompt = getRagCliSystemPrompt({ retrievalEnabled: false });
+
+  assert.equal(prompt, 'You are a helpful assistant.');
+  assert.doesNotMatch(prompt, /retrieved background documents/);
+});

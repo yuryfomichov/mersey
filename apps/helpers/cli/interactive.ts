@@ -15,8 +15,8 @@ type InteractiveCliOptions = {
   providerName: string;
   sessionStoreLine: string;
   stream: boolean;
-  input?: NodeJS.ReadStream;
-  output?: NodeJS.WriteStream;
+  input?: NodeJS.ReadableStream;
+  output?: NodeJS.WritableStream;
 };
 
 export async function runInteractiveCli(options: InteractiveCliOptions): Promise<void> {
