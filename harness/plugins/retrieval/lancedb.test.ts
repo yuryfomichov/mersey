@@ -193,6 +193,47 @@ test('LanceDB retrieval plugin stops before opening the table when embedding abo
   );
 });
 
+test('LanceDB retrieval plugin rejects non-finite query embeddings', async () => {
+  const plugin = createLanceDbRetrievalPlugin({
+    dbPath: '/path/that/should/not/be/opened',
+    embedQuery: async () => [Number.NaN, 0, 1],
+    topK: 1,
+  });
+
+  await assert.rejects(async () => {
+    await plugin.prepareProviderRequest?.(
+      {
+        messages: [{ content: 'payments', role: 'user' }],
+        stream: false,
+        systemPrompt: 'Be helpful.',
+        tools: [],
+      },
+      createPrepareContext(),
+    );
+  }, /query embedding must be a non-empty numeric vector/);
+});
+
+test('buildLanceDbIndex rejects non-finite document embeddings', async () => {
+  await withTempDir(async (rootDir) => {
+    await assert.rejects(
+      () =>
+        buildLanceDbIndex({
+          dbPath: join(rootDir, 'rag-db'),
+          documents: [
+            {
+              content: 'Built a payments platform for global merchants.',
+              id: 'resume-1',
+              source: 'resume.md',
+            },
+          ],
+          embedDocuments: async () => [[Infinity, 0, 1]],
+          replace: true,
+        }),
+      /embedding 1 must be a non-empty numeric vector/,
+    );
+  });
+});
+
 test('LanceDB retrieval plugin injects indexed context without persisting it to session history', async () => {
   await withTempDir(async (rootDir) => {
     const dbPath = join(rootDir, 'rag-db');

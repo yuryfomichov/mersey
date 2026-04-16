@@ -102,7 +102,7 @@ function isMissingTableError(error: unknown): boolean {
 }
 
 function ensureVector(vector: number[], label: string): void {
-  if (!Array.isArray(vector) || vector.length === 0 || vector.some((value) => typeof value !== 'number')) {
+  if (!Array.isArray(vector) || vector.length === 0 || vector.some((value) => !Number.isFinite(value))) {
     throw new Error(`${label} must be a non-empty numeric vector.`);
   }
 }
