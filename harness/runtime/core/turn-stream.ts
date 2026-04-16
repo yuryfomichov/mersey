@@ -115,20 +115,25 @@ function createTurnStream({
           queue.push(snapshot(result.value));
         }
 
-        await session.commit(turnMessages);
-        queue.end();
+        const afterTurnCommittedContext = turnId
+          ? {
+              historyBeforeTurn,
+              model: provider.model,
+              provider,
+              providerName: provider.name,
+              sessionId: session.id,
+              turnId,
+              turnMessages: snapshot(turnMessages),
+            }
+          : null;
 
-        if (turnId) {
-          pluginRunner.runAfterTurnCommitted({
-            historyBeforeTurn,
-            model: provider.model,
-            provider,
-            providerName: provider.name,
-            sessionId: session.id,
-            turnId,
-            turnMessages: snapshot(turnMessages),
-          });
+        await session.commit(turnMessages);
+
+        if (afterTurnCommittedContext) {
+          pluginRunner.runAfterTurnCommitted(afterTurnCommittedContext);
         }
+
+        queue.end();
       } catch (error: unknown) {
         queue.fail(error);
         throw error;

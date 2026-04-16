@@ -8,6 +8,7 @@ export type { CreateHarnessOptions, Harness } from './runtime/harness.js';
 export type { HarnessEvent, HarnessEventListener } from './runtime/events/types.js';
 
 export type {
+  AfterTurnCommittedContext,
   BeforeProviderCallContext,
   BeforeToolCallContext,
   HarnessPlugin,
