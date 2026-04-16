@@ -22,12 +22,14 @@ export function createRetrievalPlugin(options: RetrievalPluginOptions): HarnessP
         return {};
       }
 
+      ctx.signal?.throwIfAborted();
       const chunks = (await options.retrieve(query, ctx)).slice(0, topK);
 
       if (chunks.length === 0) {
         return {};
       }
 
+      ctx.signal?.throwIfAborted();
       const prepared = (await options.formatChunks?.(chunks, ctx)) ?? defaultFormatChunks(chunks, { maxContextChars });
 
       return {

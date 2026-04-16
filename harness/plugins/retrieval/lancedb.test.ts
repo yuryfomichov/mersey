@@ -108,6 +108,38 @@ test('createRetrievalPlugin skips backend retrieval when topK is zero', async ()
   assert.deepEqual(result, {});
 });
 
+test('createRetrievalPlugin stops before backend retrieval when the signal is already aborted', async () => {
+  let retrieveCalls = 0;
+  const controller = new AbortController();
+  controller.abort();
+  const plugin = createRetrievalPlugin({
+    async retrieve() {
+      retrieveCalls += 1;
+      return [];
+    },
+  });
+
+  await assert.rejects(
+    async () => {
+      await plugin.prepareProviderRequest?.(
+        {
+          messages: [{ content: 'payments', role: 'user' }],
+          stream: false,
+          systemPrompt: 'Be helpful.',
+          tools: [],
+        },
+        {
+          ...createPrepareContext(),
+          signal: controller.signal,
+        },
+      );
+    },
+    { name: 'AbortError' },
+  );
+
+  assert.equal(retrieveCalls, 0);
+});
+
 test('LanceDB retrieval plugin skips search when the query embedding is all zeros', async () => {
   const plugin = createLanceDbRetrievalPlugin({
     dbPath: '/path/that/should/not/be/opened',
@@ -129,6 +161,36 @@ test('LanceDB retrieval plugin skips search when the query embedding is all zero
   );
 
   assert.deepEqual(result, {});
+});
+
+test('LanceDB retrieval plugin stops before opening the table when embedding aborts the request', async () => {
+  const controller = new AbortController();
+  const plugin = createLanceDbRetrievalPlugin({
+    dbPath: '/path/that/should/not/be/opened',
+    embedQuery: async () => {
+      controller.abort();
+      return [1, 0, 0];
+    },
+    topK: 1,
+  });
+
+  await assert.rejects(
+    async () => {
+      await plugin.prepareProviderRequest?.(
+        {
+          messages: [{ content: 'payments', role: 'user' }],
+          stream: false,
+          systemPrompt: 'Be helpful.',
+          tools: [],
+        },
+        {
+          ...createPrepareContext(),
+          signal: controller.signal,
+        },
+      );
+    },
+    { name: 'AbortError' },
+  );
 });
 
 test('LanceDB retrieval plugin injects indexed context without persisting it to session history', async () => {

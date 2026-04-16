@@ -15,6 +15,8 @@ type LanceDbRow = LanceDbIndexDocument & {
   vector: number[];
 };
 
+type LanceDbTable = Awaited<ReturnType<Awaited<ReturnType<typeof connect>>['openTable']>>;
+
 const DEFAULT_TABLE_NAME = 'documents';
 
 export async function buildLanceDbIndex(options: BuildLanceDbIndexOptions): Promise<void> {
@@ -47,21 +49,29 @@ export async function buildLanceDbIndex(options: BuildLanceDbIndexOptions): Prom
 
 export function createLanceDbRetrievalPlugin(options: LanceDbRetrievalPluginOptions): HarnessPlugin {
   const tableName = options.tableName ?? DEFAULT_TABLE_NAME;
+  let tablePromise: Promise<LanceDbTable> | undefined;
+
+  function getTable() {
+    tablePromise ??= connect(options.dbPath).then((db) => db.openTable(tableName));
+    return tablePromise;
+  }
 
   return createRetrievalPlugin({
     buildQuery: options.buildQuery,
     formatChunks: options.formatChunks,
     maxContextChars: options.maxContextChars,
     name: options.name ?? 'lancedb-retrieval',
-    async retrieve(query: string, _ctx: PrepareProviderRequestContext): Promise<RetrievedChunk[]> {
+    async retrieve(query: string, ctx: PrepareProviderRequestContext): Promise<RetrievedChunk[]> {
+      ctx.signal?.throwIfAborted();
       const vector = await options.embedQuery(query);
+      ctx.signal?.throwIfAborted();
       ensureVector(vector, 'query embedding');
       if (isZeroVector(vector)) {
         return [];
       }
 
-      const db = await connect(options.dbPath);
-      const table = await db.openTable(tableName);
+      const table = await getTable();
+      ctx.signal?.throwIfAborted();
       const rows = (await table
         .vectorSearch(vector)
         .limit(options.topK ?? 5)
