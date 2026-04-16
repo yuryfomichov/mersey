@@ -1,5 +1,7 @@
 import type { HarnessEvent } from '../events/types.js';
+import type { ModelProvider } from '../models/provider.js';
 import type { ModelMessage, ModelRequest } from '../models/types.js';
+import type { Message } from '../sessions/types.js';
 
 export type HookDecision =
   | { continue: true }
@@ -9,7 +11,12 @@ export type HookDecision =
       exposeToModel?: boolean;
     };
 
-export type HookName = 'beforeProviderCall' | 'prepareProviderRequest' | 'beforeToolCall' | 'onEvent';
+export type HookName =
+  | 'beforeProviderCall'
+  | 'prepareProviderRequest'
+  | 'beforeToolCall'
+  | 'afterTurnCommitted'
+  | 'onEvent';
 
 export type BeforeProviderCallContext = {
   sessionId: string;
@@ -57,6 +64,7 @@ export type PrepareProviderRequestContext = {
 
 export type PrepareProviderRequestResult = {
   appendMessages?: ModelMessage[];
+  messages?: ModelMessage[];
   prependMessages?: ModelMessage[];
   systemPrompt?: string;
 };
@@ -70,6 +78,16 @@ export type BeforeToolCallContext = {
     name: string;
     input: unknown;
   };
+};
+
+export type AfterTurnCommittedContext = {
+  historyBeforeTurn: readonly Message[];
+  model: string;
+  provider: ModelProvider;
+  providerName: string;
+  sessionId: string;
+  turnId: string;
+  turnMessages: readonly Message[];
 };
 
 export type PluginEventContext = {
@@ -88,6 +106,7 @@ export type HarnessPlugin = {
     ctx: PrepareProviderRequestContext,
   ): Promise<PrepareProviderRequestResult> | PrepareProviderRequestResult;
   beforeToolCall?(ctx: BeforeToolCallContext): Promise<HookDecision> | HookDecision;
+  afterTurnCommitted?(ctx: AfterTurnCommittedContext): Promise<void> | void;
 
   onEvent?(event: HarnessEvent, ctx: PluginEventContext): Promise<void> | void;
 };

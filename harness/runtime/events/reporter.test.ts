@@ -274,3 +274,26 @@ test('HarnessEventReporter sanitizes hook_error messages', () => {
   assert.equal(event?.type, 'hook_error');
   assert.equal(event && event.type === 'hook_error' ? event.errorMessage : undefined, 'Plugin hook failed.');
 });
+
+test('HarnessEventReporter respects hook_error session and turn overrides', () => {
+  const events: HarnessEvent[] = [];
+  const reporter = new HarnessEventReporter({
+    getSessionId: () => 'session-1',
+    providerName: 'fake',
+  });
+
+  reporter.subscribe((event) => {
+    events.push(event);
+  });
+
+  reporter.hookError('plugin-a', 'afterTurnCommitted', new Error('boom'), {
+    sessionId: 'session-override',
+    turnId: 'turn-override',
+  });
+
+  const event = events.at(-1);
+
+  assert.equal(event?.type, 'hook_error');
+  assert.equal(event && event.type === 'hook_error' ? event.sessionId : undefined, 'session-override');
+  assert.equal(event && event.type === 'hook_error' ? event.turnId : undefined, 'turn-override');
+});

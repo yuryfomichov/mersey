@@ -2,11 +2,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 
+import { FakeProvider } from '../../providers/fake.js';
 import { HarnessEventReporter } from '../events/reporter.js';
 import type { HarnessEvent } from '../events/types.js';
 import type { ModelRequest } from '../models/types.js';
 import { PluginRunner, createPluginRunner } from './runner.js';
 import type {
+  AfterTurnCommittedContext,
   BeforeProviderCallContext,
   BeforeToolCallContext,
   HarnessPlugin,
@@ -70,6 +72,34 @@ function createBaseRequest(): ModelRequest {
     stream: false,
     systemPrompt: 'Be helpful.',
     tools: [],
+  };
+}
+
+function createAfterTurnCommittedContext(
+  overrides: Partial<AfterTurnCommittedContext> = {},
+): AfterTurnCommittedContext {
+  const provider = overrides.provider ?? new FakeProvider();
+
+  return {
+    historyBeforeTurn: [],
+    model: overrides.model ?? provider.model,
+    provider,
+    providerName: overrides.providerName ?? provider.name,
+    sessionId: 'test-session',
+    turnId: 'test-turn',
+    turnMessages: [
+      {
+        content: 'hello',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        role: 'user',
+      },
+      {
+        content: 'reply:hello',
+        createdAt: '2024-01-01T00:00:01.000Z',
+        role: 'assistant',
+      },
+    ],
+    ...overrides,
   };
 }
 
@@ -219,6 +249,87 @@ test('PluginRunner.runPrepareProviderRequest reuses the original request when ho
   });
 
   assert.equal(decision, request);
+});
+
+test('PluginRunner.runPrepareProviderRequest supports full message replacement', async () => {
+  const plugins: HarnessPlugin[] = [
+    {
+      name: 'plugin-a',
+      prepareProviderRequest() {
+        return {
+          messages: [{ content: 'summary', role: 'user' }],
+        };
+      },
+    },
+  ];
+
+  const { runner } = createPluginRunnerWithPlugins(plugins);
+  const decision = await runner.runPrepareProviderRequest(createBaseRequest(), {
+    ...createPrepareProviderRequestContext(),
+  });
+
+  assert.deepEqual(decision.messages, [{ content: 'summary', role: 'user' }]);
+});
+
+test('PluginRunner.runPrepareProviderRequest composes message replacement with prepend and append changes', async () => {
+  const plugins: HarnessPlugin[] = [
+    {
+      name: 'plugin-a',
+      prepareProviderRequest() {
+        return {
+          messages: [{ content: 'summary', role: 'user' }],
+          prependMessages: [{ content: 'policy', role: 'user' }],
+        };
+      },
+    },
+    {
+      name: 'plugin-b',
+      prepareProviderRequest() {
+        return {
+          appendMessages: [{ content: 'closing note', role: 'assistant' }],
+        };
+      },
+    },
+  ];
+
+  const { runner } = createPluginRunnerWithPlugins(plugins);
+  const decision = await runner.runPrepareProviderRequest(createBaseRequest(), {
+    ...createPrepareProviderRequestContext(),
+  });
+
+  assert.deepEqual(decision.messages, [
+    { content: 'policy', role: 'user' },
+    { content: 'summary', role: 'user' },
+    { content: 'closing note', role: 'assistant' },
+  ]);
+});
+
+test('PluginRunner.runPrepareProviderRequest passes rewritten request messages to later hooks', async () => {
+  let observedMessages: ModelRequest['messages'] | null = null;
+  const plugins: HarnessPlugin[] = [
+    {
+      name: 'plugin-a',
+      prepareProviderRequest() {
+        return {
+          messages: [{ content: 'summary', role: 'user' }],
+        };
+      },
+    },
+    {
+      name: 'plugin-b',
+      prepareProviderRequest(request) {
+        observedMessages = request.messages;
+        return {};
+      },
+    },
+  ];
+
+  const { runner } = createPluginRunnerWithPlugins(plugins);
+  await runner.runPrepareProviderRequest(createBaseRequest(), {
+    ...createPrepareProviderRequestContext(),
+  });
+
+  assert.deepEqual(observedMessages, [{ content: 'summary', role: 'user' }]);
 });
 
 test('PluginRunner.runPrepareProviderRequest allows hooks to explicitly clear systemPrompt', async () => {
@@ -387,6 +498,139 @@ test('PluginRunner.runBeforeToolCall fails closed on hook error', async () => {
   assert.equal(hookError?.type === 'hook_error' ? hookError.hookName : undefined, 'beforeToolCall');
 });
 
+test('PluginRunner.runAfterTurnCommitted executes hooks in registration order', async () => {
+  const callOrder: string[] = [];
+  const plugins: HarnessPlugin[] = [
+    {
+      afterTurnCommitted() {
+        callOrder.push('plugin-a');
+      },
+      name: 'plugin-a',
+    },
+    {
+      afterTurnCommitted() {
+        callOrder.push('plugin-b');
+      },
+      name: 'plugin-b',
+    },
+  ];
+
+  const { runner } = createPluginRunnerWithPlugins(plugins);
+  runner.runAfterTurnCommitted(createAfterTurnCommittedContext());
+  await delay(0);
+
+  assert.deepEqual(callOrder, ['plugin-a', 'plugin-b']);
+});
+
+test('PluginRunner.runAfterTurnCommitted is best-effort and reports async hook errors', async () => {
+  const events: HarnessEvent[] = [];
+  let pluginBRan = false;
+  const plugins: HarnessPlugin[] = [
+    {
+      async afterTurnCommitted() {
+        throw new Error('post-commit failure');
+      },
+      name: 'plugin-a',
+    },
+    {
+      afterTurnCommitted() {
+        pluginBRan = true;
+      },
+      name: 'plugin-b',
+    },
+  ];
+
+  const { reporter, runner } = createPluginRunnerWithPlugins(plugins);
+  reporter.subscribe((event) => {
+    events.push(event);
+  });
+
+  assert.doesNotThrow(() => {
+    runner.runAfterTurnCommitted(createAfterTurnCommittedContext());
+  });
+
+  await delay(0);
+
+  const hookError = events.find((event) => event.type === 'hook_error');
+  assert.equal(pluginBRan, true);
+  assert.equal(hookError?.type, 'hook_error');
+  assert.equal(hookError?.type === 'hook_error' ? hookError.pluginName : undefined, 'plugin-a');
+  assert.equal(hookError?.type === 'hook_error' ? hookError.hookName : undefined, 'afterTurnCommitted');
+});
+
+test('PluginRunner.runAfterTurnCommitted serializes work per session', async () => {
+  const callOrder: string[] = [];
+  let releaseFirst!: () => void;
+  let finishSecond!: () => void;
+  const firstHookReleased = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  const secondHookFinished = new Promise<void>((resolve) => {
+    finishSecond = resolve;
+  });
+  const plugins: HarnessPlugin[] = [
+    {
+      async afterTurnCommitted(ctx) {
+        callOrder.push(`start:${ctx.turnId}`);
+
+        if (ctx.turnId === 'turn-1') {
+          await firstHookReleased;
+        }
+
+        callOrder.push(`end:${ctx.turnId}`);
+
+        if (ctx.turnId === 'turn-2') {
+          finishSecond();
+        }
+      },
+      name: 'plugin-a',
+    },
+  ];
+
+  const { runner } = createPluginRunnerWithPlugins(plugins);
+  runner.runAfterTurnCommitted(createAfterTurnCommittedContext({ turnId: 'turn-1' }));
+  runner.runAfterTurnCommitted(createAfterTurnCommittedContext({ turnId: 'turn-2' }));
+
+  await delay(0);
+  assert.deepEqual(callOrder, ['start:turn-1']);
+
+  releaseFirst();
+  await secondHookFinished;
+
+  assert.deepEqual(callOrder, ['start:turn-1', 'end:turn-1', 'start:turn-2', 'end:turn-2']);
+});
+
+test('PluginRunner.runAfterTurnCommitted does not block other sessions', async () => {
+  let releaseFirst!: () => void;
+  let markSecondStarted!: () => void;
+  const firstHookReleased = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  const secondHookStarted = new Promise<void>((resolve) => {
+    markSecondStarted = resolve;
+  });
+  const plugins: HarnessPlugin[] = [
+    {
+      async afterTurnCommitted(ctx) {
+        if (ctx.sessionId === 'session-a') {
+          await firstHookReleased;
+          return;
+        }
+
+        markSecondStarted();
+      },
+      name: 'plugin-a',
+    },
+  ];
+
+  const { runner } = createPluginRunnerWithPlugins(plugins);
+  runner.runAfterTurnCommitted(createAfterTurnCommittedContext({ sessionId: 'session-a', turnId: 'turn-a' }));
+  runner.runAfterTurnCommitted(createAfterTurnCommittedContext({ sessionId: 'session-b', turnId: 'turn-b' }));
+
+  await secondHookStarted;
+  releaseFirst();
+});
+
 test('PluginRunner delivers events to all plugins via reporter subscription', async () => {
   const receivedEvents: string[] = [];
   const plugins: HarnessPlugin[] = [
@@ -463,6 +707,39 @@ test('PluginRunner converts async onEvent errors into hook_error events', async 
   assert.equal(hookError?.type === 'hook_error' ? hookError.pluginName : undefined, 'plugin-a');
   assert.equal(hookError?.type === 'hook_error' ? hookError.hookName : undefined, 'onEvent');
   assert.equal(hookError?.type === 'hook_error' ? hookError.errorMessage : undefined, 'Plugin hook failed.');
+});
+
+test('PluginRunner preserves the original turnId for async onEvent hook errors', async () => {
+  const events: HarnessEvent[] = [];
+  let rejectHook!: (error: Error) => void;
+  const hookResult = new Promise<void>((_, reject) => {
+    rejectHook = reject;
+  });
+  const plugins: HarnessPlugin[] = [
+    {
+      async onEvent() {
+        await hookResult;
+      },
+      name: 'plugin-a',
+    },
+  ];
+
+  const { reporter } = createPluginRunnerWithPlugins(plugins);
+  reporter.subscribe((event) => {
+    events.push(event);
+  });
+
+  reporter.turnStarted(10);
+  const turnStartedEvent = events.at(-1);
+  const originatingTurnId = turnStartedEvent?.type === 'turn_started' ? turnStartedEvent.turnId : undefined;
+  reporter.turnFinished(1, 0, 5);
+  rejectHook(new Error('late failure'));
+  await delay(0);
+
+  const hookError = events.find((event) => event.type === 'hook_error');
+
+  assert.equal(hookError?.type, 'hook_error');
+  assert.equal(hookError?.type === 'hook_error' ? hookError.turnId : undefined, originatingTurnId);
 });
 
 test('PluginRunner avoids recursive hook_error storms for the same plugin', async () => {

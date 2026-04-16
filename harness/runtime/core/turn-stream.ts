@@ -79,13 +79,21 @@ function createTurnStream({
     started = true;
 
     backgroundTask = session.runExclusive(async () => {
+      let turnId: string | null = null;
+      const unsubscribe = reporter.subscribe((event) => {
+        if (event.type === 'turn_started') {
+          turnId = event.turnId;
+        }
+      });
+
       try {
         await session.ensure();
+        const historyBeforeTurn = snapshot(session.messages);
         reporter.sessionStarted();
 
         const iterator = streamLoop({
           content,
-          history: session.messages,
+          history: historyBeforeTurn,
           reporter,
           pluginRunner,
           provider,
@@ -107,11 +115,30 @@ function createTurnStream({
           queue.push(snapshot(result.value));
         }
 
+        const afterTurnCommittedContext = turnId
+          ? {
+              historyBeforeTurn,
+              model: provider.model,
+              provider,
+              providerName: provider.name,
+              sessionId: session.id,
+              turnId,
+              turnMessages: snapshot(turnMessages),
+            }
+          : null;
+
         await session.commit(turnMessages);
+
+        if (afterTurnCommittedContext) {
+          pluginRunner.runAfterTurnCommitted(afterTurnCommittedContext);
+        }
+
         queue.end();
       } catch (error: unknown) {
         queue.fail(error);
         throw error;
+      } finally {
+        unsubscribe();
       }
     });
 

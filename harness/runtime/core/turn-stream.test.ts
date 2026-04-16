@@ -9,7 +9,9 @@ import type { ModelProvider } from '../models/provider.js';
 import { createEmptyModelUsage } from '../models/types.js';
 import { createPluginRunner } from '../plugins/runner.js';
 import type { HarnessPlugin } from '../plugins/types.js';
+import type { HarnessSession } from '../sessions/runtime.js';
 import type { SessionStore } from '../sessions/store.js';
+import type { Message } from '../sessions/types.js';
 import { createToolRuntimeFactory } from '../tools/runtime/index.js';
 import type { Tool } from '../tools/types.js';
 import { createTurnStreamFactory } from './turn-stream.js';
@@ -32,6 +34,29 @@ async function collectChunks<T>(iterable: AsyncIterable<T>): Promise<T[]> {
   }
 
   return chunks;
+}
+
+function createLiveSession(messages: Message[], sessionId = 'live-session'): HarnessSession {
+  return {
+    createdAt: '2024-01-01T00:00:00.000Z',
+    async commit(nextMessages: Message[]) {
+      messages.push(...nextMessages);
+    },
+    async ensure() {},
+    async getContextSize() {
+      return 0;
+    },
+    async getUsage() {
+      return createEmptyModelUsage();
+    },
+    id: sessionId,
+    get messages() {
+      return messages;
+    },
+    async runExclusive<T>(run: () => Promise<T>): Promise<T> {
+      return run();
+    },
+  };
 }
 
 function createStreamTurnFactory(input: {
@@ -343,4 +368,160 @@ test('createTurnStreamFactory snapshots final_message chunks before exposing the
       { content: 'hello', role: 'assistant' },
     ],
   );
+});
+
+test('createTurnStreamFactory runs afterTurnCommitted in background after a successful commit', async () => {
+  let releaseHook!: () => void;
+  let markHookStarted!: () => void;
+  let markHookFinished!: () => void;
+  let observedSessionMessages: { content: string; role: string }[] | null = null;
+  let sessionRef: Session;
+
+  const hookStarted = new Promise<void>((resolve) => {
+    markHookStarted = resolve;
+  });
+  const hookFinished = new Promise<void>((resolve) => {
+    markHookFinished = resolve;
+  });
+  const hookRelease = new Promise<void>((resolve) => {
+    releaseHook = resolve;
+  });
+
+  const { session, streamTurn } = createStreamTurnFactory({
+    plugins: [
+      {
+        async afterTurnCommitted(ctx) {
+          observedSessionMessages = sessionRef.messages.map((message) => ({
+            content: message.content,
+            role: message.role,
+          }));
+          assert.deepEqual(ctx.historyBeforeTurn, []);
+          assert.deepEqual(
+            ctx.turnMessages.map((message) => ({ content: message.content, role: message.role })),
+            [
+              { content: 'hello', role: 'user' },
+              { content: 'reply:hello', role: 'assistant' },
+            ],
+          );
+          markHookStarted();
+          await hookRelease;
+          markHookFinished();
+        },
+        name: 'memory',
+      },
+    ],
+  });
+  sessionRef = session;
+
+  const chunks = await collectChunks(streamTurn('hello', false));
+
+  assert.equal(chunks.at(-1)?.type, 'final_message');
+  await hookStarted;
+  assert.deepEqual(observedSessionMessages, [
+    { content: 'hello', role: 'user' },
+    { content: 'reply:hello', role: 'assistant' },
+  ]);
+
+  let hookFinishedEarly = false;
+  void hookFinished.then(() => {
+    hookFinishedEarly = true;
+  });
+  await delay(0);
+  assert.equal(hookFinishedEarly, false);
+
+  releaseHook();
+  await hookFinished;
+});
+
+test('createTurnStreamFactory does not run afterTurnCommitted when the turn fails', async () => {
+  let afterTurnCommittedCalls = 0;
+  const session = createTestSession(new MemorySessionStore());
+  const provider: ModelProvider = {
+    model: 'broken-model',
+    name: 'broken-provider',
+    async *generate() {
+      throw new Error('provider failed');
+    },
+  };
+  const reporter = new HarnessEventReporter({
+    getSessionId: () => session.id,
+    providerName: provider.name,
+  });
+  const streamTurn = createTurnStreamFactory({
+    pluginRunner: createPluginRunner({
+      reporter,
+      plugins: [
+        {
+          afterTurnCommitted() {
+            afterTurnCommittedCalls += 1;
+          },
+          name: 'memory',
+        },
+      ],
+      runId: reporter.getRunId(),
+    }),
+    reporter,
+    provider,
+    session,
+    toolRuntimeFactory: createToolRuntimeFactory({ tools: [] }),
+  });
+
+  await assert.rejects(async () => {
+    await collectChunks(streamTurn('hello', false));
+  });
+  await delay(0);
+
+  assert.equal(afterTurnCommittedCalls, 0);
+});
+
+test('createTurnStreamFactory snapshots historyBeforeTurn for live session implementations', async () => {
+  const liveMessages: Message[] = [
+    {
+      content: 'existing user message',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      role: 'user',
+    },
+    {
+      content: 'existing assistant message',
+      createdAt: '2024-01-01T00:00:01.000Z',
+      role: 'assistant',
+      usage: createEmptyModelUsage(),
+    },
+  ];
+  let capturedHistoryBeforeTurn: { content: string; role: string }[] | null = null;
+  const session = createLiveSession(liveMessages, 'live-session');
+  const provider = new FakeProvider();
+  const reporter = new HarnessEventReporter({
+    getSessionId: () => session.id,
+    providerName: provider.name,
+  });
+  const streamTurn = createTurnStreamFactory({
+    pluginRunner: createPluginRunner({
+      reporter,
+      plugins: [
+        {
+          afterTurnCommitted(ctx) {
+            capturedHistoryBeforeTurn = ctx.historyBeforeTurn.map((message) => ({
+              content: message.content,
+              role: message.role,
+            }));
+          },
+          name: 'memory',
+        },
+      ],
+      runId: reporter.getRunId(),
+    }),
+    reporter,
+    provider,
+    session,
+    toolRuntimeFactory: createToolRuntimeFactory({ tools: [] }),
+  });
+
+  await collectChunks(streamTurn('hello', false));
+  await delay(0);
+
+  assert.deepEqual(capturedHistoryBeforeTurn, [
+    { content: 'existing user message', role: 'user' },
+    { content: 'existing assistant message', role: 'assistant' },
+  ]);
 });

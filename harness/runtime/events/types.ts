@@ -150,7 +150,7 @@ export type ProviderBlockedEvent = HarnessTurnEventBase & {
 export type HookErrorEvent = HarnessTurnEventBase & {
   type: 'hook_error';
   pluginName: string;
-  hookName: 'beforeProviderCall' | 'prepareProviderRequest' | 'beforeToolCall' | 'onEvent';
+  hookName: 'beforeProviderCall' | 'prepareProviderRequest' | 'beforeToolCall' | 'afterTurnCommitted' | 'onEvent';
   errorMessage: string;
 };
 
