@@ -5,6 +5,7 @@
 ## Run
 
 ```bash
+pnpm rag-cli -- --provider anthropic
 pnpm rag-cli -- --provider openai
 pnpm rag-cli -- --provider fake --memory --session-id memory-demo
 ```
@@ -13,17 +14,19 @@ The script uses Node's `--env-file=.env` support, so a local `.env` file is enou
 
 Provider setup:
 
+- `anthropic`: requires `ANTHROPIC_API_KEY`
 - `fake`: no environment variables required
 - `minimax`: requires `MINIMAX_API_KEY`
 - `openai`: requires `OPENAI_API_KEY`
 
 ## Useful Flags
 
-- `--provider <fake|minimax|openai>`
+- `--provider <anthropic|fake|minimax|openai>`
 - `--session-id <id>`
 - `--session-store <memory|filesystem>`
 - `--sessions-dir <path>`
 - `--stream`
+- `--cache`
 - `--debug`
 - `--rag`
 - `--rag-dir <path>`
