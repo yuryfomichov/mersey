@@ -92,6 +92,10 @@ export class PluginRunner {
 
         nextRequest = applyPreparedRequest(nextRequest, prepared);
       } catch (error: unknown) {
+        if (isAbortError(error, ctx.signal)) {
+          throw error;
+        }
+
         this.reporter.hookError(plugin.name, 'prepareProviderRequest', error);
         throw new Error(SANITIZED_ERROR_REASON);
       }
@@ -226,6 +230,10 @@ function applyPreparedRequest(request: ModelRequest, prepared: PrepareProviderRe
 
 export function createPluginRunner(options: PluginRunnerOptions): PluginRunner {
   return new PluginRunner(options);
+}
+
+function isAbortError(error: unknown, signal?: AbortSignal): boolean {
+  return error === signal?.reason || (error instanceof Error && error.name === 'AbortError');
 }
 
 function hasPrepareProviderRequestHook(plugin: HarnessPlugin): plugin is PrepareProviderRequestPlugin {

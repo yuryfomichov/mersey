@@ -527,6 +527,37 @@ test('PluginRunner.runPrepareProviderRequest fails closed on hook error', async 
   assert.equal(hookError?.type === 'hook_error' ? hookError.hookName : undefined, 'prepareProviderRequest');
 });
 
+test('PluginRunner.runPrepareProviderRequest propagates aborts without reporting hook_error', async () => {
+  const events: HarnessEvent[] = [];
+  const controller = new AbortController();
+  const plugins: HarnessPlugin[] = [
+    {
+      name: 'plugin-a',
+      prepareProviderRequest() {
+        controller.abort();
+        throw controller.signal.reason;
+      },
+    },
+  ];
+
+  const { reporter, runner } = createPluginRunnerWithPlugins(plugins);
+  reporter.subscribe((event) => {
+    events.push(event);
+  });
+
+  await assert.rejects(
+    runner.runPrepareProviderRequest(createBaseRequest(), {
+      ...createPrepareProviderRequestContext(),
+      signal: controller.signal,
+    }),
+    { name: 'AbortError' },
+  );
+  assert.equal(
+    events.some((event) => event.type === 'hook_error' && event.hookName === 'prepareProviderRequest'),
+    false,
+  );
+});
+
 test('PluginRunner.runBeforeToolCall executes in registration order', async () => {
   const callOrder: string[] = [];
   const plugins: HarnessPlugin[] = [
