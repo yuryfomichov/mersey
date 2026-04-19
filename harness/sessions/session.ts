@@ -135,7 +135,7 @@ export class Session implements HarnessSession {
       return;
     }
 
-    const storedState = await this.store.commitTurn(
+    const storedState = await this.store.commitTurnExclusive(
       this.id,
       messages.map((message) => cloneMessage(message)),
     );

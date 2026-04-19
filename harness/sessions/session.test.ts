@@ -266,7 +266,10 @@ test('Session.commit updates cached usage and context metrics', async () => {
 
 test('Session.commit keeps memory state unchanged when store commitTurn fails', async () => {
   class FailingCommitStore extends MemorySessionStore {
-    override async commitTurn(_sessionId: string, _turnMessages: readonly Message[]): Promise<StoredSessionState> {
+    override async commitTurnExclusive(
+      _sessionId: string,
+      _turnMessages: readonly Message[],
+    ): Promise<StoredSessionState> {
       throw new Error('commit failed');
     }
   }
@@ -297,14 +300,17 @@ test('Session.commit serializes concurrent public commits', async () => {
   class SlowCommitStore extends MemorySessionStore {
     commitCalls = 0;
 
-    override async commitTurn(sessionId: string, turnMessages: readonly Message[]): Promise<StoredSessionState> {
+    override async commitTurnExclusive(
+      sessionId: string,
+      turnMessages: readonly Message[],
+    ): Promise<StoredSessionState> {
       this.commitCalls += 1;
 
       if (this.commitCalls === 1) {
         await delay(10);
       }
 
-      return super.commitTurn(sessionId, turnMessages);
+      return super.commitTurnExclusive(sessionId, turnMessages);
     }
   }
 
@@ -396,14 +402,17 @@ test('Session.commit refreshes persisted metrics before public commits from anot
 
 test('Session.commit keeps caller messages isolated from store-side mutation', async () => {
   class MutatingStore extends MemorySessionStore {
-    override async commitTurn(sessionId: string, turnMessages: readonly Message[]): Promise<StoredSessionState> {
+    override async commitTurnExclusive(
+      sessionId: string,
+      turnMessages: readonly Message[],
+    ): Promise<StoredSessionState> {
       const assistantMessage = turnMessages[0];
 
       if (assistantMessage && assistantMessage.role === 'assistant') {
         assistantMessage.content = 'mutated by store';
       }
 
-      return super.commitTurn(sessionId, turnMessages);
+      return super.commitTurnExclusive(sessionId, turnMessages);
     }
   }
 

@@ -14,6 +14,12 @@ export class MemorySessionStore implements SessionStore {
     return this.runExclusive(sessionId, async () => this.commitTurnUnlocked(sessionId, turnSnapshot));
   }
 
+  async commitTurnExclusive(sessionId: string, turnMessages: readonly Message[]): Promise<StoredSessionState> {
+    const turnSnapshot = turnMessages.map((message) => structuredClone(message));
+
+    return this.commitTurnUnlocked(sessionId, turnSnapshot);
+  }
+
   async createSession(session: SessionState): Promise<StoredSessionState> {
     const existingSession = this.sessions.get(session.id);
 

@@ -390,9 +390,12 @@ test('createTurnStreamFactory waits for commit before exposing final_message', a
   });
 
   class DelayedCommitStore extends MemorySessionStore {
-    override async commitTurn(sessionId: string, turnMessages: readonly Message[]): Promise<StoredSessionState> {
+    override async commitTurnExclusive(
+      sessionId: string,
+      turnMessages: readonly Message[],
+    ): Promise<StoredSessionState> {
       await commitRelease;
-      return super.commitTurn(sessionId, turnMessages);
+      return super.commitTurnExclusive(sessionId, turnMessages);
     }
   }
 
@@ -418,7 +421,10 @@ test('createTurnStreamFactory waits for commit before exposing final_message', a
 
 test('createTurnStreamFactory surfaces commit failures instead of yielding final_message', async () => {
   class FailingCommitStore extends MemorySessionStore {
-    override async commitTurn(_sessionId: string, _turnMessages: readonly Message[]): Promise<StoredSessionState> {
+    override async commitTurnExclusive(
+      _sessionId: string,
+      _turnMessages: readonly Message[],
+    ): Promise<StoredSessionState> {
       throw new Error('commit failed');
     }
   }

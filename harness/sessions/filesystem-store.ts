@@ -36,7 +36,15 @@ export class FilesystemSessionStore implements SessionStore {
   async commitTurn(sessionId: string, turnMessages: readonly Message[]): Promise<StoredSessionState> {
     const turnSnapshot = turnMessages.map((message) => structuredClone(message));
 
-    return this.runExclusive(sessionId, async () => this.commitTurnUnlocked(sessionId, turnSnapshot));
+    return FilesystemSessionStore.processLocks.runExclusive(this.getLockKey(sessionId), async () =>
+      this.withSessionLock(sessionId, async () => this.commitTurnUnlocked(sessionId, turnSnapshot)),
+    );
+  }
+
+  async commitTurnExclusive(sessionId: string, turnMessages: readonly Message[]): Promise<StoredSessionState> {
+    const turnSnapshot = turnMessages.map((message) => structuredClone(message));
+
+    return this.commitTurnUnlocked(sessionId, turnSnapshot);
   }
 
   async createSession(session: SessionState): Promise<StoredSessionState> {
@@ -91,13 +99,9 @@ export class FilesystemSessionStore implements SessionStore {
   }
 
   async runExclusive<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
-    const lockKey = this.getLockKey(sessionId);
-
-    if (FilesystemSessionStore.processLocks.isHeld(lockKey)) {
-      return run();
-    }
-
-    return FilesystemSessionStore.processLocks.runExclusive(lockKey, async () => this.withSessionLock(sessionId, run));
+    return FilesystemSessionStore.processLocks.runExclusive(this.getLockKey(sessionId), async () =>
+      this.withSessionLock(sessionId, run),
+    );
   }
 
   private async commitTurnUnlocked(sessionId: string, turnMessages: readonly Message[]): Promise<StoredSessionState> {
