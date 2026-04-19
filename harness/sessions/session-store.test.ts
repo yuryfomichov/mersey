@@ -9,13 +9,10 @@ import { createEmptyModelUsage } from '../runtime/models/types.js';
 import type { Message, SessionState, StoredSessionState } from '../runtime/sessions/types.js';
 import { FilesystemSessionStore } from './filesystem-store.js';
 import { MemorySessionStore } from './memory-store.js';
+import { cloneStoredSession, commitSessionTurn } from './store-state.js';
 
 async function verifyStoreRoundTrip(store: {
-  commitTurn(
-    sessionId: string,
-    turnMessages: readonly Message[],
-    state: Omit<StoredSessionState, 'messages'>,
-  ): Promise<void>;
+  commitTurn(sessionId: string, turnMessages: readonly Message[]): Promise<StoredSessionState>;
   createSession(session: SessionState): Promise<StoredSessionState>;
   getSession(sessionId: string): Promise<StoredSessionState | null>;
   runExclusive<T>(sessionId: string, run: () => Promise<T>): Promise<T>;
@@ -30,46 +27,38 @@ async function verifyStoreRoundTrip(store: {
   assert.deepEqual(createdSession.usage, createEmptyModelUsage());
   assert.equal(createdSession.contextSize, 0);
 
-  await store.commitTurn(
-    session.id,
-    [
-      {
-        role: 'user',
-        content: 'hello',
-        createdAt: '2026-03-29T00:00:01.000Z',
-      },
-      {
-        role: 'assistant',
-        content: 'hi',
-        createdAt: '2026-03-29T00:00:02.000Z',
-        toolCalls: [
-          {
-            id: 'call-1',
-            input: { path: 'note.txt' },
-            name: 'read_file',
-          },
-        ],
-      },
-      {
-        content: 'file contents',
-        createdAt: '2026-03-29T00:00:03.000Z',
-        name: 'read_file',
-        role: 'tool',
-        toolCallId: 'call-1',
-      },
-    ],
+  await store.commitTurn(session.id, [
     {
-      contextSize: 9,
-      createdAt: session.createdAt,
-      id: session.id,
+      role: 'user',
+      content: 'hello',
+      createdAt: '2026-03-29T00:00:01.000Z',
+    },
+    {
+      role: 'assistant',
+      content: 'hi',
+      createdAt: '2026-03-29T00:00:02.000Z',
       usage: {
         ...createEmptyModelUsage(),
         cachedInputTokens: 2,
         outputTokens: 3,
         uncachedInputTokens: 4,
       },
+      toolCalls: [
+        {
+          id: 'call-1',
+          input: { path: 'note.txt' },
+          name: 'read_file',
+        },
+      ],
     },
-  );
+    {
+      content: 'file contents',
+      createdAt: '2026-03-29T00:00:03.000Z',
+      name: 'read_file',
+      role: 'tool',
+      toolCallId: 'call-1',
+    },
+  ]);
 
   const storedSession = await store.getSession(session.id);
 
@@ -118,6 +107,114 @@ test('FilesystemSessionStore persists session messages', async () => {
   }
 });
 
+test('MemorySessionStore commitTurn serializes direct concurrent writers', async () => {
+  const store = new MemorySessionStore();
+  const session: SessionState = {
+    id: 'concurrent-memory-session',
+    createdAt: '2026-03-29T00:00:00.000Z',
+    messages: [],
+  };
+
+  await store.createSession(session);
+
+  const rawStore = store as unknown as {
+    commitTurnUnlocked(sessionId: string, turnMessages: readonly Message[]): Promise<StoredSessionState>;
+    sessions: Map<string, StoredSessionState>;
+  };
+
+  rawStore.commitTurnUnlocked = async (sessionId: string, turnMessages: readonly Message[]) => {
+    const existingSession = rawStore.sessions.get(sessionId);
+    assert.ok(existingSession);
+
+    if (turnMessages[0]?.content === 'first') {
+      await delay(10);
+    }
+
+    const committedSession = commitSessionTurn(existingSession, turnMessages);
+    rawStore.sessions.set(sessionId, committedSession);
+    return cloneStoredSession(committedSession);
+  };
+
+  await Promise.all([
+    store.commitTurn(session.id, [
+      {
+        content: 'first',
+        createdAt: '2026-03-29T00:00:01.000Z',
+        role: 'user',
+      },
+    ]),
+    store.commitTurn(session.id, [
+      {
+        content: 'second',
+        createdAt: '2026-03-29T00:00:02.000Z',
+        role: 'user',
+      },
+    ]),
+  ]);
+
+  assert.deepEqual(
+    (await store.getSession(session.id))?.messages.map((message) => message.content),
+    ['first', 'second'],
+  );
+});
+
+test('FilesystemSessionStore commitTurn serializes direct concurrent writers', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
+
+  try {
+    const store = new FilesystemSessionStore({ rootDir });
+    const session: SessionState = {
+      id: 'concurrent-filesystem-session',
+      createdAt: '2026-03-29T00:00:00.000Z',
+      messages: [],
+    };
+
+    await store.createSession(session);
+
+    const rawStore = store as unknown as {
+      commitTurnUnlocked(sessionId: string, turnMessages: readonly Message[]): Promise<StoredSessionState>;
+      writeSession(sessionId: string, session: StoredSessionState): Promise<void>;
+    };
+
+    rawStore.commitTurnUnlocked = async (sessionId: string, turnMessages: readonly Message[]) => {
+      const existingSession = await store.getSession(sessionId);
+      assert.ok(existingSession);
+
+      if (turnMessages[0]?.content === 'first') {
+        await delay(10);
+      }
+
+      const committedSession = commitSessionTurn(existingSession, turnMessages);
+      await rawStore.writeSession(sessionId, committedSession);
+      return cloneStoredSession(committedSession);
+    };
+
+    await Promise.all([
+      store.commitTurn(session.id, [
+        {
+          content: 'first',
+          createdAt: '2026-03-29T00:00:01.000Z',
+          role: 'user',
+        },
+      ]),
+      store.commitTurn(session.id, [
+        {
+          content: 'second',
+          createdAt: '2026-03-29T00:00:02.000Z',
+          role: 'user',
+        },
+      ]),
+    ]);
+
+    assert.deepEqual(
+      (await store.getSession(session.id))?.messages.map((message) => message.content),
+      ['first', 'second'],
+    );
+  } finally {
+    await rm(rootDir, { force: true, recursive: true });
+  }
+});
+
 test('FilesystemSessionStore rejects traversal-style session ids', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
 
@@ -150,22 +247,13 @@ test('FilesystemSessionStore createSession does not clobber existing messages', 
     };
 
     await store.createSession(session);
-    await store.commitTurn(
-      session.id,
-      [
-        {
-          role: 'user',
-          content: 'hello',
-          createdAt: '2026-03-29T00:00:01.000Z',
-        },
-      ],
+    await store.commitTurn(session.id, [
       {
-        contextSize: 0,
-        createdAt: session.createdAt,
-        id: session.id,
-        usage: createEmptyModelUsage(),
+        role: 'user',
+        content: 'hello',
+        createdAt: '2026-03-29T00:00:01.000Z',
       },
-    );
+    ]);
 
     const returnedSession = await store.createSession({
       id: session.id,
@@ -223,12 +311,7 @@ test('MemorySessionStore isolates nested message mutations', async () => {
   };
 
   await store.createSession(session);
-  await store.commitTurn(session.id, [message], {
-    contextSize: 0,
-    createdAt: session.createdAt,
-    id: session.id,
-    usage: createEmptyModelUsage(),
-  });
+  await store.commitTurn(session.id, [message]);
 
   if (message.toolCalls?.[0]) {
     message.toolCalls[0].input = { path: 'changed.txt' };
@@ -282,22 +365,13 @@ test('FilesystemSessionStore commits turns atomically in a single session file',
       messages: [],
     });
 
-    await store.commitTurn(
-      'atomic-session',
-      [
-        {
-          content: 'hello',
-          createdAt: '2026-03-29T00:00:01.000Z',
-          role: 'user',
-        },
-      ],
+    await store.commitTurn('atomic-session', [
       {
-        contextSize: 0,
-        createdAt: '2026-03-29T00:00:00.000Z',
-        id: 'atomic-session',
-        usage: createEmptyModelUsage(),
+        content: 'hello',
+        createdAt: '2026-03-29T00:00:01.000Z',
+        role: 'user',
       },
-    );
+    ]);
 
     const fileContents = await readFile(join(rootDir, 'atomic-session', 'session.json'), 'utf8');
     const storedSession = JSON.parse(fileContents) as StoredSessionState;
