@@ -4,6 +4,8 @@ import test from 'node:test';
 import type OpenAI from 'openai';
 
 import type { ModelRequest } from '../../runtime/models/types.js';
+import { RunCommandTool } from '../../tools/run-command.js';
+import { WriteFileTool } from '../../tools/write-file.js';
 import { OpenAICodec } from './openai.js';
 
 const codec = new OpenAICodec();
@@ -87,9 +89,9 @@ test('getTools adds strict object requirements to function schemas', () => {
           options: {
             additionalProperties: false,
             properties: {
-              path: { type: 'string' },
+              path: { type: ['string', 'null'] },
             },
-            required: [],
+            required: ['path'],
             type: 'object',
           },
         },
@@ -102,7 +104,7 @@ test('getTools adds strict object requirements to function schemas', () => {
   ]);
 });
 
-test('getTools preserves optional properties from the provider-agnostic schema', () => {
+test('getTools converts optional properties into nullable required fields for strict schemas', () => {
   const request: ModelRequest = {
     messages: [{ content: 'hello', role: 'user' }],
     stream: false,
@@ -131,10 +133,89 @@ test('getTools preserves optional properties from the provider-agnostic schema',
         additionalProperties: false,
         properties: {
           content: { type: 'string' },
-          overwrite: { type: 'boolean' },
+          overwrite: { type: ['boolean', 'null'] },
           path: { type: 'string' },
         },
-        required: ['content', 'path'],
+        required: ['content', 'overwrite', 'path'],
+        type: 'object',
+      },
+      strict: true,
+      type: 'function',
+    },
+  ]);
+});
+
+test('getTools normalizes real built-in tool schemas for strict OpenAI responses', () => {
+  const request: ModelRequest = {
+    messages: [{ content: 'hello', role: 'user' }],
+    stream: false,
+    tools: [
+      new WriteFileTool({ policy: { workspaceRoot: process.cwd() } }),
+      new RunCommandTool({ policy: { workspaceRoot: process.cwd() } }),
+    ],
+  };
+
+  assert.deepEqual(codec.getTools(request), [
+    {
+      description: 'Write a UTF-8 text file to disk.',
+      name: 'write_file',
+      parameters: {
+        additionalProperties: false,
+        properties: {
+          content: {
+            description: 'UTF-8 text content to write to the file.',
+            type: 'string',
+          },
+          overwrite: {
+            description: 'Whether to overwrite an existing file. Defaults to false.',
+            type: ['boolean', 'null'],
+          },
+          path: {
+            description: 'Absolute path or a path relative to the workspace root.',
+            minLength: 1,
+            type: 'string',
+          },
+        },
+        required: ['content', 'overwrite', 'path'],
+        type: 'object',
+      },
+      strict: true,
+      type: 'function',
+    },
+    {
+      description:
+        'Run one allowed executable directly inside the workspace without a shell. Put the executable in `command` and only trailing arguments in `args`. Example: `{ "command": "pwd" }` or `{ "command": "git", "args": ["status"] }`.',
+      name: 'run_command',
+      parameters: {
+        additionalProperties: false,
+        properties: {
+          args: {
+            description:
+              'Arguments after the executable only. Do not repeat command here. Example: for `git status`, use command=`git` and args=`["status"]`. For `pwd`, omit args.',
+            items: { type: 'string' },
+            type: ['array', 'null'],
+          },
+          command: {
+            description:
+              'Executable name only, run directly without a shell. Do not include the command again in args and do not use shell wrappers like `bash -lc`. Example: `pwd` or `git`.',
+            minLength: 1,
+            type: 'string',
+          },
+          cwd: {
+            description:
+              'Optional working directory inside the workspace. Use an absolute path or a path relative to the workspace root.',
+            minLength: 1,
+            type: ['string', 'null'],
+          },
+          timeoutMs: {
+            description:
+              'Optional timeout in milliseconds. Use this only when the command may take longer than the default limit.',
+            exclusiveMinimum: 0,
+            maximum: 9007199254740991,
+            type: ['integer', 'null'],
+          },
+        },
+        required: ['args', 'command', 'cwd', 'timeoutMs'],
         type: 'object',
       },
       strict: true,
