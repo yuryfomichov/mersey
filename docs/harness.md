@@ -11,7 +11,7 @@ Key exports include:
 - `createHarness`
 - built-in sessions from `harness/sessions/index.ts`
 - built-in tools from `harness/tools/index.ts`
-- logging and retrieval plugins from `harness/plugins/index.ts`
+- logging, memory, and retrieval plugins from `harness/plugins/index.ts`
 - provider-agnostic types like `ModelProvider`
 - event and plugin types
 
@@ -257,6 +257,37 @@ const plugin = {
 ```
 
 `prepareProviderRequest(request, ctx)` receives an immutable provider-request snapshot plus a simplified immutable transcript, and can return `prependMessages`, `appendMessages`, `messages`, and `systemPrompt` overrides.
+
+## Memory Plugins
+
+`harness` also supports a generic memory plugin shape for external memory systems.
+
+- `recall(query, ctx)` runs before the first provider call in a turn
+- recalled memory is injected ephemerally and is not persisted into session history
+- `remember(ctx)` runs after the turn commit succeeds
+- `remember(ctx)` runs after commit in the background, so an immediate follow-up turn may not see freshly written memory yet
+- memory stays backend-agnostic and separate from session storage
+
+The generic memory contract lives under `harness/plugins/memory/`.
+
+```ts
+import { createMemoryPlugin } from '../harness/plugins/index.js';
+
+const plugin = createMemoryPlugin({
+  async recall(query) {
+    return [{ id: 'pref-1', content: `Stored memory for: ${query}` }];
+  },
+  async remember(ctx) {
+    const finalAssistantMessage = ctx.turnMessages.at(-1);
+
+    if (finalAssistantMessage?.role === 'assistant') {
+      // Persist useful information to your memory backend.
+    }
+  },
+});
+```
+
+`swallowRecallErrors` defaults to `true`, so recall is best-effort by default. Swallowed recall failures are intentionally silent in v1; formatter failures still throw. If you need logger-visible recall failures, disable swallowing and let the normal `hook_error` event path handle them.
 
 ## Integration Boundaries
 

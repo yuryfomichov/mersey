@@ -7,6 +7,7 @@ import { getBooleanFlag, getProviderName, getSessionId } from '../../helpers/cli
 import { getProviderModel } from '../../helpers/cli/harness-config.js';
 import { runInteractiveCli } from '../../helpers/cli/interactive.js';
 import { createCliLoggingPlugins } from '../../helpers/cli/logging.js';
+import { createLocalMemoryPlugin, getLocalMemoryDefinition } from '../../helpers/cli/memory.js';
 import { getProviderDefinition } from '../../helpers/cli/provider-config.js';
 import { createMarkdownRagPlugin, getMarkdownRagDefinition } from '../../helpers/cli/rag.js';
 import { createSession, formatSessionStore, getSessionStoreDefinition } from '../../helpers/cli/session-store.js';
@@ -24,6 +25,8 @@ async function main(): Promise<void> {
   const sessionStoreDefinition = getSessionStoreDefinition(args);
   const session = createSession(sessionStoreDefinition, sessionId);
   const { logPaths, plugins: loggingPlugins } = await createCliLoggingPlugins(sessionId);
+  const memoryDefinition = getLocalMemoryDefinition(args);
+  const memoryResult = await createLocalMemoryPlugin(memoryDefinition);
   const ragDefinition = getMarkdownRagDefinition(args, {
     defaultEnabled: true,
     defaultIndexDir: join('tmp', 'rag', 'rag-cli-data'),
@@ -32,7 +35,13 @@ async function main(): Promise<void> {
   const retrievalEnabled = Boolean(ragResult.plugin);
   const harness = createHarness({
     debug,
-    plugins: [...loggingPlugins, ...(ragResult.plugin ? [ragResult.plugin] : [])],
+    // prepareProviderRequest prepends compose in reverse registration order,
+    // so keep memory before retrieval here to leave recalled memory closest to the live user message.
+    plugins: [
+      ...loggingPlugins,
+      ...(memoryResult.plugin ? [memoryResult.plugin] : []),
+      ...(ragResult.plugin ? [ragResult.plugin] : []),
+    ],
     providerInstance,
     session,
     systemPrompt: getRagCliSystemPrompt({ retrievalEnabled }),
@@ -44,7 +53,7 @@ async function main(): Promise<void> {
     appName: 'RAG CLI',
     cache,
     debug,
-    extraStatusLines: ragResult.summaryLines,
+    extraStatusLines: [...memoryResult.summaryLines, ...ragResult.summaryLines],
     harness,
     instructionLine: "Ask a question or type 'exit' to quit.",
     logLine: `logs: ${logPaths.jsonlPath}, ${logPaths.textPath}`,

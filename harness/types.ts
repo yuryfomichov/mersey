@@ -8,6 +8,14 @@ export type { CreateHarnessOptions, Harness, HarnessSessionView } from './runtim
 export type { HarnessEvent, HarnessEventListener } from './runtime/events/types.js';
 
 export type {
+  JsonlMemoryPluginOptions,
+  MemoryItem,
+  MemoryPluginOptions,
+  MemoryRecallContext,
+  MemoryRememberContext,
+} from './plugins/memory/index.js';
+
+export type {
   AfterTurnCommittedContext,
   BeforeProviderCallContext,
   BeforeToolCallContext,

@@ -23,6 +23,7 @@ The repo is organized around a reusable `harness` package and thin apps that sit
 - `harness/sessions/`: built-in `Session`, `MemorySessionStore`, and `FilesystemSessionStore`
 - `harness/runtime/events/`: event emitter/reporter and safe telemetry
 - `harness/plugins/logging/`: built-in JSONL and text logging plugins
+- `harness/plugins/memory/`: backend-agnostic memory recall/remember plugin helpers
 - `harness/plugins/retrieval/`: backend-agnostic request-prep retrieval contract and helpers
 - `harness/plugins/retrieval/lancedb/`: built-in LanceDB retrieval backend and index helpers
 - `apps/helpers/cli/`: shared app-side wiring for provider, session, tool, and logging setup
@@ -85,6 +86,10 @@ RAG flags for `apps/rag-cli`:
 - `--rebuild-rag`
 - `--rag-top-k <n>`
 - `--rag-max-context-chars <n>`
+- `--memory`
+- `--memory-file <path>`
+- `--memory-top-k <n>`
+- `--memory-max-context-chars <n>`
 
 Examples:
 
@@ -92,6 +97,7 @@ Examples:
 pnpm cli -- --provider fake --stream
 pnpm rag-cli -- --stream
 pnpm rag-cli -- --provider openai --rebuild-rag
+pnpm rag-cli -- --provider fake --memory --session-id memory-demo
 pnpm cli -- --provider openai --session-store filesystem --sessions-dir tmp/sessions
 pnpm cli -- --provider openai --cache
 pnpm ftv -- --provider openai --session-store filesystem --sessions-dir tmp/sessions
@@ -105,6 +111,8 @@ RAG indexes are reused across restarts by default. Pass `--rebuild-rag` to rebui
 
 `apps/rag-cli` uses the same interactive shell but disables tools and turns on RAG by default unless `--rag=false` is passed.
 
+For local memory testing, `apps/rag-cli` can also register an opt-in file-backed memory plugin with `--memory`. It stores remembered turns in newline-delimited JSON under `tmp/memory/rag-cli.jsonl` by default so you can test recall across sessions without adding a real external memory backend.
+
 ## Architecture Summary
 
 - Apps own interaction and presentation.
@@ -113,6 +121,7 @@ RAG indexes are reused across restarts by default. Pass `--rebuild-rag` to rebui
 - Built-in plugins, sessions, and tools stay namespaced under `harness/plugins/`, `harness/sessions/`, and `harness/tools/`.
 - Apps must inject both `providerInstance` and `session` into `createHarness()`.
 - Logging is plugin-based: apps inject logging plugins through `createHarness({ plugins, providerInstance, session })`.
+- Memory is also plugin-based: memory plugins can recall external memory ephemerally before the first provider call in a turn, then remember useful turn data after commit.
 - Retrieval is also plugin-based: request-prep plugins can inject ephemeral RAG context without persisting it into session messages.
 - Shared app-side provider, session, tool, and logging plugin wiring lives under `apps/helpers/cli/` so apps do not depend on each other.
 - The turn loop depends on `ModelProvider`, not SDK-specific request or response types.
