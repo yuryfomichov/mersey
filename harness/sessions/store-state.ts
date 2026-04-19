@@ -37,8 +37,7 @@ export function commitSessionTurn(session: StoredSessionState, turnMessages: rea
   let nextUsage = structuredClone(session.usage);
   let nextContextSize = session.contextSize;
 
-  for (const turnMessage of turnMessages) {
-    const message = cloneMessage(turnMessage);
+  for (const message of turnMessages) {
     nextMessages.push(message);
     nextUsage = addUsage(nextUsage, getMessageUsage(message));
 
