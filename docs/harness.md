@@ -1,6 +1,6 @@
 # Harness Guide
 
-`harness` is the reusable runtime behind Mersey. It is responsible for running model turns, executing tools, persisting session state, and exposing events to the app layer.
+`harness` is the reusable runtime behind Mersey. It is responsible for running model turns, executing tools, persisting session state, and exposing hooks, plugins, and events to the app layer.
 
 ## Public Entry Point
 
@@ -13,7 +13,7 @@ Key exports include:
 - built-in tools from `harness/tools/index.ts`
 - logging, memory, and retrieval plugins from `harness/plugins/index.ts`
 - provider-agnostic types like `ModelProvider`
-- event and plugin types
+- hook, event, and plugin types
 
 `harness/index.ts` stays focused on `createHarness()` and shared types, while built-in implementations remain available from their own submodules such as `harness/providers/index.ts`.
 
@@ -294,9 +294,9 @@ const plugin = createMemoryPlugin({
 Keep the boundary between app code and `harness` sharp:
 
 - app code should own UI and input collection
-- app code should choose provider config, session storage, and tool registration
-- app code can choose which request-prep plugins to register
+- app code should choose provider config, session storage, tool registration, and plugin registration
+- app code can choose which request-prep, memory, logging, and policy plugins to register
 - `harness` should own the turn loop, pause/resume semantics, tool execution, and session updates
 - provider-specific codecs should stay in `harness/providers/codecs/`
 
-In practice, `apps/cli/src/index.ts` is the best reference for a minimal terminal integration, while `apps/ftv/src/index.tsx` shows the same `harness` contract driving an Ink UI. Shared app-side setup lives in `apps/helpers/cli/`.
+In practice, `apps/cli/src/index.ts` is the best reference for a minimal terminal integration, `apps/rag-cli/src/index.ts` shows retrieval and memory plugin composition, and `apps/ftv/src/index.tsx` shows the same `harness` contract driving an Ink UI. Shared app-side setup lives in `apps/helpers/cli/`.
