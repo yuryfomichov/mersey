@@ -196,17 +196,19 @@ test('Session caches hydrated usage and context values in memory', async () => {
     id: 'metrics-session',
     messages: [],
   });
-  await store.commitTurn('metrics-session', [], {
-    contextSize: 15,
-    createdAt: '2026-03-29T00:00:00.000Z',
-    id: 'metrics-session',
-    usage: {
-      ...createEmptyModelUsage(),
-      cachedInputTokens: 4,
-      outputTokens: 5,
-      uncachedInputTokens: 6,
+  await store.commitTurn('metrics-session', [
+    {
+      content: 'seeded metrics',
+      createdAt: '2026-03-29T00:00:01.000Z',
+      role: 'assistant',
+      usage: {
+        ...createEmptyModelUsage(),
+        cachedInputTokens: 4,
+        outputTokens: 5,
+        uncachedInputTokens: 6,
+      },
     },
-  });
+  ]);
 
   const session = new Session({
     id: 'metrics-session',
@@ -264,11 +266,10 @@ test('Session.commit updates cached usage and context metrics', async () => {
 
 test('Session.commit keeps memory state unchanged when store commitTurn fails', async () => {
   class FailingCommitStore extends MemorySessionStore {
-    override async commitTurn(
+    override async commitTurnExclusive(
       _sessionId: string,
       _turnMessages: readonly Message[],
-      _state: Omit<StoredSessionState, 'messages'>,
-    ): Promise<void> {
+    ): Promise<StoredSessionState> {
       throw new Error('commit failed');
     }
   }
@@ -299,18 +300,17 @@ test('Session.commit serializes concurrent public commits', async () => {
   class SlowCommitStore extends MemorySessionStore {
     commitCalls = 0;
 
-    override async commitTurn(
+    override async commitTurnExclusive(
       sessionId: string,
       turnMessages: readonly Message[],
-      state: Omit<StoredSessionState, 'messages'>,
-    ): Promise<void> {
+    ): Promise<StoredSessionState> {
       this.commitCalls += 1;
 
       if (this.commitCalls === 1) {
         await delay(10);
       }
 
-      return super.commitTurn(sessionId, turnMessages, state);
+      return super.commitTurnExclusive(sessionId, turnMessages);
     }
   }
 
@@ -400,20 +400,19 @@ test('Session.commit refreshes persisted metrics before public commits from anot
   assert.equal(await secondSession.getContextSize(), 12);
 });
 
-test('Session.commit keeps in-memory messages isolated from store-side mutation', async () => {
+test('Session.commit keeps caller messages isolated from store-side mutation', async () => {
   class MutatingStore extends MemorySessionStore {
-    override async commitTurn(
+    override async commitTurnExclusive(
       sessionId: string,
       turnMessages: readonly Message[],
-      state: Omit<StoredSessionState, 'messages'>,
-    ): Promise<void> {
+    ): Promise<StoredSessionState> {
       const assistantMessage = turnMessages[0];
 
       if (assistantMessage && assistantMessage.role === 'assistant') {
         assistantMessage.content = 'mutated by store';
       }
 
-      return super.commitTurn(sessionId, turnMessages, state);
+      return super.commitTurnExclusive(sessionId, turnMessages);
     }
   }
 
@@ -421,14 +420,13 @@ test('Session.commit keeps in-memory messages isolated from store-side mutation'
     id: 'mutating-store-session',
     store: new MutatingStore(),
   });
+  const message: Message = {
+    content: 'original content',
+    createdAt: '2026-03-29T00:00:01.000Z',
+    role: 'assistant',
+  };
 
-  await session.commit([
-    {
-      content: 'original content',
-      createdAt: '2026-03-29T00:00:01.000Z',
-      role: 'assistant',
-    },
-  ]);
+  await session.commit([message]);
 
-  assert.equal(session.messages[0]?.content, 'original content');
+  assert.equal(message.content, 'original content');
 });

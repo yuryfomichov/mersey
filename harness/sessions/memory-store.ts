@@ -2,46 +2,22 @@ import { createEmptyModelUsage } from '../runtime/models/types.js';
 import type { SessionStore } from '../runtime/sessions/store.js';
 import type { Message, SessionState, StoredSessionState } from '../runtime/sessions/types.js';
 import { SessionTurnLockMap } from './exclusive.js';
-
-function cloneMessage<T extends Message>(message: T): T {
-  return structuredClone(message);
-}
-
-function cloneStoredSession(session: StoredSessionState): StoredSessionState {
-  return {
-    contextSize: session.contextSize,
-    createdAt: session.createdAt,
-    id: session.id,
-    messages: session.messages.map((message) => cloneMessage(message)),
-    usage: structuredClone(session.usage),
-  };
-}
+import { cloneStoredSession, commitSessionTurn } from './store-state.js';
 
 export class MemorySessionStore implements SessionStore {
   private readonly sessions = new Map<string, StoredSessionState>();
   private readonly turnLocks = new SessionTurnLockMap();
 
-  async commitTurn(
-    sessionId: string,
-    turnMessages: readonly Message[],
-    state: Omit<StoredSessionState, 'messages'>,
-  ): Promise<void> {
-    const existingSession = this.sessions.get(sessionId);
+  async commitTurn(sessionId: string, turnMessages: readonly Message[]): Promise<StoredSessionState> {
+    const turnSnapshot = turnMessages.map((message) => structuredClone(message));
 
-    if (!existingSession) {
-      throw new Error(`Session does not exist: ${sessionId}`);
-    }
+    return this.runExclusive(sessionId, async () => this.commitTurnUnlocked(sessionId, turnSnapshot));
+  }
 
-    this.sessions.set(sessionId, {
-      contextSize: state.contextSize,
-      createdAt: state.createdAt,
-      id: state.id,
-      messages: [
-        ...existingSession.messages.map((message) => cloneMessage(message)),
-        ...turnMessages.map(cloneMessage),
-      ],
-      usage: structuredClone(state.usage),
-    });
+  async commitTurnExclusive(sessionId: string, turnMessages: readonly Message[]): Promise<StoredSessionState> {
+    const turnSnapshot = turnMessages.map((message) => structuredClone(message));
+
+    return this.commitTurnUnlocked(sessionId, turnSnapshot);
   }
 
   async createSession(session: SessionState): Promise<StoredSessionState> {
@@ -71,5 +47,17 @@ export class MemorySessionStore implements SessionStore {
 
   async runExclusive<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
     return this.turnLocks.runExclusive(sessionId, run);
+  }
+
+  private async commitTurnUnlocked(sessionId: string, turnMessages: readonly Message[]): Promise<StoredSessionState> {
+    const existingSession = this.sessions.get(sessionId);
+
+    if (!existingSession) {
+      throw new Error(`Session does not exist: ${sessionId}`);
+    }
+
+    const committedSession = commitSessionTurn(existingSession, turnMessages);
+    this.sessions.set(sessionId, committedSession);
+    return cloneStoredSession(committedSession);
   }
 }

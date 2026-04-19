@@ -6,6 +6,7 @@ import { createEmptyModelUsage } from '../runtime/models/types.js';
 import type { SessionStore } from '../runtime/sessions/store.js';
 import type { Message, SessionState, StoredSessionState } from '../runtime/sessions/types.js';
 import { SessionTurnLockMap } from './exclusive.js';
+import { cloneStoredSession, commitSessionTurn } from './store-state.js';
 import { assertValidSessionId } from './utils.js';
 
 export type FilesystemSessionStoreOptions = {
@@ -21,10 +22,6 @@ function isErrnoCode(error: unknown, code: string): boolean {
   return error instanceof Error && 'code' in error && error.code === code;
 }
 
-function cloneMessage<T extends Message>(message: T): T {
-  return structuredClone(message);
-}
-
 const LOCK_RETRY_MS = 10;
 const LOCK_STARTUP_GRACE_MS = 100;
 
@@ -36,24 +33,18 @@ export class FilesystemSessionStore implements SessionStore {
     this.rootDir = options.rootDir ?? join(process.cwd(), 'tmp', 'sessions');
   }
 
-  async commitTurn(
-    sessionId: string,
-    turnMessages: readonly Message[],
-    state: Omit<StoredSessionState, 'messages'>,
-  ): Promise<void> {
-    const existingSession = await this.getSession(sessionId);
+  async commitTurn(sessionId: string, turnMessages: readonly Message[]): Promise<StoredSessionState> {
+    const turnSnapshot = turnMessages.map((message) => structuredClone(message));
 
-    if (!existingSession) {
-      throw new Error(`Session does not exist: ${sessionId}`);
-    }
+    return FilesystemSessionStore.processLocks.runExclusive(this.getLockKey(sessionId), async () =>
+      this.withSessionLock(sessionId, async () => this.commitTurnUnlocked(sessionId, turnSnapshot)),
+    );
+  }
 
-    await this.writeSession(sessionId, {
-      contextSize: state.contextSize,
-      createdAt: state.createdAt,
-      id: state.id,
-      messages: [...existingSession.messages.map(cloneMessage), ...turnMessages.map(cloneMessage)],
-      usage: structuredClone(state.usage),
-    });
+  async commitTurnExclusive(sessionId: string, turnMessages: readonly Message[]): Promise<StoredSessionState> {
+    const turnSnapshot = turnMessages.map((message) => structuredClone(message));
+
+    return this.commitTurnUnlocked(sessionId, turnSnapshot);
   }
 
   async createSession(session: SessionState): Promise<StoredSessionState> {
@@ -111,6 +102,18 @@ export class FilesystemSessionStore implements SessionStore {
     return FilesystemSessionStore.processLocks.runExclusive(this.getLockKey(sessionId), async () =>
       this.withSessionLock(sessionId, run),
     );
+  }
+
+  private async commitTurnUnlocked(sessionId: string, turnMessages: readonly Message[]): Promise<StoredSessionState> {
+    const existingSession = await this.getSession(sessionId);
+
+    if (!existingSession) {
+      throw new Error(`Session does not exist: ${sessionId}`);
+    }
+
+    const committedSession = commitSessionTurn(existingSession, turnMessages);
+    await this.writeSession(sessionId, committedSession);
+    return cloneStoredSession(committedSession);
   }
 
   private getSessionDir(sessionId: string): string {

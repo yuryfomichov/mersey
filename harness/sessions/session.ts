@@ -3,10 +3,7 @@ import type { HarnessSession } from '../runtime/sessions/runtime.js';
 import type { SessionStore } from '../runtime/sessions/store.js';
 import type { Message, SessionState, StoredSessionState } from '../runtime/sessions/types.js';
 import { snapshot } from '../runtime/utils/object.js';
-
-function cloneMessage<T extends Message>(message: T): T {
-  return structuredClone(message);
-}
+import { cloneMessage } from './store-state.js';
 
 function cloneState(state: SessionState): SessionState {
   return {
@@ -18,23 +15,6 @@ function cloneState(state: SessionState): SessionState {
 
 function cloneUsage(usage: ModelUsage): ModelUsage {
   return structuredClone(usage);
-}
-
-function getMessageUsage(message: Message): ModelUsage {
-  return message.role === 'assistant' && message.usage ? message.usage : createEmptyModelUsage();
-}
-
-function getUsageTotalTokens(usage: ModelUsage): number {
-  return usage.uncachedInputTokens + usage.cachedInputTokens + usage.cacheWriteInputTokens + usage.outputTokens;
-}
-
-function addUsage(left: ModelUsage, right: ModelUsage): ModelUsage {
-  return {
-    cacheWriteInputTokens: left.cacheWriteInputTokens + right.cacheWriteInputTokens,
-    cachedInputTokens: left.cachedInputTokens + right.cachedInputTokens,
-    outputTokens: left.outputTokens + right.outputTokens,
-    uncachedInputTokens: left.uncachedInputTokens + right.uncachedInputTokens,
-  };
 }
 
 export type SessionOptions = {
@@ -152,33 +132,11 @@ export class Session implements HarnessSession {
       return;
     }
 
-    const persistedMessages = messages.map((message) => cloneMessage(message));
-    const stateMessages = messages.map((message) => cloneMessage(message));
-    let nextUsage = cloneUsage(this.usageValue);
-    let nextContextSize = this.contextSizeValue;
-
-    for (const message of stateMessages) {
-      const usage = getMessageUsage(message);
-      nextUsage = addUsage(nextUsage, usage);
-
-      if (message.role === 'assistant' && message.usage) {
-        nextContextSize = getUsageTotalTokens(message.usage);
-      }
-    }
-
-    await this.store.commitTurn(this.id, persistedMessages, {
-      contextSize: nextContextSize,
-      createdAt: this.createdAt,
-      id: this.id,
-      usage: cloneUsage(nextUsage),
-    });
-
-    for (const stateMessage of stateMessages) {
-      this.stateValue.messages.push(stateMessage);
-    }
-
-    this.usageValue = nextUsage;
-    this.contextSizeValue = nextContextSize;
+    const storedState = await this.store.commitTurnExclusive(
+      this.id,
+      messages.map((message) => cloneMessage(message)),
+    );
+    this.hydrate(storedState);
 
     this.invalidateSnapshots();
   }
