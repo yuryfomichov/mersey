@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -132,5 +132,42 @@ test('ReadFileTool rejects denylisted paths from shared policy', async () => {
     );
   } finally {
     await rm(rootDir, { force: true, recursive: true });
+  }
+});
+
+test('ReadFileTool rejects symlink swaps between validation and file open', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
+  const outsidePath = join(rootDir, '..outside.txt');
+
+  try {
+    await writeFile(join(rootDir, 'note.txt'), 'hello from file', 'utf8');
+    await writeFile(outsidePath, 'outside secret', 'utf8');
+
+    const tool = new ReadFileTool({ policy: { workspaceRoot: rootDir } });
+    const files = (
+      tool as unknown as {
+        files: {
+          resolveForRead(path: string, toolName: string): Promise<string>;
+        };
+      }
+    ).files;
+    const originalResolveForRead = files.resolveForRead.bind(files);
+
+    files.resolveForRead = async (path, toolName) => {
+      const resolvedPath = await originalResolveForRead(path, toolName);
+
+      await rm(resolvedPath);
+      await symlink(outsidePath, resolvedPath);
+
+      return resolvedPath;
+    };
+
+    await assert.rejects(
+      () => tool.execute({ path: 'note.txt' }, createToolExecutionContext()),
+      /ELOOP|too many symbolic links/,
+    );
+  } finally {
+    await rm(rootDir, { force: true, recursive: true });
+    await rm(outsidePath, { force: true });
   }
 });

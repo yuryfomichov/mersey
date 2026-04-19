@@ -31,7 +31,9 @@ export type ToolOutputLimitResult = {
 export type ToolFileService = {
   assertReadSize(path: string, toolName: string): Promise<void>;
   assertWriteSize(content: string, toolName: string): void;
+  getMaxReadBytes(): number;
   resolveForRead(path: string, toolName: string): Promise<string>;
+  resolveForReadWrite(path: string, toolName: string): Promise<string>;
   resolveForWrite(path: string, toolName: string): Promise<string>;
 };
 

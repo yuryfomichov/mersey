@@ -1,6 +1,7 @@
 import type { HarnessEventReporter } from '../events/reporter.js';
 import type { HarnessEvent } from '../events/types.js';
 import type { ModelRequest } from '../models/types.js';
+import { toModelMessage, toModelMessages, toProviderRequestSnapshot } from './request-snapshots.js';
 import type {
   AfterTurnCommittedContext,
   BeforeProviderCallContext,
@@ -87,7 +88,7 @@ export class PluginRunner {
       const prepareProviderRequest = plugin.prepareProviderRequest;
 
       try {
-        const prepared = await prepareProviderRequest(nextRequest, ctx);
+        const prepared = await prepareProviderRequest(toProviderRequestSnapshot(nextRequest), ctx);
 
         nextRequest = applyPreparedRequest(nextRequest, prepared);
       } catch (error: unknown) {
@@ -175,7 +176,7 @@ export class PluginRunner {
 
       if (hookResult && typeof (hookResult as PromiseLike<unknown>).then === 'function') {
         void Promise.resolve(hookResult).catch((error: unknown) => {
-          if (this.shouldEmitHookError(event)) {
+          if (event.type !== 'hook_error') {
             this.reporter.hookError(plugin.name, 'onEvent', error, {
               sessionId: pluginCtx.sessionId,
               turnId: pluginCtx.turnId,
@@ -184,21 +185,13 @@ export class PluginRunner {
         });
       }
     } catch (error: unknown) {
-      if (this.shouldEmitHookError(event)) {
+      if (event.type !== 'hook_error') {
         this.reporter.hookError(plugin.name, 'onEvent', error, {
           sessionId: pluginCtx.sessionId,
           turnId: pluginCtx.turnId,
         });
       }
     }
-  }
-
-  private shouldEmitHookError(event: HarnessEvent): boolean {
-    if (event.type === 'hook_error') {
-      return false;
-    }
-
-    return true;
   }
 }
 
@@ -213,10 +206,10 @@ function applyPreparedRequest(request: ModelRequest, prepared: PrepareProviderRe
     return request;
   }
 
-  const baseMessages = hasMessageReplacement ? (prepared.messages ?? []) : request.messages;
+  const baseMessages = hasMessageReplacement ? toModelMessages(prepared.messages ?? []) : request.messages;
   const messages =
     prependMessages.length > 0 || appendMessages.length > 0
-      ? [...prependMessages, ...baseMessages, ...appendMessages]
+      ? [...prependMessages.map(toModelMessage), ...baseMessages, ...appendMessages.map(toModelMessage)]
       : baseMessages;
   const systemPrompt = hasSystemPromptOverride ? prepared.systemPrompt : request.systemPrompt;
 

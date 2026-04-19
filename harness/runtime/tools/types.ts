@@ -31,3 +31,5 @@ export type ToolExecutionResult = {
 export interface Tool extends ModelToolDefinition {
   execute(input: ModelToolInput, context: ToolExecutionContext): Promise<ToolExecuteResult>;
 }
+
+export type { ToolExecutionContext } from './runtime/index.js';

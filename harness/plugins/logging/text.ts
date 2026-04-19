@@ -13,7 +13,7 @@ export function createTextEventLoggingPlugin(options: TextEventLoggingPluginOpti
   return {
     name: options.name ?? 'text-event-logger',
     onEvent(event: HarnessEvent): Promise<void> {
-      return writeLine(`${toEventTextLine(event)}\n`).catch(() => {});
+      return writeLine(`${toEventTextLine(event)}\n`);
     },
   };
 }

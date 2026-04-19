@@ -1,4 +1,5 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { open } from 'node:fs/promises';
 
 import { z } from 'zod';
 
@@ -60,24 +61,46 @@ export class EditFileTool implements Tool {
     const { newText, oldText, path } = parseToolInput(EditFileTool.input, input);
 
     context.cancellation.throwIfAborted();
-    const resolvedPath = await this.files.resolveForRead(path, this.name);
-    await this.files.resolveForWrite(path, this.name);
-    await this.files.assertReadSize(resolvedPath, this.name);
-    const content = await readFile(resolvedPath, 'utf8');
-    const matchCount = getMatchCount(content, oldText);
+    const resolvedPath = await this.files.resolveForReadWrite(path, this.name);
+    const fileHandle = await open(resolvedPath, constants.O_RDWR | constants.O_NOFOLLOW);
+    try {
+      const file = await fileHandle.stat();
 
-    if (matchCount === 0) {
-      throw new Error(`edit_file could not find oldText in file: ${resolvedPath}`);
+      if (file.size > this.files.getMaxReadBytes()) {
+        throw new Error(
+          `${this.name} refuses files larger than ${this.files.getMaxReadBytes()} bytes: ${resolvedPath}`,
+        );
+      }
+
+      const content = await fileHandle.readFile({ encoding: 'utf8' });
+      const matchCount = getMatchCount(content, oldText);
+
+      if (matchCount === 0) {
+        throw new Error(`edit_file could not find oldText in file: ${resolvedPath}`);
+      }
+
+      if (matchCount !== 1) {
+        throw new Error(`edit_file requires oldText to match exactly once: ${resolvedPath}`);
+      }
+
+      const nextContent = content.replace(oldText, newText);
+      const nextBuffer = Buffer.from(nextContent, 'utf8');
+
+      this.files.assertWriteSize(nextContent, this.name);
+
+      await fileHandle.truncate(0);
+
+      let written = 0;
+
+      while (written < nextBuffer.length) {
+        const result = await fileHandle.write(nextBuffer, written, nextBuffer.length - written, written);
+
+        written += result.bytesWritten;
+      }
+    } finally {
+      await fileHandle.close();
     }
 
-    if (matchCount !== 1) {
-      throw new Error(`edit_file requires oldText to match exactly once: ${resolvedPath}`);
-    }
-
-    const nextContent = content.replace(oldText, newText);
-
-    this.files.assertWriteSize(nextContent, this.name);
-    await writeFile(resolvedPath, nextContent, 'utf8');
     context.cancellation.throwIfAborted();
 
     return {

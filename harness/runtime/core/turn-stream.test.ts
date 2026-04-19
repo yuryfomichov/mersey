@@ -11,7 +11,7 @@ import { createPluginRunner } from '../plugins/runner.js';
 import type { HarnessPlugin } from '../plugins/types.js';
 import type { HarnessSession } from '../sessions/runtime.js';
 import type { SessionStore } from '../sessions/store.js';
-import type { Message } from '../sessions/types.js';
+import type { Message, StoredSessionState } from '../sessions/types.js';
 import { createToolRuntimeFactory } from '../tools/runtime/index.js';
 import type { Tool } from '../tools/types.js';
 import { createTurnStreamFactory } from './turn-stream.js';
@@ -122,6 +122,62 @@ test('createTurnStreamFactory starts on first pull and ignores pre-consumption r
   });
 });
 
+test('createTurnStreamFactory ensures the session before reading history', async () => {
+  let ensured = false;
+  const session: HarnessSession = {
+    createdAt: '2024-01-01T00:00:00.000Z',
+    async commit(_messages: Message[]) {},
+    async ensure() {
+      ensured = true;
+    },
+    async getContextSize() {
+      return 0;
+    },
+    async getUsage() {
+      return createEmptyModelUsage();
+    },
+    id: 'ensure-history-session',
+    get messages() {
+      return ensured
+        ? [
+            {
+              content: 'persisted',
+              createdAt: '2024-01-01T00:00:00.000Z',
+              role: 'user' as const,
+            },
+          ]
+        : [];
+    },
+    async runExclusive<T>(run: () => Promise<T>): Promise<T> {
+      return run();
+    },
+  };
+  const provider = new FakeProvider();
+  const reporter = new HarnessEventReporter({
+    getSessionId: () => session.id,
+    providerName: provider.name,
+  });
+  const streamTurn = createTurnStreamFactory({
+    pluginRunner: createPluginRunner({
+      reporter,
+      plugins: [],
+      runId: reporter.getRunId(),
+    }),
+    reporter,
+    provider,
+    session,
+    toolRuntimeFactory: createToolRuntimeFactory({ tools: [] }),
+  });
+
+  await collectChunks(streamTurn('hello', false));
+
+  assert.equal(provider.requests.length, 1);
+  assert.deepEqual(provider.requests[0]?.messages, [
+    { content: 'persisted', role: 'user' },
+    { content: 'hello', role: 'user' },
+  ]);
+});
+
 test('createTurnStreamFactory emits one plugin event per turn across repeated turns', async () => {
   const turnStartedIds: string[] = [];
   const { streamTurn } = createStreamTurnFactory({
@@ -220,7 +276,7 @@ test('createTurnStreamFactory return aborts an active turn, drops partial histor
   await iterator.return?.();
 
   assert.equal(session.messages.length, 0);
-  assert.equal((await sessionStore.listMessages('cancelled-stream-session')).length, 0);
+  assert.equal((await sessionStore.getSession('cancelled-stream-session'))?.messages.length ?? 0, 0);
 
   const reply = await Promise.race([
     collectChunks(streamTurn('second', true)).then((chunks) => chunks.at(-1)),
@@ -325,6 +381,122 @@ test('createTurnStreamFactory yields only final_message when streaming is disabl
       type: 'final_message',
     },
   ]);
+});
+
+test('createTurnStreamFactory waits for commit before exposing final_message', async () => {
+  let releaseCommit!: () => void;
+  const commitRelease = new Promise<void>((resolve) => {
+    releaseCommit = resolve;
+  });
+
+  class DelayedCommitStore extends MemorySessionStore {
+    override async commitTurn(
+      sessionId: string,
+      turnMessages: readonly Message[],
+      state: Omit<StoredSessionState, 'messages'>,
+    ): Promise<void> {
+      await commitRelease;
+      return super.commitTurn(sessionId, turnMessages, state);
+    }
+  }
+
+  const { streamTurn } = createStreamTurnFactory({
+    sessionStore: new DelayedCommitStore(),
+  });
+  const iterator = streamTurn('hello', false)[Symbol.asyncIterator]();
+
+  let firstNextResolved = false;
+  const firstNext = iterator.next().then((result) => {
+    firstNextResolved = true;
+    return result;
+  });
+
+  await delay(10);
+  assert.equal(firstNextResolved, false);
+
+  releaseCommit();
+
+  const finalChunk = await firstNext;
+  assert.equal(finalChunk.value?.type, 'final_message');
+});
+
+test('createTurnStreamFactory surfaces commit failures instead of yielding final_message', async () => {
+  class FailingCommitStore extends MemorySessionStore {
+    override async commitTurn(
+      _sessionId: string,
+      _turnMessages: readonly Message[],
+      _state: Omit<StoredSessionState, 'messages'>,
+    ): Promise<void> {
+      throw new Error('commit failed');
+    }
+  }
+
+  const { session, streamTurn } = createStreamTurnFactory({
+    sessionStore: new FailingCommitStore(),
+  });
+
+  await assert.rejects(async () => {
+    await collectChunks(streamTurn('hello', false));
+  }, /commit failed/);
+
+  assert.equal(session.messages.length, 0);
+});
+
+test('createTurnStreamFactory return propagates non-abort background failures', async () => {
+  let markCommitStarted!: () => void;
+  let failCommit!: () => void;
+  const commitStarted = new Promise<void>((resolve) => {
+    markCommitStarted = resolve;
+  });
+  const commitFailure = new Promise<void>((_, reject) => {
+    failCommit = () => {
+      reject(new Error('commit failed'));
+    };
+  });
+
+  const session = createLiveSession([], 'failing-return-session');
+  session.commit = async () => {
+    markCommitStarted();
+    return commitFailure;
+  };
+
+  const provider = new FakeProvider({
+    streamReply: [
+      { delta: 'partial', type: 'text_delta' },
+      {
+        response: { text: 'done', usage: createEmptyModelUsage() },
+        type: 'response_completed',
+      },
+    ],
+  });
+  const reporter = new HarnessEventReporter({
+    getSessionId: () => session.id,
+    providerName: provider.name,
+  });
+  const streamTurn = createTurnStreamFactory({
+    pluginRunner: createPluginRunner({
+      reporter,
+      plugins: [],
+      runId: reporter.getRunId(),
+    }),
+    reporter,
+    provider,
+    session,
+    toolRuntimeFactory: createToolRuntimeFactory({ tools: [] }),
+  });
+  const iterator = streamTurn('hello', true)[Symbol.asyncIterator]();
+
+  const firstChunk = await iterator.next();
+  assert.equal(firstChunk.value?.type, 'assistant_delta');
+
+  await commitStarted;
+
+  const returnPromise = iterator.return?.();
+  failCommit();
+
+  await assert.rejects(async () => {
+    await returnPromise;
+  }, /commit failed/);
 });
 
 test('createTurnStreamFactory snapshots final_message chunks before exposing them', async () => {

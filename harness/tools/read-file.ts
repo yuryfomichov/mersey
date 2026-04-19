@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { open } from 'node:fs/promises';
 
 import { z } from 'zod';
 
@@ -46,8 +47,23 @@ export class ReadFileTool implements Tool {
 
     context.cancellation.throwIfAborted();
     const resolvedPath = await this.files.resolveForRead(path, this.name);
-    await this.files.assertReadSize(resolvedPath, this.name);
-    const content = await readFile(resolvedPath, 'utf8');
+    const fileHandle = await open(resolvedPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    let content: string;
+
+    try {
+      const file = await fileHandle.stat();
+
+      if (file.size > this.files.getMaxReadBytes()) {
+        throw new Error(
+          `${this.name} refuses files larger than ${this.files.getMaxReadBytes()} bytes: ${resolvedPath}`,
+        );
+      }
+
+      content = await fileHandle.readFile({ encoding: 'utf8' });
+    } finally {
+      await fileHandle.close();
+    }
+
     context.cancellation.throwIfAborted();
     const limited = this.output.limitResult(content);
 

@@ -1,6 +1,6 @@
 import type { HarnessEvent } from '../events/types.js';
 import type { ModelProvider } from '../models/provider.js';
-import type { ModelMessage, ModelRequest } from '../models/types.js';
+import type { ModelToolCall, ModelToolDefinition } from '../models/types.js';
 import type { Message } from '../sessions/types.js';
 
 export type HookDecision =
@@ -26,6 +26,7 @@ export type BeforeProviderCallContext = {
   model: string;
   messageCount: number;
   messageCountsByRole: { user: number; assistant: number; tool: number };
+  request: ProviderRequestSnapshot;
   toolDefinitionNames: string[];
 };
 
@@ -37,9 +38,11 @@ export type PrepareProviderRequestMessage =
   | {
       content: string;
       role: 'assistant';
+      toolCalls?: ModelToolCall[];
     }
   | {
       content: string;
+      data?: Record<string, unknown>;
       isError?: boolean;
       name: string;
       role: 'tool';
@@ -62,10 +65,17 @@ export type PrepareProviderRequestContext = {
   signal?: AbortSignal;
 };
 
+export type ProviderRequestSnapshot = Readonly<{
+  messages: readonly Readonly<PrepareProviderRequestMessage>[];
+  stream: boolean;
+  systemPrompt?: string;
+  tools?: readonly Readonly<ModelToolDefinition>[];
+}>;
+
 export type PrepareProviderRequestResult = {
-  appendMessages?: ModelMessage[];
-  messages?: ModelMessage[];
-  prependMessages?: ModelMessage[];
+  appendMessages?: PrepareProviderRequestMessage[];
+  messages?: PrepareProviderRequestMessage[];
+  prependMessages?: PrepareProviderRequestMessage[];
   systemPrompt?: string;
 };
 
@@ -102,7 +112,7 @@ export type HarnessPlugin = {
 
   beforeProviderCall?(ctx: BeforeProviderCallContext): Promise<HookDecision> | HookDecision;
   prepareProviderRequest?(
-    request: Readonly<ModelRequest>,
+    request: ProviderRequestSnapshot,
     ctx: PrepareProviderRequestContext,
   ): Promise<PrepareProviderRequestResult> | PrepareProviderRequestResult;
   beforeToolCall?(ctx: BeforeToolCallContext): Promise<HookDecision> | HookDecision;

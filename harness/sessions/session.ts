@@ -48,10 +48,10 @@ export class Session implements HarnessSession {
   private stateValue: SessionState;
   private usageValue: ModelUsage = createEmptyModelUsage();
   private contextSizeValue = 0;
+  private activeExclusiveSessionId: string | null = null;
   private messagesSnapshot: readonly Message[] | null = null;
   private stateSnapshot: SessionState | null = null;
   private initialized: Promise<void> | null = null;
-  private turnQueue: Promise<void> = Promise.resolve();
 
   constructor({ createdAt, id, store }: SessionOptions) {
     this.store = store;
@@ -101,20 +101,12 @@ export class Session implements HarnessSession {
       return;
     }
 
-    await this.ensure();
-
-    for (const message of messages) {
-      const storedMessage = cloneMessage(message);
-      const stateMessage = cloneMessage(message);
-
-      await this.store.appendMessage(this.id, storedMessage);
-      this.stateValue.messages.push(stateMessage);
-      this.updateMetrics(stateMessage);
+    if (this.activeExclusiveSessionId === this.id) {
+      await this.commitUnlocked(messages);
+      return;
     }
 
-    await this.store.writeState(this.id, this.getStoredState());
-
-    this.invalidateSnapshots();
+    await this.runExclusive(() => this.commitUnlocked(messages));
   }
 
   async ensure(): Promise<void> {
@@ -139,48 +131,76 @@ export class Session implements HarnessSession {
   }
 
   async runExclusive<T>(run: () => Promise<T>): Promise<T> {
-    const waitForTurn = this.turnQueue;
-    let releaseTurn!: () => void;
+    await this.ensure();
 
-    this.turnQueue = new Promise((resolve) => {
-      releaseTurn = resolve;
+    return this.store.runExclusive(this.id, async () => {
+      await this.refreshFromStore();
+
+      const previousExclusiveSessionId = this.activeExclusiveSessionId;
+      this.activeExclusiveSessionId = this.id;
+
+      try {
+        return await run();
+      } finally {
+        this.activeExclusiveSessionId = previousExclusiveSessionId;
+      }
+    });
+  }
+
+  private async commitUnlocked(messages: Message[]): Promise<void> {
+    if (messages.length === 0) {
+      return;
+    }
+
+    const persistedMessages = messages.map((message) => cloneMessage(message));
+    const stateMessages = messages.map((message) => cloneMessage(message));
+    let nextUsage = cloneUsage(this.usageValue);
+    let nextContextSize = this.contextSizeValue;
+
+    for (const message of stateMessages) {
+      const usage = getMessageUsage(message);
+      nextUsage = addUsage(nextUsage, usage);
+
+      if (message.role === 'assistant' && message.usage) {
+        nextContextSize = getUsageTotalTokens(message.usage);
+      }
+    }
+
+    await this.store.commitTurn(this.id, persistedMessages, {
+      contextSize: nextContextSize,
+      createdAt: this.createdAt,
+      id: this.id,
+      usage: cloneUsage(nextUsage),
     });
 
-    await waitForTurn;
-
-    try {
-      return await run();
-    } finally {
-      releaseTurn();
+    for (const stateMessage of stateMessages) {
+      this.stateValue.messages.push(stateMessage);
     }
+
+    this.usageValue = nextUsage;
+    this.contextSizeValue = nextContextSize;
+
+    this.invalidateSnapshots();
   }
 
   private invalidateSnapshots(): void {
     this.messagesSnapshot = null;
     this.stateSnapshot = null;
   }
-
-  private getStoredState(): Omit<StoredSessionState, 'messages'> {
-    return {
-      contextSize: this.contextSizeValue,
-      createdAt: this.createdAt,
-      id: this.id,
-      usage: cloneUsage(this.usageValue),
-    };
-  }
-
   private hydrate(state: StoredSessionState): void {
     this.stateValue = cloneState(state);
     this.usageValue = cloneUsage(state.usage);
     this.contextSizeValue = state.contextSize;
   }
 
-  private updateMetrics(message: Message): void {
-    const usage = getMessageUsage(message);
-    this.usageValue = addUsage(this.usageValue, usage);
+  private async refreshFromStore(): Promise<void> {
+    const latestSession = await this.store.getSession(this.id);
 
-    if (message.role === 'assistant' && message.usage) {
-      this.contextSizeValue = getUsageTotalTokens(message.usage);
+    if (!latestSession) {
+      return;
     }
+
+    this.hydrate(latestSession);
+    this.invalidateSnapshots();
   }
 }

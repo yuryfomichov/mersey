@@ -1,5 +1,4 @@
-import type { TurnChunk } from './core/loop.js';
-import { asFinalMessage, createTurnStreamFactory } from './core/turn-stream.js';
+import { asFinalMessage, createTurnStreamFactory, type TurnStream } from './core/turn-stream.js';
 import { HarnessEventEmitter } from './events/emitter.js';
 import { HarnessEventReporter } from './events/reporter.js';
 import type { HarnessEventListener } from './events/types.js';
@@ -11,10 +10,20 @@ import type { Message } from './sessions/types.js';
 import { createToolRuntimeFactory } from './tools/runtime/index.js';
 import type { Tool } from './tools/types.js';
 
+export type HarnessSessionView = {
+  readonly createdAt: string;
+  readonly id: string;
+  readonly messages: readonly Message[];
+
+  ensure(): Promise<void>;
+  getContextSize(): Promise<number>;
+  getUsage(): Promise<import('./models/types.js').ModelUsage>;
+};
+
 export type Harness = {
-  session: HarnessSession;
-  sendMessage(content: string): Promise<Message>;
-  streamMessage(content: string): AsyncIterable<TurnChunk>;
+  session: HarnessSessionView;
+  sendMessage(content: string, options?: { signal?: AbortSignal }): Promise<Message>;
+  streamMessage(content: string, options?: { signal?: AbortSignal }): TurnStream;
   subscribe(listener: HarnessEventListener): () => void;
 };
 
@@ -72,12 +81,34 @@ export function createHarness(options: CreateHarnessOptions): Harness {
     systemPrompt: options.systemPrompt,
     toolRuntimeFactory,
   });
+  const sessionView: HarnessSessionView = {
+    get createdAt() {
+      return session.createdAt;
+    },
+    get id() {
+      return session.id;
+    },
+    get messages() {
+      return session.messages;
+    },
+    ensure() {
+      return session.ensure();
+    },
+    getContextSize() {
+      return session.getContextSize();
+    },
+    getUsage() {
+      return session.getUsage();
+    },
+  };
 
   return {
-    session,
-    sendMessage: asFinalMessage(streamTurn),
-    streamMessage(content: string): AsyncIterable<TurnChunk> {
-      return streamTurn(content);
+    session: sessionView,
+    sendMessage(content: string, options?: { signal?: AbortSignal }): Promise<Message> {
+      return asFinalMessage(streamTurn)(content, options?.signal);
+    },
+    streamMessage(content: string, options?: { signal?: AbortSignal }): TurnStream {
+      return streamTurn(content, true, options?.signal);
     },
     subscribe(listener: HarnessEventListener): () => void {
       return reporter.subscribe(listener);

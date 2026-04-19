@@ -49,3 +49,16 @@ test('executeToolCall returns tool results with tool metadata', async () => {
     assert.equal(result.content, 'hello from file');
   });
 });
+
+test('createToolRuntime rejects duplicate tool names', () => {
+  assert.throws(
+    () =>
+      createToolRuntime({
+        tools: [
+          new ReadFileTool({ policy: { workspaceRoot: process.cwd() } }),
+          new ReadFileTool({ policy: { workspaceRoot: process.cwd() } }),
+        ],
+      }),
+    /Duplicate tool name registered: read_file/,
+  );
+});

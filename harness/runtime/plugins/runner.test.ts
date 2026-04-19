@@ -13,6 +13,7 @@ import type {
   BeforeToolCallContext,
   HarnessPlugin,
   PrepareProviderRequestContext,
+  PrepareProviderRequestMessage,
 } from './types.js';
 
 function createTestReporter(): HarnessEventReporter {
@@ -42,6 +43,12 @@ function createBeforeProviderCallContext(): BeforeProviderCallContext {
     messageCountsByRole: { user: 1, assistant: 0, tool: 0 },
     model: 'test-model',
     providerName: 'test-provider',
+    request: {
+      messages: [{ content: 'hello', role: 'user' }],
+      stream: false,
+      systemPrompt: 'Be helpful.',
+      tools: [],
+    },
     sessionId: 'test-session',
     toolDefinitionNames: [],
     turnId: 'test-turn',
@@ -305,7 +312,7 @@ test('PluginRunner.runPrepareProviderRequest composes message replacement with p
 });
 
 test('PluginRunner.runPrepareProviderRequest passes rewritten request messages to later hooks', async () => {
-  let observedMessages: ModelRequest['messages'] | null = null;
+  let observedMessages: readonly PrepareProviderRequestMessage[] | null = null;
   const plugins: HarnessPlugin[] = [
     {
       name: 'plugin-a',
@@ -330,6 +337,134 @@ test('PluginRunner.runPrepareProviderRequest passes rewritten request messages t
   });
 
   assert.deepEqual(observedMessages, [{ content: 'summary', role: 'user' }]);
+});
+
+test('PluginRunner.runPrepareProviderRequest passes immutable request snapshots to hooks', async () => {
+  let mutationFailed = false;
+
+  const { runner } = createPluginRunnerWithPlugins([
+    {
+      name: 'plugin-a',
+      prepareProviderRequest(request) {
+        try {
+          (request.messages as PrepareProviderRequestMessage[]).push({ content: 'mutated', role: 'user' });
+        } catch {
+          mutationFailed = true;
+        }
+
+        return {};
+      },
+    },
+  ]);
+
+  await runner.runPrepareProviderRequest(createBaseRequest(), {
+    ...createPrepareProviderRequestContext(),
+  });
+
+  assert.equal(mutationFailed, true);
+});
+
+test('PluginRunner.runPrepareProviderRequest preserves assistant toolCalls in request snapshots', async () => {
+  let observedToolCalls: unknown;
+
+  const { runner } = createPluginRunnerWithPlugins([
+    {
+      name: 'plugin-a',
+      prepareProviderRequest(request) {
+        observedToolCalls = request.messages[1]?.role === 'assistant' ? request.messages[1].toolCalls : undefined;
+        return {};
+      },
+    },
+  ]);
+
+  await runner.runPrepareProviderRequest(
+    {
+      messages: [
+        { content: 'hello', role: 'user' },
+        {
+          content: '',
+          role: 'assistant',
+          toolCalls: [{ id: 'call-1', input: { path: 'note.txt' }, name: 'read_file' }],
+        },
+      ],
+      stream: false,
+    },
+    {
+      ...createPrepareProviderRequestContext(),
+    },
+  );
+
+  assert.deepEqual(observedToolCalls, [{ id: 'call-1', input: { path: 'note.txt' }, name: 'read_file' }]);
+});
+
+test('PluginRunner.runPrepareProviderRequest preserves tool result data in request snapshots', async () => {
+  let observedToolData: unknown;
+
+  const { runner } = createPluginRunnerWithPlugins([
+    {
+      name: 'plugin-a',
+      prepareProviderRequest(request) {
+        observedToolData = request.messages[1]?.role === 'tool' ? request.messages[1].data : undefined;
+        return {};
+      },
+    },
+  ]);
+
+  await runner.runPrepareProviderRequest(
+    {
+      messages: [
+        { content: 'hello', role: 'user' },
+        {
+          content: 'tool output',
+          data: { path: 'note.txt' },
+          name: 'read_file',
+          role: 'tool',
+          toolCallId: 'call-1',
+        },
+      ],
+      stream: false,
+    },
+    {
+      ...createPrepareProviderRequestContext(),
+    },
+  );
+
+  assert.deepEqual(observedToolData, { path: 'note.txt' });
+});
+
+test('PluginRunner request snapshots do not freeze live assistant toolCalls', async () => {
+  const request = createBaseRequest();
+
+  request.messages.push({
+    content: '',
+    role: 'assistant',
+    toolCalls: [{ id: 'call-1', input: { path: 'note.txt' }, name: 'read_file' }],
+  });
+
+  const { runner } = createPluginRunnerWithPlugins([
+    {
+      name: 'plugin-a',
+      prepareProviderRequest() {
+        return {};
+      },
+    },
+  ]);
+
+  await runner.runPrepareProviderRequest(request, {
+    ...createPrepareProviderRequestContext(),
+  });
+
+  const assistantMessage = request.messages[1];
+
+  if (!assistantMessage || assistantMessage.role !== 'assistant' || !assistantMessage.toolCalls) {
+    throw new Error('Expected assistant toolCalls in the live request.');
+  }
+
+  const toolCalls = assistantMessage.toolCalls;
+
+  assert.doesNotThrow(() => {
+    toolCalls.push({ id: 'call-2', input: { path: 'other.txt' }, name: 'read_file' });
+  });
 });
 
 test('PluginRunner.runPrepareProviderRequest allows hooks to explicitly clear systemPrompt', async () => {
@@ -707,6 +842,45 @@ test('PluginRunner converts async onEvent errors into hook_error events', async 
   assert.equal(hookError?.type === 'hook_error' ? hookError.pluginName : undefined, 'plugin-a');
   assert.equal(hookError?.type === 'hook_error' ? hookError.hookName : undefined, 'onEvent');
   assert.equal(hookError?.type === 'hook_error' ? hookError.errorMessage : undefined, 'Plugin hook failed.');
+});
+
+test('PluginRunner preserves the original turn id for async onEvent failures after turn_finished', async () => {
+  const events: HarnessEvent[] = [];
+  let rejectHook!: (error: Error) => void;
+  const hookFailure = new Promise<void>((_, reject) => {
+    rejectHook = reject;
+  });
+  const plugins: HarnessPlugin[] = [
+    {
+      name: 'plugin-a',
+      onEvent(event) {
+        if (event.type === 'turn_finished') {
+          return hookFailure;
+        }
+
+        return undefined;
+      },
+    },
+  ];
+
+  const { reporter } = createPluginRunnerWithPlugins(plugins);
+  reporter.subscribe((event) => {
+    events.push(event);
+  });
+
+  reporter.turnStarted(10);
+  const turnId = events.find((event) => event.type === 'turn_started' && event.userMessageLength === 10);
+  reporter.turnFinished(1, 0, 5);
+  rejectHook(new Error('late failure'));
+  await delay(0);
+
+  const hookError = events.find((event) => event.type === 'hook_error');
+
+  assert.equal(hookError?.type, 'hook_error');
+  assert.equal(
+    hookError?.type === 'hook_error' ? hookError.turnId : undefined,
+    turnId?.type === 'turn_started' ? turnId.turnId : undefined,
+  );
 });
 
 test('PluginRunner preserves the original turnId for async onEvent hook errors', async () => {

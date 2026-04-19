@@ -16,6 +16,7 @@ type TurnStreamOptions = {
   reporter: HarnessEventReporter;
   pluginRunner: PluginRunner;
   provider: ModelProvider;
+  signal?: AbortSignal;
   session: HarnessSession;
   stream: boolean;
   systemPrompt?: string;
@@ -28,7 +29,11 @@ export type TurnStreamFactoryOptions = Omit<TurnStreamOptions, 'content' | 'stre
 
 export type TurnStream = AsyncIterable<TurnChunk> & AsyncIterator<TurnChunk>;
 
-export type TurnStreamFactory = (content: string, stream?: boolean) => TurnStream;
+export type TurnStreamFactory = (content: string, stream?: boolean, signal?: AbortSignal) => TurnStream;
+
+function isAbortReason(error: unknown, signal: AbortSignal): boolean {
+  return error === signal.reason || (error instanceof Error && error.name === 'AbortError');
+}
 
 /**
  * Executes a single turn (user message → model response → optional tool calls)
@@ -61,6 +66,7 @@ function createTurnStream({
   reporter,
   pluginRunner,
   provider,
+  signal,
   session,
   stream,
   systemPrompt,
@@ -68,6 +74,9 @@ function createTurnStream({
 }: TurnStreamOptions): AsyncIterable<TurnChunk> & AsyncIterator<TurnChunk> {
   const queue = createAsyncQueue<TurnChunk>();
   const abortController = new AbortController();
+  const onAbort = () => {
+    abortController.abort(signal?.reason);
+  };
   let backgroundTask: Promise<void> | null = null;
   let started = false;
 
@@ -77,6 +86,12 @@ function createTurnStream({
     }
 
     started = true;
+
+    if (signal?.aborted) {
+      onAbort();
+    } else {
+      signal?.addEventListener('abort', onAbort, { once: true });
+    }
 
     backgroundTask = session.runExclusive(async () => {
       let turnId: string | null = null;
@@ -103,6 +118,7 @@ function createTurnStream({
           toolRuntimeFactory,
         });
         let turnMessages: Message[] = [];
+        let finalMessageChunk: TurnChunk | null = null;
 
         while (true) {
           const result = await iterator.next();
@@ -110,6 +126,11 @@ function createTurnStream({
           if (result.done) {
             turnMessages = result.value;
             break;
+          }
+
+          if (result.value.type === 'final_message') {
+            finalMessageChunk = snapshot(result.value);
+            continue;
           }
 
           queue.push(snapshot(result.value));
@@ -129,6 +150,10 @@ function createTurnStream({
 
         await session.commit(turnMessages);
 
+        if (finalMessageChunk) {
+          queue.push(finalMessageChunk);
+        }
+
         if (afterTurnCommittedContext) {
           pluginRunner.runAfterTurnCommitted(afterTurnCommittedContext);
         }
@@ -138,6 +163,7 @@ function createTurnStream({
         queue.fail(error);
         throw error;
       } finally {
+        signal?.removeEventListener('abort', onAbort);
         unsubscribe();
       }
     });
@@ -162,7 +188,16 @@ function createTurnStream({
 
       return (async () => {
         await (queue.iterable.return?.() ?? Promise.resolve({ done: true, value: undefined }));
-        await backgroundTask?.catch(() => {});
+
+        if (backgroundTask) {
+          try {
+            await backgroundTask;
+          } catch (error: unknown) {
+            if (!isAbortReason(error, abortController.signal)) {
+              throw error;
+            }
+          }
+        }
 
         return { done: true, value: undefined };
       })();
@@ -171,19 +206,22 @@ function createTurnStream({
 }
 
 export function createTurnStreamFactory(options: TurnStreamFactoryOptions): TurnStreamFactory {
-  return (content: string, stream = true) =>
+  return (content: string, stream = true, signal?: AbortSignal) =>
     createTurnStream({
       ...options,
       content,
+      signal,
       stream,
     });
 }
 
-export function asFinalMessage(factory: TurnStreamFactory): (content: string) => Promise<Message> {
-  return async (content: string): Promise<Message> => {
+export function asFinalMessage(
+  factory: TurnStreamFactory,
+): (content: string, signal?: AbortSignal) => Promise<Message> {
+  return async (content: string, signal?: AbortSignal): Promise<Message> => {
     let finalMessage: Message | null = null;
 
-    for await (const chunk of factory(content, false)) {
+    for await (const chunk of factory(content, false, signal)) {
       if (chunk.type === 'final_message') {
         finalMessage = chunk.message;
       }

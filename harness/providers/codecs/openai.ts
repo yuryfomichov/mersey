@@ -111,15 +111,24 @@ export class OpenAICodec {
       return schema;
     }
 
-    const normalizedEntries = Object.entries(schema).map(([key, value]) => {
+    const objectSchema = schema as Record<string, unknown>;
+    const requiredProperties = new Set(Array.isArray(objectSchema.required) ? objectSchema.required : []);
+
+    const normalizedEntries = Object.entries(objectSchema).map(([key, value]) => {
       if (key === 'properties' && value && typeof value === 'object' && !Array.isArray(value)) {
         return [
           key,
           Object.fromEntries(
-            Object.entries(value).map(([propertyName, propertySchema]) => [
-              propertyName,
-              this.normalizeObjectSchema(propertySchema),
-            ]),
+            Object.entries(value).map(([propertyName, propertySchema]) => {
+              const normalizedPropertySchema = this.normalizeObjectSchema(propertySchema);
+
+              return [
+                propertyName,
+                requiredProperties.has(propertyName)
+                  ? normalizedPropertySchema
+                  : this.makeSchemaNullable(normalizedPropertySchema),
+              ];
+            }),
           ),
         ];
       }
@@ -138,21 +147,70 @@ export class OpenAICodec {
     const normalizedSchema = Object.fromEntries(normalizedEntries);
 
     if (normalizedSchema.type === 'object') {
-      const propertyNames =
+      const properties =
         normalizedSchema.properties &&
         typeof normalizedSchema.properties === 'object' &&
         !Array.isArray(normalizedSchema.properties)
-          ? Object.keys(normalizedSchema.properties)
-          : [];
+          ? normalizedSchema.properties
+          : {};
 
       return {
         ...normalizedSchema,
         additionalProperties: normalizedSchema.additionalProperties ?? false,
-        required: propertyNames,
+        required: Object.keys(properties),
       };
     }
 
     return normalizedSchema;
+  }
+
+  private makeSchemaNullable(schema: unknown): unknown {
+    if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
+      return { anyOf: [schema, { type: 'null' }] };
+    }
+
+    const objectSchema = schema as Record<string, unknown>;
+
+    if (typeof objectSchema.type === 'string') {
+      if (objectSchema.type === 'null') {
+        return schema;
+      }
+
+      return {
+        ...objectSchema,
+        type: [objectSchema.type, 'null'],
+      };
+    }
+
+    if (Array.isArray(objectSchema.type)) {
+      if (objectSchema.type.includes('null')) {
+        return schema;
+      }
+
+      return {
+        ...objectSchema,
+        type: [...objectSchema.type, 'null'],
+      };
+    }
+
+    if (Array.isArray(objectSchema.anyOf)) {
+      if (
+        objectSchema.anyOf.some(
+          (entry) => entry && typeof entry === 'object' && !Array.isArray(entry) && entry.type === 'null',
+        )
+      ) {
+        return schema;
+      }
+
+      return {
+        ...objectSchema,
+        anyOf: [...objectSchema.anyOf, { type: 'null' }],
+      };
+    }
+
+    return {
+      anyOf: [schema, { type: 'null' }],
+    };
   }
 
   private parseToolInput(argumentsText: string): Record<string, unknown> {

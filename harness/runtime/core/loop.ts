@@ -1,8 +1,8 @@
 import { getMessageCountsByRole, HarnessEventReporter } from '../events/reporter.js';
 import type { ModelProvider } from '../models/provider.js';
 import type { ModelMessage, ModelRequest, ModelResponse } from '../models/types.js';
+import { toPrepareProviderRequestTranscript, toProviderRequestSnapshot } from '../plugins/request-snapshots.js';
 import type { PluginRunner } from '../plugins/runner.js';
-import type { PrepareProviderRequestMessage } from '../plugins/types.js';
 import type { Message } from '../sessions/types.js';
 import type { ToolRuntimeFactory } from '../tools/runtime/index.js';
 import { freezeDeep } from '../utils/object.js';
@@ -86,33 +86,7 @@ function toModelMessages(messages: readonly Message[]): ModelMessage[] {
       return {
         content: message.content,
         role: 'assistant',
-        toolCalls: message.toolCalls,
-      };
-    }
-
-    return {
-      content: message.content,
-      role: 'user',
-    };
-  });
-}
-
-function toPrepareProviderRequestTranscript(messages: readonly Message[]): PrepareProviderRequestMessage[] {
-  return messages.map((message) => {
-    if (message.role === 'tool') {
-      return {
-        content: message.content,
-        isError: message.isError,
-        name: message.name,
-        role: 'tool',
-        toolCallId: message.toolCallId,
-      };
-    }
-
-    if (message.role === 'assistant') {
-      return {
-        content: message.content,
-        role: 'assistant',
+        ...(message.toolCalls ? { toolCalls: structuredClone(message.toolCalls) } : {}),
       };
     }
 
@@ -282,26 +256,6 @@ export async function* streamLoop({
       currentIteration += 1;
       reporter.iterationStarted(currentIteration, transcript.length);
 
-      const providerCtx = {
-        iteration: currentIteration,
-        messageCount: transcript.length,
-        messageCountsByRole: getMessageCountsByRole(modelMessages),
-        model: provider.model,
-        providerName: provider.name,
-        sessionId: reporter.getSessionId(),
-        toolDefinitionNames: toolRuntime.toolDefinitions?.map((t) => t.name) ?? [],
-        turnId: reporter.getTurnId(),
-      };
-
-      const providerDecision = await pluginRunner.runBeforeProviderCall(providerCtx);
-
-      if (providerDecision.continue === false) {
-        currentErrorType = 'provider';
-        const exposeToModel = providerDecision.exposeToModel ?? false;
-        reporter.providerBlocked(currentIteration, providerDecision.reason, exposeToModel);
-        throw new Error(exposeToModel ? providerDecision.reason : 'Provider request blocked by policy.');
-      }
-
       let request: ModelRequest = {
         messages: modelMessages,
         signal,
@@ -326,6 +280,26 @@ export async function* streamLoop({
             role: 'user' as const,
           }),
         });
+      }
+      const providerCtx = {
+        iteration: currentIteration,
+        messageCount: request.messages.length,
+        messageCountsByRole: getMessageCountsByRole(request.messages),
+        model: provider.model,
+        providerName: provider.name,
+        request: toProviderRequestSnapshot(request),
+        sessionId: reporter.getSessionId(),
+        toolDefinitionNames: request.tools?.map((tool) => tool.name) ?? [],
+        turnId: reporter.getTurnId(),
+      };
+
+      const providerDecision = await pluginRunner.runBeforeProviderCall(providerCtx);
+
+      if (providerDecision.continue === false) {
+        currentErrorType = 'provider';
+        const exposeToModel = providerDecision.exposeToModel ?? false;
+        reporter.providerBlocked(currentIteration, providerDecision.reason, exposeToModel);
+        throw new Error(exposeToModel ? providerDecision.reason : 'Provider request blocked by policy.');
       }
 
       reporter.providerRequested(currentIteration, request, provider);
