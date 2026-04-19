@@ -233,7 +233,9 @@ export function createPluginRunner(options: PluginRunnerOptions): PluginRunner {
 }
 
 function isAbortError(error: unknown, signal?: AbortSignal): boolean {
-  return error === signal?.reason || (error instanceof Error && error.name === 'AbortError');
+  return (
+    signal?.aborted === true && (error === signal.reason || (error instanceof Error && error.name === 'AbortError'))
+  );
 }
 
 function hasPrepareProviderRequestHook(plugin: HarnessPlugin): plugin is PrepareProviderRequestPlugin {

@@ -167,7 +167,9 @@ function getMemoryLabel(memory: MemoryItem, index: number): string {
 }
 
 function isAbortError(error: unknown, signal?: AbortSignal): boolean {
-  return error === signal?.reason || (error instanceof Error && error.name === 'AbortError');
+  return (
+    signal?.aborted === true && (error === signal.reason || (error instanceof Error && error.name === 'AbortError'))
+  );
 }
 
 function toMemoryRememberContext(ctx: AfterTurnCommittedContext): MemoryRememberContext {

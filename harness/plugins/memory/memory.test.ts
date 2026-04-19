@@ -188,6 +188,22 @@ test('createMemoryPlugin does not swallow abort errors when swallowRecallErrors 
   );
 });
 
+test('createMemoryPlugin swallows backend-local AbortError when the turn signal is not aborted', async () => {
+  const plugin = createMemoryPlugin({
+    async recall() {
+      const error = new Error('backend timeout');
+      error.name = 'AbortError';
+      throw error;
+    },
+    async remember() {},
+    swallowRecallErrors: true,
+  });
+
+  const result = await plugin.prepareProviderRequest?.(createBaseRequest(), createPrepareContext());
+
+  assert.deepEqual(result, {});
+});
+
 test('createMemoryPlugin lets recall errors fail when swallowing is disabled', async () => {
   const plugin = createMemoryPlugin({
     async recall() {

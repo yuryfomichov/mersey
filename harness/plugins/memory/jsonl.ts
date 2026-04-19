@@ -1,5 +1,7 @@
-import { appendFile, mkdir, readFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { appendFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { createInterface } from 'node:readline';
 
 import type { HarnessPlugin } from '../../runtime/plugins/types.js';
 import { createMemoryPlugin } from './memory.js';
@@ -20,6 +22,8 @@ type StoredMemoryRecord = {
   sessionId: string;
   turnId: string;
 };
+
+const MAX_STORED_RECORDS = 2_000;
 
 export function createJsonlMemoryPlugin(options: JsonlMemoryPluginOptions): HarnessPlugin {
   return createMemoryPlugin({
@@ -45,32 +49,40 @@ export function createJsonlMemoryPlugin(options: JsonlMemoryPluginOptions): Harn
 }
 
 async function readStoredMemories(filePath: string, signal?: AbortSignal): Promise<StoredMemoryRecord[]> {
-  let contents: string;
+  const records: StoredMemoryRecord[] = [];
+  const stream = createReadStream(filePath, { encoding: 'utf8' });
+  const lines = createInterface({ crlfDelay: Number.POSITIVE_INFINITY, input: stream });
 
   try {
     signal?.throwIfAborted();
-    contents = await readFile(filePath, { encoding: 'utf8', signal });
+
+    for await (const rawLine of lines) {
+      signal?.throwIfAborted();
+      const line = rawLine.trim();
+
+      if (line.length === 0) {
+        continue;
+      }
+
+      try {
+        records.push(parseStoredMemoryRecord(line));
+
+        if (records.length > MAX_STORED_RECORDS) {
+          records.shift();
+        }
+      } catch {
+        continue;
+      }
+    }
   } catch (error: unknown) {
     if (isMissingPathError(error)) {
       return [];
     }
 
     throw error;
-  }
-
-  const records: StoredMemoryRecord[] = [];
-
-  for (const line of contents
-    .split(/\r?\n/)
-    .map((entry) => entry.trim())
-    .filter(Boolean)) {
-    signal?.throwIfAborted();
-
-    try {
-      records.push(parseStoredMemoryRecord(line));
-    } catch {
-      continue;
-    }
+  } finally {
+    lines.close();
+    stream.destroy();
   }
 
   return records;
@@ -180,7 +192,7 @@ function toStoredMemoryRecord(ctx: MemoryRememberContext): StoredMemoryRecord | 
 }
 
 function tokenize(text: string): string[] {
-  return text.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
 }
 
 function isMissingPathError(error: unknown): boolean {
