@@ -1,4 +1,5 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { mkdir, open } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import { z } from 'zod';
@@ -48,7 +49,19 @@ export class WriteFileTool implements Tool {
     await mkdir(dirname(resolvedPath), { recursive: true });
 
     try {
-      await writeFile(resolvedPath, content, { encoding: 'utf8', flag: overwrite ? 'w' : 'wx' });
+      const fileHandle = await open(
+        resolvedPath,
+        overwrite
+          ? constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW
+          : constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+        0o666,
+      );
+
+      try {
+        await fileHandle.writeFile(content, { encoding: 'utf8' });
+      } finally {
+        await fileHandle.close();
+      }
     } catch (error: unknown) {
       const errorCode = error instanceof Error && 'code' in error ? error.code : undefined;
 

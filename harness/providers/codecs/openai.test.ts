@@ -89,7 +89,7 @@ test('getTools adds strict object requirements to function schemas', () => {
             properties: {
               path: { type: 'string' },
             },
-            required: ['path'],
+            required: [],
             type: 'object',
           },
         },
@@ -102,7 +102,7 @@ test('getTools adds strict object requirements to function schemas', () => {
   ]);
 });
 
-test('getTools requires every declared property for strict OpenAI schemas', () => {
+test('getTools preserves optional properties from the provider-agnostic schema', () => {
   const request: ModelRequest = {
     messages: [{ content: 'hello', role: 'user' }],
     stream: false,
@@ -134,7 +134,7 @@ test('getTools requires every declared property for strict OpenAI schemas', () =
           overwrite: { type: 'boolean' },
           path: { type: 'string' },
         },
-        required: ['content', 'overwrite', 'path'],
+        required: ['content', 'path'],
         type: 'object',
       },
       strict: true,

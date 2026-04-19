@@ -1,5 +1,5 @@
 import { realpath, stat } from 'node:fs/promises';
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 type ResolvePathInWorkspaceOptions = {
   allowMissing?: boolean;
@@ -18,12 +18,15 @@ function getWorkspacePathError(path: string, toolName: string): Error {
   return new Error(`${toolName} path must stay inside workspace root: ${path}`);
 }
 
-async function getClosestExistingPath(path: string): Promise<string> {
+async function resolveMissingPath(path: string): Promise<string> {
   let currentPath = path;
+  const missingSegments: string[] = [];
 
   while (true) {
     try {
-      return await realpath(currentPath);
+      const canonicalPath = await realpath(currentPath);
+
+      return missingSegments.length > 0 ? join(canonicalPath, ...missingSegments) : canonicalPath;
     } catch (error: unknown) {
       const errorCode = error instanceof Error && 'code' in error ? error.code : undefined;
 
@@ -37,6 +40,7 @@ async function getClosestExistingPath(path: string): Promise<string> {
         throw error;
       }
 
+      missingSegments.unshift(basename(currentPath));
       currentPath = parentPath;
     }
   }
@@ -62,13 +66,11 @@ export async function resolvePathInWorkspace(
     throw getWorkspacePathError(resolvedPath, options.toolName);
   }
 
-  const comparablePath = options.allowMissing
-    ? await getClosestExistingPath(resolvedPath)
-    : await realpath(resolvedPath);
+  const comparablePath = options.allowMissing ? await resolveMissingPath(resolvedPath) : await realpath(resolvedPath);
 
   if (!isPathInWorkspace(comparablePath, canonicalWorkspaceRoot)) {
     throw getWorkspacePathError(resolvedPath, options.toolName);
   }
 
-  return resolvedPath;
+  return comparablePath;
 }

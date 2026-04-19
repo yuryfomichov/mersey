@@ -182,11 +182,19 @@ test('event logging plugins preserve write order under concurrent calls', async 
   }
 });
 
-test('event logging plugins isolate file write failures', async () => {
-  const badPath = '/definitely-missing/path/runtime.log';
-  const plugin = createTextEventLoggingPlugin({ path: badPath });
+test('event logging plugins create parent directories on demand', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'mersey-plugin-logger-'));
 
-  assert.doesNotThrow(() => {
-    plugin.onEvent?.(createIterationEvent(1), PLUGIN_CTX);
-  });
+  try {
+    const path = join(rootDir, 'nested', 'runtime.log');
+    const plugin = createTextEventLoggingPlugin({ path });
+
+    await plugin.onEvent?.(createIterationEvent(1), PLUGIN_CTX);
+
+    const contents = await readFile(path, 'utf8');
+
+    assert.match(contents, /iteration_started/);
+  } finally {
+    await rm(rootDir, { force: true, recursive: true });
+  }
 });

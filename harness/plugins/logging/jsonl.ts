@@ -12,7 +12,7 @@ export function createJsonlEventLoggingPlugin(options: JsonlEventLoggingPluginOp
   return {
     name: options.name ?? 'jsonl-event-logger',
     onEvent(event: HarnessEvent): Promise<void> {
-      return writeLine(`${JSON.stringify(event)}\n`).catch(() => {});
+      return writeLine(`${JSON.stringify(event)}\n`);
     },
   };
 }

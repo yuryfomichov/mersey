@@ -73,7 +73,7 @@ test('createHarness uses the injected provider and appends session history', asy
     ],
   );
   assert.deepEqual(
-    (await sessionStore.listMessages('test-session')).map((message) => message.content),
+    (await sessionStore.getSession('test-session'))?.messages.map((message) => message.content),
     ['hello', 'reply:hello'],
   );
 });
@@ -87,13 +87,10 @@ test('createHarness emits events with the canonical session id after ensure', as
     }
 
     override async createSession(session: SessionState): Promise<StoredSessionState> {
-      return {
+      return super.createSession({
         ...session,
-        contextSize: 0,
         id: 'canonical-session',
-        messages: [],
-        usage: createEmptyModelUsage(),
-      };
+      });
     }
   }
 
@@ -170,9 +167,163 @@ test('createHarness serializes concurrent sendMessage calls for one session', as
   assert.equal(secondReply.content, 'reply:second');
   assert.deepEqual(requests[1]?.messages, [
     { content: 'first', role: 'user' },
-    { content: 'reply:first', role: 'assistant', toolCalls: undefined },
+    { content: 'reply:first', role: 'assistant' },
     { content: 'second', role: 'user' },
   ]);
+});
+
+test('createHarness serializes turns after canonical session id hydration', async () => {
+  let releaseFirstRequest!: () => void;
+  let firstRequestStarted!: () => void;
+
+  const firstRequestStartedPromise = new Promise<void>((resolve) => {
+    firstRequestStarted = resolve;
+  });
+  const releaseFirstRequestPromise = new Promise<void>((resolve) => {
+    releaseFirstRequest = resolve;
+  });
+
+  class CanonicalSessionStore extends MemorySessionStore {
+    override async getSession(sessionId: string): Promise<StoredSessionState | null> {
+      return super.getSession(sessionId === 'shared-session' ? sessionId : 'shared-session');
+    }
+
+    override async createSession(session: SessionState): Promise<StoredSessionState> {
+      return super.createSession({
+        ...session,
+        id: 'shared-session',
+      });
+    }
+  }
+
+  const requests: ModelRequest[] = [];
+  const provider: ModelProvider = {
+    model: 'fake-model',
+    name: 'fake',
+    async *generate(input: ModelRequest): AsyncIterable<ModelStreamEvent> {
+      requests.push(input);
+
+      const lastMessage = input.messages.at(-1);
+
+      if (lastMessage?.role !== 'user') {
+        throw new Error('Expected the last message to be a user message.');
+      }
+
+      if (lastMessage.content === 'first') {
+        firstRequestStarted();
+        await releaseFirstRequestPromise;
+      }
+
+      yield {
+        response: { text: `reply:${lastMessage.content}`, usage: createEmptyModelUsage() },
+        type: 'response_completed',
+      };
+    },
+  };
+  const sessionStore = new CanonicalSessionStore();
+  const firstHarness = createHarness({
+    providerInstance: provider,
+    session: createTestSession(sessionStore, 'local-a'),
+  });
+  const secondHarness = createHarness({
+    providerInstance: provider,
+    session: createTestSession(sessionStore, 'local-b'),
+  });
+
+  const firstReplyPromise = firstHarness.sendMessage('first');
+
+  await firstRequestStartedPromise;
+
+  const secondReplyPromise = secondHarness.sendMessage('second');
+
+  await delay(0);
+  assert.equal(requests.length, 1);
+
+  releaseFirstRequest();
+
+  const [firstReply, secondReply] = await Promise.all([firstReplyPromise, secondReplyPromise]);
+
+  assert.equal(firstReply.content, 'reply:first');
+  assert.equal(secondReply.content, 'reply:second');
+  assert.deepEqual(requests[1]?.messages, [
+    { content: 'first', role: 'user' },
+    { content: 'reply:first', role: 'assistant' },
+    { content: 'second', role: 'user' },
+  ]);
+});
+
+test('createHarness sendMessage supports explicit cancellation', async () => {
+  const controller = new AbortController();
+  const provider: ModelProvider = {
+    model: 'abortable-model',
+    name: 'abortable',
+    async *generate(input: ModelRequest): AsyncIterable<ModelStreamEvent> {
+      await new Promise((_, reject) => {
+        input.signal?.addEventListener(
+          'abort',
+          () => {
+            reject(input.signal?.reason);
+          },
+          { once: true },
+        );
+      });
+    },
+  };
+  const harness = createTestHarness({
+    providerInstance: provider,
+    sessionStore: new MemorySessionStore(),
+  });
+
+  const pendingReply = harness.sendMessage('hello', { signal: controller.signal });
+  controller.abort();
+
+  await assert.rejects(
+    async () => {
+      await pendingReply;
+    },
+    { name: 'AbortError' },
+  );
+  assert.deepEqual(harness.session.messages, []);
+});
+
+test('createHarness streamMessage supports explicit cancellation', async () => {
+  const controller = new AbortController();
+  const provider: ModelProvider = {
+    model: 'abortable-model',
+    name: 'abortable',
+    async *generate(input: ModelRequest): AsyncIterable<ModelStreamEvent> {
+      yield { delta: 'partial', type: 'text_delta' };
+
+      await new Promise((_, reject) => {
+        input.signal?.addEventListener(
+          'abort',
+          () => {
+            reject(input.signal?.reason);
+          },
+          { once: true },
+        );
+      });
+    },
+  };
+  const harness = createTestHarness({
+    providerInstance: provider,
+    sessionStore: new MemorySessionStore(),
+  });
+  const iterator = harness.streamMessage('hello', { signal: controller.signal })[Symbol.asyncIterator]();
+
+  const firstChunk = await iterator.next();
+  assert.equal(firstChunk.value?.type, 'assistant_delta');
+
+  const nextChunk = iterator.next();
+  controller.abort();
+
+  await assert.rejects(
+    async () => {
+      await nextChunk;
+    },
+    { name: 'AbortError' },
+  );
+  assert.deepEqual(harness.session.messages, []);
 });
 
 test('createHarness emits live events in stable order without leaking raw content', async () => {

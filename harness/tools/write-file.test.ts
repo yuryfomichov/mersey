@@ -173,3 +173,38 @@ test('WriteFileTool supports tool-specific denylist rules in shared policy', asy
     await rm(rootDir, { force: true, recursive: true });
   }
 });
+
+test('WriteFileTool rejects symlink swaps between validation and file open', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
+  const outsidePath = join(rootDir, '..outside.txt');
+
+  try {
+    await writeFile(outsidePath, 'outside secret', 'utf8');
+
+    const tool = new WriteFileTool({ policy: { workspaceRoot: rootDir } });
+    const files = (
+      tool as unknown as {
+        files: {
+          resolveForWrite(path: string, toolName: string): Promise<string>;
+        };
+      }
+    ).files;
+    const originalResolveForWrite = files.resolveForWrite.bind(files);
+
+    files.resolveForWrite = async (path, toolName) => {
+      const resolvedPath = await originalResolveForWrite(path, toolName);
+
+      await symlink(outsidePath, resolvedPath);
+
+      return resolvedPath;
+    };
+
+    await assert.rejects(
+      () => tool.execute({ content: 'hello', path: 'note.txt' }, createToolExecutionContext()),
+      /ELOOP|too many symbolic links|refuses to overwrite existing files/,
+    );
+  } finally {
+    await rm(rootDir, { force: true, recursive: true });
+    await rm(outsidePath, { force: true });
+  }
+});

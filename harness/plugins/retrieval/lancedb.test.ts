@@ -291,3 +291,53 @@ test('LanceDB retrieval plugin injects indexed context without persisting it to 
     );
   });
 });
+
+test('LanceDB retrieval plugin retries after an initial table-open failure', async () => {
+  await withTempDir(async (rootDir) => {
+    const dbPath = join(rootDir, 'rag-db');
+    const plugin = createLanceDbRetrievalPlugin({
+      dbPath,
+      embedQuery: async (text) => embedText(text),
+      topK: 1,
+    });
+
+    await assert.rejects(
+      async () =>
+        plugin.prepareProviderRequest?.(
+          {
+            messages: [{ content: 'payments', role: 'user' }],
+            stream: false,
+            systemPrompt: 'Be helpful.',
+            tools: [],
+          },
+          createPrepareContext(),
+        ),
+      /table .*not found|does not exist|was not found/i,
+    );
+
+    await buildLanceDbIndex({
+      dbPath,
+      documents: [
+        {
+          content: 'Built a payments platform for global merchants.',
+          id: 'resume-1',
+          source: 'resume.md',
+        },
+      ],
+      embedDocuments: async (texts) => texts.map(embedText),
+      replace: true,
+    });
+
+    const result = await plugin.prepareProviderRequest?.(
+      {
+        messages: [{ content: 'payments', role: 'user' }],
+        stream: false,
+        systemPrompt: 'Be helpful.',
+        tools: [],
+      },
+      createPrepareContext(),
+    );
+
+    assert.match(result?.prependMessages?.[0]?.content ?? '', /payments platform/);
+  });
+});

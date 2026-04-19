@@ -1,31 +1,59 @@
-import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import { createEmptyModelUsage } from '../runtime/models/types.js';
 import type { SessionStore } from '../runtime/sessions/store.js';
 import type { Message, SessionState, StoredSessionState } from '../runtime/sessions/types.js';
+import { SessionTurnLockMap } from './exclusive.js';
 import { assertValidSessionId } from './utils.js';
 
 export type FilesystemSessionStoreOptions = {
   rootDir?: string;
 };
 
-type SessionMetadata = Omit<StoredSessionState, 'messages'>;
+type SessionLockContents = {
+  createdAt: number;
+  pid: number;
+};
 
 function isErrnoCode(error: unknown, code: string): boolean {
   return error instanceof Error && 'code' in error && error.code === code;
 }
 
+function cloneMessage<T extends Message>(message: T): T {
+  return structuredClone(message);
+}
+
+const LOCK_RETRY_MS = 10;
+const LOCK_STARTUP_GRACE_MS = 100;
+
 export class FilesystemSessionStore implements SessionStore {
+  private static readonly processLocks = new SessionTurnLockMap();
   private readonly rootDir: string;
 
   constructor(options: FilesystemSessionStoreOptions = {}) {
     this.rootDir = options.rootDir ?? join(process.cwd(), 'tmp', 'sessions');
   }
 
-  async appendMessage(sessionId: string, message: Message): Promise<void> {
-    await mkdir(this.getSessionDir(sessionId), { recursive: true });
-    await appendFile(this.getMessagesPath(sessionId), `${JSON.stringify(message)}\n`, 'utf8');
+  async commitTurn(
+    sessionId: string,
+    turnMessages: readonly Message[],
+    state: Omit<StoredSessionState, 'messages'>,
+  ): Promise<void> {
+    const existingSession = await this.getSession(sessionId);
+
+    if (!existingSession) {
+      throw new Error(`Session does not exist: ${sessionId}`);
+    }
+
+    await this.writeSession(sessionId, {
+      contextSize: state.contextSize,
+      createdAt: state.createdAt,
+      id: state.id,
+      messages: [...existingSession.messages.map(cloneMessage), ...turnMessages.map(cloneMessage)],
+      usage: structuredClone(state.usage),
+    });
   }
 
   async createSession(session: SessionState): Promise<StoredSessionState> {
@@ -35,21 +63,20 @@ export class FilesystemSessionStore implements SessionStore {
       return existingSession;
     }
 
-    const sessionDir = this.getSessionDir(session.id);
-    const sessionPath = this.getSessionPath(session.id);
-    const messagesPath = this.getMessagesPath(session.id);
-
-    await mkdir(sessionDir, { recursive: true });
-
-    const metadata: SessionMetadata = {
+    const storedSession: StoredSessionState = {
       contextSize: 0,
-      id: session.id,
       createdAt: session.createdAt,
+      id: session.id,
+      messages: [],
       usage: createEmptyModelUsage(),
     };
 
+    const sessionDir = this.getSessionDir(session.id);
+
+    await mkdir(sessionDir, { recursive: true });
+
     try {
-      await writeFile(sessionPath, `${JSON.stringify(metadata, null, 2)}\n`, {
+      await writeFile(this.getSessionPath(session.id), `${JSON.stringify(storedSession, null, 2)}\n`, {
         encoding: 'utf8',
         flag: 'wx',
       });
@@ -65,37 +92,12 @@ export class FilesystemSessionStore implements SessionStore {
       throw error;
     }
 
-    try {
-      await writeFile(messagesPath, '', {
-        encoding: 'utf8',
-        flag: 'wx',
-      });
-    } catch (error: unknown) {
-      if (!isErrnoCode(error, 'EEXIST')) {
-        throw error;
-      }
-    }
-
-    return {
-      contextSize: 0,
-      id: session.id,
-      createdAt: session.createdAt,
-      messages: [],
-      usage: createEmptyModelUsage(),
-    };
+    return storedSession;
   }
 
   async getSession(sessionId: string): Promise<StoredSessionState | null> {
     try {
-      const metadata = await this.readMetadata(sessionId);
-
-      return {
-        contextSize: metadata.contextSize,
-        id: metadata.id,
-        createdAt: metadata.createdAt,
-        messages: await this.listMessages(sessionId),
-        usage: metadata.usage,
-      };
+      return await this.readSession(sessionId);
     } catch (error: unknown) {
       if (isErrnoCode(error, 'ENOENT')) {
         return null;
@@ -105,29 +107,10 @@ export class FilesystemSessionStore implements SessionStore {
     }
   }
 
-  async listMessages(sessionId: string): Promise<Message[]> {
-    try {
-      const contents = await readFile(this.getMessagesPath(sessionId), 'utf8');
-      const lines = contents.split('\n').filter(Boolean);
-
-      return lines.flatMap((line) => {
-        try {
-          return [JSON.parse(line) as Message];
-        } catch {
-          return [];
-        }
-      });
-    } catch (error: unknown) {
-      if (isErrnoCode(error, 'ENOENT')) {
-        return [];
-      }
-
-      throw error;
-    }
-  }
-
-  private getMessagesPath(sessionId: string): string {
-    return join(this.getSessionDir(sessionId), 'messages.jsonl');
+  async runExclusive<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
+    return FilesystemSessionStore.processLocks.runExclusive(this.getLockKey(sessionId), async () =>
+      this.withSessionLock(sessionId, run),
+    );
   }
 
   private getSessionDir(sessionId: string): string {
@@ -139,18 +122,119 @@ export class FilesystemSessionStore implements SessionStore {
     return join(this.getSessionDir(sessionId), 'session.json');
   }
 
-  private async readMetadata(sessionId: string): Promise<SessionMetadata> {
+  private getLockKey(sessionId: string): string {
+    return `${this.rootDir}:${sessionId}`;
+  }
+
+  private getLockPath(sessionId: string): string {
+    return join(this.getSessionDir(sessionId), 'session.lock');
+  }
+
+  private async readSession(sessionId: string): Promise<StoredSessionState> {
     const contents = await readFile(this.getSessionPath(sessionId), 'utf8');
-    return JSON.parse(contents) as SessionMetadata;
+
+    return JSON.parse(contents) as StoredSessionState;
   }
 
-  private async writeMetadata(sessionId: string, metadata: SessionMetadata): Promise<void> {
-    await writeFile(this.getSessionPath(sessionId), `${JSON.stringify(metadata, null, 2)}\n`, {
+  private async writeSession(sessionId: string, session: StoredSessionState): Promise<void> {
+    const sessionDir = this.getSessionDir(sessionId);
+    const sessionPath = this.getSessionPath(sessionId);
+    const tempPath = join(sessionDir, `${sessionId}.tmp-${process.pid}-${Date.now()}`);
+
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(tempPath, `${JSON.stringify(session, null, 2)}\n`, {
       encoding: 'utf8',
+      flag: 'w',
     });
+    await rename(tempPath, sessionPath);
   }
 
-  async writeState(sessionId: string, state: Omit<StoredSessionState, 'messages'>): Promise<void> {
-    await this.writeMetadata(sessionId, state);
+  private async withSessionLock<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
+    const sessionDir = this.getSessionDir(sessionId);
+    const lockPath = this.getLockPath(sessionId);
+
+    await mkdir(sessionDir, { recursive: true });
+
+    while (true) {
+      try {
+        const handle = await open(lockPath, 'wx');
+
+        try {
+          await handle.writeFile(
+            `${JSON.stringify({ createdAt: Date.now(), pid: process.pid } satisfies SessionLockContents)}\n`,
+            {
+              encoding: 'utf8',
+            },
+          );
+
+          return await run();
+        } finally {
+          await handle.close();
+          await rm(lockPath, { force: true });
+        }
+      } catch (error: unknown) {
+        if (!isErrnoCode(error, 'EEXIST')) {
+          throw error;
+        }
+
+        if (await this.reclaimStaleLock(lockPath)) {
+          continue;
+        }
+
+        await delay(LOCK_RETRY_MS);
+      }
+    }
+  }
+
+  private async reclaimStaleLock(lockPath: string): Promise<boolean> {
+    try {
+      const contents = await readFile(lockPath, 'utf8');
+      const parsed = JSON.parse(contents) as Partial<SessionLockContents>;
+
+      if (typeof parsed.pid !== 'number' || Number.isNaN(parsed.pid)) {
+        return this.reclaimUnparseableLock(lockPath);
+      }
+
+      if (isProcessRunning(parsed.pid)) {
+        return false;
+      }
+
+      await rm(lockPath, { force: true });
+      return true;
+    } catch (error: unknown) {
+      if (isErrnoCode(error, 'ENOENT')) {
+        return true;
+      }
+
+      return this.reclaimUnparseableLock(lockPath);
+    }
+  }
+
+  private async reclaimUnparseableLock(lockPath: string): Promise<boolean> {
+    try {
+      const lockStat = await stat(lockPath);
+
+      if (Date.now() - lockStat.mtimeMs < LOCK_STARTUP_GRACE_MS) {
+        return false;
+      }
+
+      await rm(lockPath, { force: true });
+      return true;
+    } catch (error: unknown) {
+      if (isErrnoCode(error, 'ENOENT')) {
+        return true;
+      }
+
+      return false;
+    }
+  }
+}
+
+function isProcessRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error: unknown) {
+    return !(error instanceof Error && 'code' in error && error.code === 'ESRCH');
   }
 }

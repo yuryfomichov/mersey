@@ -71,7 +71,7 @@ test('Session.commit snapshots caller messages before persistence', async () => 
     message.toolCalls[0].input = { path: 'changed.txt' };
   }
 
-  const storedMessage = (await store.listMessages(session.id))[0];
+  const storedMessage = (await store.getSession(session.id))?.messages[0];
   const sessionMessage = session.messages[0];
 
   assert.deepEqual(storedMessage && 'toolCalls' in storedMessage ? storedMessage.toolCalls?.[0]?.input : undefined, {
@@ -196,7 +196,7 @@ test('Session caches hydrated usage and context values in memory', async () => {
     id: 'metrics-session',
     messages: [],
   });
-  await store.writeState('metrics-session', {
+  await store.commitTurn('metrics-session', [], {
     contextSize: 15,
     createdAt: '2026-03-29T00:00:00.000Z',
     id: 'metrics-session',
@@ -260,4 +260,175 @@ test('Session.commit updates cached usage and context metrics', async () => {
     outputTokens: 7,
     uncachedInputTokens: 5,
   });
+});
+
+test('Session.commit keeps memory state unchanged when store commitTurn fails', async () => {
+  class FailingCommitStore extends MemorySessionStore {
+    override async commitTurn(
+      _sessionId: string,
+      _turnMessages: readonly Message[],
+      _state: Omit<StoredSessionState, 'messages'>,
+    ): Promise<void> {
+      throw new Error('commit failed');
+    }
+  }
+
+  const session = new Session({
+    id: 'failing-commit-session',
+    store: new FailingCommitStore(),
+  });
+
+  const message: Message = {
+    content: 'hello',
+    createdAt: '2026-03-29T00:00:01.000Z',
+    role: 'assistant',
+    usage: {
+      ...createEmptyModelUsage(),
+      outputTokens: 3,
+      uncachedInputTokens: 2,
+    },
+  };
+
+  await assert.rejects(() => session.commit([message]), /commit failed/);
+  assert.deepEqual(session.messages, []);
+  assert.deepEqual(await session.getUsage(), createEmptyModelUsage());
+  assert.equal(await session.getContextSize(), 0);
+});
+
+test('Session.commit serializes concurrent public commits', async () => {
+  class SlowCommitStore extends MemorySessionStore {
+    commitCalls = 0;
+
+    override async commitTurn(
+      sessionId: string,
+      turnMessages: readonly Message[],
+      state: Omit<StoredSessionState, 'messages'>,
+    ): Promise<void> {
+      this.commitCalls += 1;
+
+      if (this.commitCalls === 1) {
+        await delay(10);
+      }
+
+      return super.commitTurn(sessionId, turnMessages, state);
+    }
+  }
+
+  const store = new SlowCommitStore();
+  const session = new Session({
+    id: 'serialized-commit-session',
+    store,
+  });
+
+  await Promise.all([
+    session.commit([
+      {
+        content: 'first',
+        createdAt: '2026-03-29T00:00:01.000Z',
+        role: 'user',
+      },
+    ]),
+    session.commit([
+      {
+        content: 'second',
+        createdAt: '2026-03-29T00:00:02.000Z',
+        role: 'user',
+      },
+    ]),
+  ]);
+
+  assert.deepEqual(
+    session.messages.map((message) => message.content),
+    ['first', 'second'],
+  );
+});
+
+test('Session.commit refreshes persisted metrics before public commits from another session instance', async () => {
+  const store = new MemorySessionStore();
+  const firstSession = new Session({
+    id: 'shared-session',
+    store,
+  });
+  const secondSession = new Session({
+    id: 'shared-session',
+    store,
+  });
+
+  await firstSession.commit([
+    {
+      content: 'first',
+      createdAt: '2026-03-29T00:00:01.000Z',
+      role: 'assistant',
+      usage: {
+        ...createEmptyModelUsage(),
+        cachedInputTokens: 2,
+        outputTokens: 3,
+        uncachedInputTokens: 5,
+      },
+    },
+  ]);
+
+  await secondSession.commit([
+    {
+      content: 'second',
+      createdAt: '2026-03-29T00:00:02.000Z',
+      role: 'assistant',
+      usage: {
+        ...createEmptyModelUsage(),
+        cacheWriteInputTokens: 1,
+        outputTokens: 7,
+        uncachedInputTokens: 4,
+      },
+    },
+  ]);
+
+  assert.deepEqual((await store.getSession('shared-session'))?.usage, {
+    ...createEmptyModelUsage(),
+    cacheWriteInputTokens: 1,
+    cachedInputTokens: 2,
+    outputTokens: 10,
+    uncachedInputTokens: 9,
+  });
+  assert.equal((await store.getSession('shared-session'))?.contextSize, 12);
+  assert.deepEqual(await secondSession.getUsage(), {
+    ...createEmptyModelUsage(),
+    cacheWriteInputTokens: 1,
+    cachedInputTokens: 2,
+    outputTokens: 10,
+    uncachedInputTokens: 9,
+  });
+  assert.equal(await secondSession.getContextSize(), 12);
+});
+
+test('Session.commit keeps in-memory messages isolated from store-side mutation', async () => {
+  class MutatingStore extends MemorySessionStore {
+    override async commitTurn(
+      sessionId: string,
+      turnMessages: readonly Message[],
+      state: Omit<StoredSessionState, 'messages'>,
+    ): Promise<void> {
+      const assistantMessage = turnMessages[0];
+
+      if (assistantMessage && assistantMessage.role === 'assistant') {
+        assistantMessage.content = 'mutated by store';
+      }
+
+      return super.commitTurn(sessionId, turnMessages, state);
+    }
+  }
+
+  const session = new Session({
+    id: 'mutating-store-session',
+    store: new MutatingStore(),
+  });
+
+  await session.commit([
+    {
+      content: 'original content',
+      createdAt: '2026-03-29T00:00:01.000Z',
+      role: 'assistant',
+    },
+  ]);
+
+  assert.equal(session.messages[0]?.content, 'original content');
 });

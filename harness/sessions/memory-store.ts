@@ -1,75 +1,75 @@
 import { createEmptyModelUsage } from '../runtime/models/types.js';
 import type { SessionStore } from '../runtime/sessions/store.js';
 import type { Message, SessionState, StoredSessionState } from '../runtime/sessions/types.js';
+import { SessionTurnLockMap } from './exclusive.js';
 
 function cloneMessage<T extends Message>(message: T): T {
   return structuredClone(message);
 }
 
+function cloneStoredSession(session: StoredSessionState): StoredSessionState {
+  return {
+    contextSize: session.contextSize,
+    createdAt: session.createdAt,
+    id: session.id,
+    messages: session.messages.map((message) => cloneMessage(message)),
+    usage: structuredClone(session.usage),
+  };
+}
+
 export class MemorySessionStore implements SessionStore {
-  private readonly messages = new Map<string, Message[]>();
-  private readonly sessions = new Map<
-    string,
-    { contextSize: number; createdAt: string; id: string; usage: ReturnType<typeof createEmptyModelUsage> }
-  >();
+  private readonly sessions = new Map<string, StoredSessionState>();
+  private readonly turnLocks = new SessionTurnLockMap();
 
-  async appendMessage(sessionId: string, message: Message): Promise<void> {
-    const messages = this.messages.get(sessionId) ?? [];
+  async commitTurn(
+    sessionId: string,
+    turnMessages: readonly Message[],
+    state: Omit<StoredSessionState, 'messages'>,
+  ): Promise<void> {
+    const existingSession = this.sessions.get(sessionId);
 
-    messages.push(cloneMessage(message));
-    this.messages.set(sessionId, messages);
+    if (!existingSession) {
+      throw new Error(`Session does not exist: ${sessionId}`);
+    }
+
+    this.sessions.set(sessionId, {
+      contextSize: state.contextSize,
+      createdAt: state.createdAt,
+      id: state.id,
+      messages: [
+        ...existingSession.messages.map((message) => cloneMessage(message)),
+        ...turnMessages.map(cloneMessage),
+      ],
+      usage: structuredClone(state.usage),
+    });
   }
 
   async createSession(session: SessionState): Promise<StoredSessionState> {
     const existingSession = this.sessions.get(session.id);
 
     if (existingSession) {
-      return {
-        ...existingSession,
-        messages: await this.listMessages(session.id),
-      };
+      return cloneStoredSession(existingSession);
     }
 
-    this.sessions.set(session.id, {
+    const storedSession: StoredSessionState = {
       contextSize: 0,
-      id: session.id,
       createdAt: session.createdAt,
-      usage: createEmptyModelUsage(),
-    });
-    this.messages.set(session.id, []);
-
-    return {
-      contextSize: 0,
       id: session.id,
-      createdAt: session.createdAt,
       messages: [],
       usage: createEmptyModelUsage(),
     };
+
+    this.sessions.set(session.id, storedSession);
+    return cloneStoredSession(storedSession);
   }
 
   async getSession(sessionId: string): Promise<StoredSessionState | null> {
     const session = this.sessions.get(sessionId);
 
-    if (!session) {
-      return null;
-    }
-
-    return {
-      ...session,
-      messages: await this.listMessages(sessionId),
-    };
+    return session ? cloneStoredSession(session) : null;
   }
 
-  async listMessages(sessionId: string): Promise<Message[]> {
-    return (this.messages.get(sessionId) ?? []).map((message) => cloneMessage(message));
-  }
-
-  async writeState(sessionId: string, state: Omit<StoredSessionState, 'messages'>): Promise<void> {
-    this.sessions.set(sessionId, {
-      contextSize: state.contextSize,
-      createdAt: state.createdAt,
-      id: state.id,
-      usage: structuredClone(state.usage),
-    });
+  async runExclusive<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
+    return this.turnLocks.runExclusive(sessionId, run);
   }
 }

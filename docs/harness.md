@@ -9,12 +9,13 @@ The main entry point is `createHarness()` from `harness/index.ts`.
 Key exports include:
 
 - `createHarness`
-- `Session`, `MemorySessionStore`, `FilesystemSessionStore` from `harness/sessions/index.ts`
+- built-in sessions from `harness/sessions/index.ts`
+- built-in tools from `harness/tools/index.ts`
+- logging and retrieval plugins from `harness/plugins/index.ts`
 - provider-agnostic types like `ModelProvider`
 - event and plugin types
 
-Built-in tools are exported from `harness/tools/index.ts`.
-Built-in providers are exported from `harness/providers/index.ts`.
+`harness/index.ts` stays focused on `createHarness()` and shared types, while built-in implementations remain available from their own submodules such as `harness/providers/index.ts`.
 
 ## Minimal Example
 
@@ -75,7 +76,7 @@ const harness = createHarness({
 
 ### Session
 
-Each harness instance uses an injected `HarnessSession` to store:
+Each harness instance uses an injected `HarnessSession` internally, and exposes a read-only `harness.session` view for:
 
 - message history
 - turn status
@@ -83,6 +84,7 @@ Each harness instance uses an injected `HarnessSession` to store:
 - the last turn's token footprint
 
 `createHarness()` does not construct sessions internally. Apps own session wiring and can choose a built-in or custom implementation.
+Built-in stores expose atomic turn commits and serialize work per session id.
 
 ```ts
 import { createHarness } from '../harness/index.js';
@@ -101,6 +103,9 @@ const harness = createHarness({
 
 const usage = await harness.session.getUsage();
 const lastTurnTokens = await harness.session.getContextSize();
+
+// The app-facing session view is read-only.
+console.log(harness.session.id, harness.session.messages.length);
 ```
 
 ### Tools
@@ -142,6 +147,7 @@ const harness = createHarness({
 ```
 
 Each tool owns its own runtime services and enforces workspace and output limits.
+Custom tools can depend on the public `ToolExecutionContext`, `ToolFileService`, and `ToolOutputService` types from `harness/tools/types.ts`.
 
 ## Streaming
 
@@ -173,6 +179,8 @@ for await (const chunk of harness.streamMessage('hello')) {
 }
 ```
 
+Both `sendMessage()` and `streamMessage()` accept `{ signal }` so callers can cancel a turn explicitly.
+
 Chunk types come from `harness/runtime/core/loop.ts`:
 
 - `assistant_delta`
@@ -198,6 +206,7 @@ The event stream includes turn lifecycle, provider calls, and tool execution. Se
 When debug mode is enabled for a harness, `provider_requested` events also include the final request payload that will be sent to the model, so logging plugins can record the exact system prompt and messages after request-prep hooks run.
 
 The core harness is event-only. Logging is implemented through plugins that subscribe with `onEvent`.
+Built-in logging plugins create parent directories on demand and surface write failures through the normal hook error path.
 
 ```ts
 import { createHarness } from '../harness/index.js';
@@ -224,9 +233,9 @@ Under the hood, `HarnessEventEmitter` owns immutable publish/subscribe delivery 
 
 ## Request Preparation Hooks
 
-`harness` supports a request-prep hook that can enrich the outbound `ModelRequest` just before each provider call.
+`harness` supports a request-prep hook that can enrich the outbound provider request just before each provider call.
 
-- request-prep runs after `beforeProviderCall` allows the iteration
+- request-prep runs before `beforeProviderCall`, so policy hooks validate the final prepared request
 - injected context is ephemeral for that provider call only
 - synthetic request messages are not persisted into session history
 - hook contexts receive immutable, request-prep-safe snapshots rather than live session objects
@@ -247,7 +256,7 @@ const plugin = {
 };
 ```
 
-`prepareProviderRequest(request, ctx)` receives a readonly request plus a simplified immutable transcript, and can return `prependMessages`, `appendMessages`, and `systemPrompt` overrides.
+`prepareProviderRequest(request, ctx)` receives an immutable provider-request snapshot plus a simplified immutable transcript, and can return `prependMessages`, `appendMessages`, `messages`, and `systemPrompt` overrides.
 
 ## Integration Boundaries
 

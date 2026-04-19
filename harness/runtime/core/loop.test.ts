@@ -243,6 +243,39 @@ test('streamLoop applies prepareProviderRequest changes without persisting retri
   );
 });
 
+test('streamLoop prepareProviderRequest transcript snapshots do not freeze live assistant toolCalls', async () => {
+  const assistantToolCalls = [{ id: 'call-1', input: { path: 'note.txt' }, name: 'read_file' }];
+
+  await collectFinalMessage(
+    createLoopInput({
+      content: 'hello',
+      history: [
+        {
+          content: '',
+          createdAt: '2026-03-29T00:00:00.000Z',
+          role: 'assistant',
+          toolCalls: assistantToolCalls,
+        },
+      ],
+      plugins: [
+        {
+          name: 'request-prep',
+          prepareProviderRequest() {
+            return {};
+          },
+        },
+      ],
+      provider: new FakeProvider(),
+      sessionId: 'snapshot-tool-calls',
+      tools: [],
+    }),
+  );
+
+  assert.doesNotThrow(() => {
+    assistantToolCalls.push({ id: 'call-2', input: { path: 'other.txt' }, name: 'read_file' });
+  });
+});
+
 test('streamLoop passes immutable snapshots to request-prep hooks', async () => {
   let transcriptMutationFailed = false;
   let userMessageMutationFailed = false;
@@ -867,6 +900,54 @@ test('streamLoop provider deny path can expose reason when explicitly allowed', 
     ),
     /exposed policy reason/,
   );
+});
+
+test('streamLoop runs beforeProviderCall against the final prepared provider request', async () => {
+  let observedMessages: { content: string; role: string }[] | null = null;
+  let observedSystemPrompt: string | undefined;
+
+  await assert.rejects(
+    collectFinalMessage(
+      createLoopInput({
+        content: 'hello',
+        history: [],
+        plugins: [
+          {
+            name: 'retrieval',
+            prepareProviderRequest(request) {
+              return {
+                prependMessages: [{ content: 'retrieved context', role: 'user' }],
+                systemPrompt: `${request.systemPrompt ?? ''} answer briefly`.trim(),
+              };
+            },
+          },
+          {
+            name: 'deny-provider',
+            beforeProviderCall(ctx) {
+              observedMessages = ctx.request.messages.map((message) => ({
+                content: message.content,
+                role: message.role,
+              }));
+              observedSystemPrompt = ctx.request.systemPrompt;
+
+              return { continue: false, reason: 'deny', exposeToModel: true };
+            },
+          },
+        ],
+        provider: new FakeProvider(),
+        sessionId: 'prepared-provider-request',
+        systemPrompt: 'be helpful',
+        tools: [],
+      }),
+    ),
+    /deny/,
+  );
+
+  assert.deepEqual(observedMessages, [
+    { content: 'retrieved context', role: 'user' },
+    { content: 'hello', role: 'user' },
+  ]);
+  assert.equal(observedSystemPrompt, 'be helpful answer briefly');
 });
 
 test('streamLoop prepareProviderRequest hook errors fail closed and report provider error type', async () => {

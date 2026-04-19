@@ -52,7 +52,13 @@ export function createLanceDbRetrievalPlugin(options: LanceDbRetrievalPluginOpti
   let tablePromise: Promise<LanceDbTable> | undefined;
 
   function getTable() {
-    tablePromise ??= connect(options.dbPath).then((db) => db.openTable(tableName));
+    tablePromise ??= connect(options.dbPath)
+      .then((db) => db.openTable(tableName))
+      .catch((error: unknown) => {
+        tablePromise = undefined;
+        throw error;
+      });
+
     return tablePromise;
   }
 

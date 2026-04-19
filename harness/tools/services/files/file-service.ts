@@ -19,8 +19,12 @@ type FileServiceOptions = {
 export class FileService implements ToolFileService {
   constructor(private readonly options: FileServiceOptions) {}
 
+  getMaxReadBytes(): number {
+    return this.options.policy.maxReadBytes ?? DEFAULT_MAX_READ_BYTES;
+  }
+
   async assertReadSize(path: string, toolName: string): Promise<void> {
-    await assertFileSizeWithinLimit(path, this.options.policy.maxReadBytes ?? DEFAULT_MAX_READ_BYTES, toolName);
+    await assertFileSizeWithinLimit(path, this.getMaxReadBytes(), toolName);
   }
 
   assertWriteSize(content: string, toolName: string): void {
@@ -35,6 +39,14 @@ export class FileService implements ToolFileService {
     const resolvedPath = await resolvePathInWorkspace(path, this.options.policy.workspaceRoot, { toolName });
 
     await this.assertPathAllowed(resolvedPath, toolName, 'read');
+    return resolvedPath;
+  }
+
+  async resolveForReadWrite(path: string, toolName: string): Promise<string> {
+    const resolvedPath = await resolvePathInWorkspace(path, this.options.policy.workspaceRoot, { toolName });
+
+    await this.assertPathAllowed(resolvedPath, toolName, 'read');
+    await this.assertPathAllowed(resolvedPath, toolName, 'write');
     return resolvedPath;
   }
 

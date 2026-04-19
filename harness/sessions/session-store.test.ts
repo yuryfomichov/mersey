@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { appendFile, mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import { createEmptyModelUsage } from '../runtime/models/types.js';
 import type { Message, SessionState, StoredSessionState } from '../runtime/sessions/types.js';
@@ -10,11 +11,14 @@ import { FilesystemSessionStore } from './filesystem-store.js';
 import { MemorySessionStore } from './memory-store.js';
 
 async function verifyStoreRoundTrip(store: {
-  appendMessage(sessionId: string, message: Message): Promise<void>;
+  commitTurn(
+    sessionId: string,
+    turnMessages: readonly Message[],
+    state: Omit<StoredSessionState, 'messages'>,
+  ): Promise<void>;
   createSession(session: SessionState): Promise<StoredSessionState>;
   getSession(sessionId: string): Promise<StoredSessionState | null>;
-  listMessages(sessionId: string): Promise<Message[]>;
-  writeState(sessionId: string, state: Omit<StoredSessionState, 'messages'>): Promise<void>;
+  runExclusive<T>(sessionId: string, run: () => Promise<T>): Promise<T>;
 }): Promise<void> {
   const session: SessionState = {
     id: 'session-1',
@@ -26,70 +30,76 @@ async function verifyStoreRoundTrip(store: {
   assert.deepEqual(createdSession.usage, createEmptyModelUsage());
   assert.equal(createdSession.contextSize, 0);
 
-  await store.writeState(session.id, {
-    contextSize: 9,
-    createdAt: session.createdAt,
-    id: session.id,
-    usage: {
-      ...createEmptyModelUsage(),
-      cachedInputTokens: 2,
-      outputTokens: 3,
-      uncachedInputTokens: 4,
+  await store.commitTurn(
+    session.id,
+    [
+      {
+        role: 'user',
+        content: 'hello',
+        createdAt: '2026-03-29T00:00:01.000Z',
+      },
+      {
+        role: 'assistant',
+        content: 'hi',
+        createdAt: '2026-03-29T00:00:02.000Z',
+        toolCalls: [
+          {
+            id: 'call-1',
+            input: { path: 'note.txt' },
+            name: 'read_file',
+          },
+        ],
+      },
+      {
+        content: 'file contents',
+        createdAt: '2026-03-29T00:00:03.000Z',
+        name: 'read_file',
+        role: 'tool',
+        toolCallId: 'call-1',
+      },
+    ],
+    {
+      contextSize: 9,
+      createdAt: session.createdAt,
+      id: session.id,
+      usage: {
+        ...createEmptyModelUsage(),
+        cachedInputTokens: 2,
+        outputTokens: 3,
+        uncachedInputTokens: 4,
+      },
     },
-  });
+  );
 
-  await store.appendMessage(session.id, {
-    role: 'user',
-    content: 'hello',
-    createdAt: '2026-03-29T00:00:01.000Z',
+  const storedSession = await store.getSession(session.id);
+
+  assert.deepEqual(
+    storedSession?.messages.map((message) => message.content),
+    ['hello', 'hi', 'file contents'],
+  );
+  assert.deepEqual(storedSession?.usage, {
+    ...createEmptyModelUsage(),
+    cachedInputTokens: 2,
+    outputTokens: 3,
+    uncachedInputTokens: 4,
   });
-  await store.appendMessage(session.id, {
-    role: 'assistant',
-    content: 'hi',
-    createdAt: '2026-03-29T00:00:02.000Z',
-    toolCalls: [
+  assert.equal(storedSession?.contextSize, 9);
+  assert.deepEqual(
+    storedSession?.messages[1] && 'toolCalls' in storedSession.messages[1]
+      ? storedSession.messages[1].toolCalls
+      : undefined,
+    [
       {
         id: 'call-1',
         input: { path: 'note.txt' },
         name: 'read_file',
       },
     ],
-  });
-  await store.appendMessage(session.id, {
-    content: 'file contents',
-    createdAt: '2026-03-29T00:00:03.000Z',
-    name: 'read_file',
-    role: 'tool',
-    toolCallId: 'call-1',
-  });
-
-  assert.deepEqual(
-    (await store.listMessages(session.id)).map((message) => message.content),
-    ['hello', 'hi', 'file contents'],
   );
-  assert.deepEqual(
-    (await store.getSession(session.id))?.messages.map((message) => message.content),
-    ['hello', 'hi', 'file contents'],
-  );
-  assert.deepEqual((await store.getSession(session.id))?.usage, {
-    ...createEmptyModelUsage(),
-    cachedInputTokens: 2,
-    outputTokens: 3,
-    uncachedInputTokens: 4,
-  });
-  assert.equal((await store.getSession(session.id))?.contextSize, 9);
-
-  const storedMessages = await store.listMessages(session.id);
-
-  assert.deepEqual(storedMessages[1] && 'toolCalls' in storedMessages[1] ? storedMessages[1].toolCalls : undefined, [
-    {
-      id: 'call-1',
-      input: { path: 'note.txt' },
-      name: 'read_file',
-    },
-  ]);
   assert.equal(
-    storedMessages[2] && 'toolCallId' in storedMessages[2] ? storedMessages[2].toolCallId : undefined,
+    storedSession?.messages[2] && 'toolCallId' in storedSession.messages[2]
+      ? storedSession.messages[2].toolCallId
+      : undefined,
     'call-1',
   );
 }
@@ -140,11 +150,22 @@ test('FilesystemSessionStore createSession does not clobber existing messages', 
     };
 
     await store.createSession(session);
-    await store.appendMessage(session.id, {
-      role: 'user',
-      content: 'hello',
-      createdAt: '2026-03-29T00:00:01.000Z',
-    });
+    await store.commitTurn(
+      session.id,
+      [
+        {
+          role: 'user',
+          content: 'hello',
+          createdAt: '2026-03-29T00:00:01.000Z',
+        },
+      ],
+      {
+        contextSize: 0,
+        createdAt: session.createdAt,
+        id: session.id,
+        usage: createEmptyModelUsage(),
+      },
+    );
 
     const returnedSession = await store.createSession({
       id: session.id,
@@ -156,16 +177,12 @@ test('FilesystemSessionStore createSession does not clobber existing messages', 
       returnedSession.messages.map((message) => message.content),
       ['hello'],
     );
-    assert.deepEqual(
-      (await store.listMessages(session.id)).map((message) => message.content),
-      ['hello'],
-    );
   } finally {
     await rm(rootDir, { force: true, recursive: true });
   }
 });
 
-test('FilesystemSessionStore skips corrupt JSONL lines and returns the valid messages', async () => {
+test('FilesystemSessionStore rejects corrupt session files instead of dropping transcript entries', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
 
   try {
@@ -177,22 +194,9 @@ test('FilesystemSessionStore skips corrupt JSONL lines and returns the valid mes
     };
 
     await store.createSession(session);
-    await store.appendMessage(session.id, {
-      role: 'user',
-      content: 'hello',
-      createdAt: '2026-03-29T00:00:01.000Z',
-    });
-    await appendFile(join(rootDir, session.id, 'messages.jsonl'), '{bad json}\n', 'utf8');
-    await store.appendMessage(session.id, {
-      role: 'assistant',
-      content: 'hi',
-      createdAt: '2026-03-29T00:00:02.000Z',
-    });
+    await writeFile(join(rootDir, session.id, 'session.json'), '{bad json}\n', 'utf8');
 
-    assert.deepEqual(
-      (await store.listMessages(session.id)).map((message) => message.content),
-      ['hello', 'hi'],
-    );
+    await assert.rejects(() => store.getSession(session.id), /Unexpected token|Expected property name/);
   } finally {
     await rm(rootDir, { force: true, recursive: true });
   }
@@ -219,15 +223,147 @@ test('MemorySessionStore isolates nested message mutations', async () => {
   };
 
   await store.createSession(session);
-  await store.appendMessage(session.id, message);
+  await store.commitTurn(session.id, [message], {
+    contextSize: 0,
+    createdAt: session.createdAt,
+    id: session.id,
+    usage: createEmptyModelUsage(),
+  });
 
   if (message.toolCalls?.[0]) {
     message.toolCalls[0].input = { path: 'changed.txt' };
   }
 
-  const storedMessage = (await store.listMessages(session.id))[0];
+  const storedMessage = (await store.getSession(session.id))?.messages[0];
 
   assert.deepEqual(storedMessage && 'toolCalls' in storedMessage ? storedMessage.toolCalls?.[0]?.input : undefined, {
     path: 'note.txt',
   });
+});
+
+test('Session stores serialize work per session id, not per session instance', async () => {
+  const store = new MemorySessionStore();
+  let releaseFirst!: () => void;
+  const started: string[] = [];
+  const completed: string[] = [];
+  const firstRelease = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+
+  const firstRun = store.runExclusive('shared-session', async () => {
+    started.push('first');
+    await firstRelease;
+    completed.push('first');
+  });
+
+  const secondRun = store.runExclusive('shared-session', async () => {
+    started.push('second');
+    completed.push('second');
+  });
+
+  await Promise.resolve();
+  assert.deepEqual(started, ['first']);
+
+  releaseFirst();
+  await Promise.all([firstRun, secondRun]);
+
+  assert.deepEqual(started, ['first', 'second']);
+  assert.deepEqual(completed, ['first', 'second']);
+});
+
+test('FilesystemSessionStore commits turns atomically in a single session file', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
+
+  try {
+    const store = new FilesystemSessionStore({ rootDir });
+    await store.createSession({
+      id: 'atomic-session',
+      createdAt: '2026-03-29T00:00:00.000Z',
+      messages: [],
+    });
+
+    await store.commitTurn(
+      'atomic-session',
+      [
+        {
+          content: 'hello',
+          createdAt: '2026-03-29T00:00:01.000Z',
+          role: 'user',
+        },
+      ],
+      {
+        contextSize: 0,
+        createdAt: '2026-03-29T00:00:00.000Z',
+        id: 'atomic-session',
+        usage: createEmptyModelUsage(),
+      },
+    );
+
+    const fileContents = await readFile(join(rootDir, 'atomic-session', 'session.json'), 'utf8');
+    const storedSession = JSON.parse(fileContents) as StoredSessionState;
+
+    assert.deepEqual(
+      storedSession.messages.map((message) => message.content),
+      ['hello'],
+    );
+  } finally {
+    await rm(rootDir, { force: true, recursive: true });
+  }
+});
+
+test('FilesystemSessionStore reclaims stale session locks from dead processes', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
+
+  try {
+    const store = new FilesystemSessionStore({ rootDir });
+    const sessionId = 'stale-lock-session';
+    const sessionDir = join(rootDir, sessionId);
+
+    await store.createSession({
+      id: sessionId,
+      createdAt: '2026-03-29T00:00:00.000Z',
+      messages: [],
+    });
+    await writeFile(
+      join(sessionDir, 'session.lock'),
+      `${JSON.stringify({ createdAt: Date.now(), pid: 999_999 })}\n`,
+      'utf8',
+    );
+
+    let ran = false;
+    await store.runExclusive(sessionId, async () => {
+      ran = true;
+    });
+
+    assert.equal(ran, true);
+  } finally {
+    await rm(rootDir, { force: true, recursive: true });
+  }
+});
+
+test('FilesystemSessionStore reclaims stale unparseable session locks after a grace period', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
+
+  try {
+    const store = new FilesystemSessionStore({ rootDir });
+    const sessionId = 'stale-unparseable-lock-session';
+    const sessionDir = join(rootDir, sessionId);
+
+    await store.createSession({
+      id: sessionId,
+      createdAt: '2026-03-29T00:00:00.000Z',
+      messages: [],
+    });
+    await writeFile(join(sessionDir, 'session.lock'), '', 'utf8');
+    await delay(120);
+
+    let ran = false;
+    await store.runExclusive(sessionId, async () => {
+      ran = true;
+    });
+
+    assert.equal(ran, true);
+  } finally {
+    await rm(rootDir, { force: true, recursive: true });
+  }
 });

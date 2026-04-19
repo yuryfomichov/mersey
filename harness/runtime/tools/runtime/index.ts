@@ -25,6 +25,18 @@ function getToolMap(tools: Tool[]): Map<string, Tool> {
   return new Map(tools.map((tool) => [tool.name, tool]));
 }
 
+function assertUniqueToolNames(tools: Tool[]): void {
+  const seen = new Set<string>();
+
+  for (const tool of tools) {
+    if (seen.has(tool.name)) {
+      throw new Error(`Duplicate tool name registered: ${tool.name}`);
+    }
+
+    seen.add(tool.name);
+  }
+}
+
 async function executeToolCall(
   toolCall: ModelToolCall,
   tools: Map<string, Tool>,
@@ -62,6 +74,7 @@ async function executeToolCall(
 }
 
 export function createToolRuntimeFactory({ tools }: ToolRuntimeFactoryOptions): ToolRuntimeFactory {
+  assertUniqueToolNames(tools);
   const toolDefinitions = getToolDefinitions(tools);
   const toolMap = getToolMap(tools);
 

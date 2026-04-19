@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -171,5 +171,42 @@ test('EditFileTool rejects files blocked for read access by shared policy', asyn
     );
   } finally {
     await rm(rootDir, { force: true, recursive: true });
+  }
+});
+
+test('EditFileTool rejects symlink swaps between validation and file open', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
+  const outsidePath = join(rootDir, '..outside.txt');
+
+  try {
+    await writeFile(join(rootDir, 'note.txt'), 'hello world', 'utf8');
+    await writeFile(outsidePath, 'outside secret', 'utf8');
+
+    const tool = new EditFileTool({ policy: { workspaceRoot: rootDir } });
+    const files = (
+      tool as unknown as {
+        files: {
+          resolveForReadWrite(path: string, toolName: string): Promise<string>;
+        };
+      }
+    ).files;
+    const originalResolveForReadWrite = files.resolveForReadWrite.bind(files);
+
+    files.resolveForReadWrite = async (path, toolName) => {
+      const resolvedPath = await originalResolveForReadWrite(path, toolName);
+
+      await rm(resolvedPath);
+      await symlink(outsidePath, resolvedPath);
+
+      return resolvedPath;
+    };
+
+    await assert.rejects(
+      () => tool.execute({ newText: 'mersey', oldText: 'world', path: 'note.txt' }, createToolExecutionContext()),
+      /ELOOP|too many symbolic links/,
+    );
+  } finally {
+    await rm(rootDir, { force: true, recursive: true });
+    await rm(outsidePath, { force: true });
   }
 });
