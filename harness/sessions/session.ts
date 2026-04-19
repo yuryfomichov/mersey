@@ -3,10 +3,7 @@ import type { HarnessSession } from '../runtime/sessions/runtime.js';
 import type { SessionStore } from '../runtime/sessions/store.js';
 import type { Message, SessionState, StoredSessionState } from '../runtime/sessions/types.js';
 import { snapshot } from '../runtime/utils/object.js';
-
-function cloneMessage<T extends Message>(message: T): T {
-  return structuredClone(message);
-}
+import { cloneMessage } from './store-state.js';
 
 function cloneState(state: SessionState): SessionState {
   return {
