@@ -244,9 +244,9 @@ test('OpenAIProvider forwards codec-produced input and tools to responses.create
         additionalProperties: false,
         properties: {
           command: { type: 'string' },
-          cwd: { type: 'string' },
+          cwd: { type: ['string', 'null'] },
         },
-        required: ['command'],
+        required: ['command', 'cwd'],
         type: 'object',
       },
       strict: true,
