@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Mersey is a local coding agent prototype.
+Mersey is a reusable harness for building local LLM applications with pluggable tools, hooks, events, sessions, and providers.
 
 Main goals:
 

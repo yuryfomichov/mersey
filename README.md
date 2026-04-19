@@ -1,6 +1,6 @@
 # Mersey
 
-Mersey is a local coding agent prototype.
+Mersey is a reusable harness for building local LLM applications with pluggable tools, hooks, events, sessions, and providers.
 
 The repo is organized around a reusable `harness` package and thin apps that sit on top of it. The current apps are `apps/cli` for the readline terminal flow and `apps/ftv` for the Ink-based TUI prototype.
 
