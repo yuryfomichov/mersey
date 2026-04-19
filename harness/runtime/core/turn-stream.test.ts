@@ -610,6 +610,8 @@ test('createTurnStreamFactory does not run afterTurnCommitted when the turn fail
     model: 'broken-model',
     name: 'broken-provider',
     async *generate() {
+      yield* [];
+
       throw new Error('provider failed');
     },
   };

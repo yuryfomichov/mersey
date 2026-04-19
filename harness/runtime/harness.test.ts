@@ -258,6 +258,8 @@ test('createHarness sendMessage supports explicit cancellation', async () => {
     model: 'abortable-model',
     name: 'abortable',
     async *generate(input: ModelRequest): AsyncIterable<ModelStreamEvent> {
+      yield* [];
+
       await new Promise((_, reject) => {
         input.signal?.addEventListener(
           'abort',
