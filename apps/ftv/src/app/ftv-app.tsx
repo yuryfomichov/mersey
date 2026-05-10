@@ -61,7 +61,8 @@ export function FtvApp({
     }
   });
 
-  const chatBodyMaxLines = Math.max(3, rows - NON_CHAT_ROWS);
+  const nonChatRows = NON_CHAT_ROWS + (state.startupLines.length > 0 ? 1 : 0);
+  const chatBodyMaxLines = Math.max(3, rows - nonChatRows);
   const chatContentWidth = Math.max(16, columns - CHAT_CONTENT_WIDTH_PADDING);
 
   return (
@@ -90,6 +91,7 @@ export function FtvApp({
 
       <Box flexDirection='column' flexShrink={0} marginTop={1}>
         <StatusBar
+          startupNotice={state.startupLines.join(' | ')}
           turnCount={state.turnCount}
           toolName={state.pendingApproval?.toolName}
           toolSummary={state.pendingApproval?.summary}

@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 import { FileService } from './services/files/file-service.js';
 import type { ToolExecutionContext, ToolExecutionPolicy, ToolFileService } from './services/index.js';
-import type { Tool, ToolExecuteResult, ToolInput } from './types.js';
+import { createTextToolResult, type Tool, type ToolExecuteResult, type ToolInput } from './types.js';
 import { createCanonicalWorkspaceRootGetter, resolveToolExecutionPolicy } from './utils/policy.js';
 import { parseToolInput, toToolInputSchema } from './utils/schema.js';
 
@@ -48,7 +48,7 @@ export class EditFileTool implements Tool {
 
   readonly description = 'Edit a UTF-8 text file by replacing exactly one matching string.';
   readonly inputSchema = toToolInputSchema(EditFileTool.input);
-  readonly name = 'edit_file';
+  readonly name = 'workspace.edit_file';
 
   constructor(options: EditFileToolOptions = {}) {
     const policy = resolveToolExecutionPolicy(options.policy);
@@ -103,11 +103,10 @@ export class EditFileTool implements Tool {
 
     context.cancellation.throwIfAborted();
 
-    return {
-      content: `Edited file: ${resolvedPath}`,
-      data: {
+    return createTextToolResult(`Edited file: ${resolvedPath}`, {
+      metadata: {
         path: resolvedPath,
       },
-    };
+    });
   }
 }

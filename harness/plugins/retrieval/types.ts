@@ -1,4 +1,5 @@
-import type { PrepareProviderRequestContext, PrepareProviderRequestResult } from '../../runtime/plugins/types.js';
+import type { TurnContextContribution } from '../../runtime/context/types.js';
+import type { TurnContextCollectContext } from '../../runtime/plugins/types.js';
 
 export type RetrievedChunk = {
   content: string;
@@ -9,13 +10,13 @@ export type RetrievedChunk = {
 };
 
 export type RetrievalPluginOptions = {
-  buildQuery?(ctx: PrepareProviderRequestContext): string;
+  buildQuery?(ctx: TurnContextCollectContext): string;
   formatChunks?(
     chunks: RetrievedChunk[],
-    ctx: PrepareProviderRequestContext,
-  ): PrepareProviderRequestResult | undefined | Promise<PrepareProviderRequestResult | undefined>;
+    ctx: TurnContextCollectContext,
+  ): TurnContextContribution[] | undefined | Promise<TurnContextContribution[] | undefined>;
   maxContextChars?: number;
   name?: string;
-  retrieve(query: string, ctx: PrepareProviderRequestContext): Promise<RetrievedChunk[]>;
+  retrieve(query: string, ctx: TurnContextCollectContext): Promise<RetrievedChunk[]>;
   topK?: number;
 };

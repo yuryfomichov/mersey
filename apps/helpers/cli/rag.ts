@@ -6,7 +6,7 @@ import {
   createLanceDbRetrievalPlugin,
   hasLanceDbIndex,
 } from '../../../harness/plugins/retrieval/lancedb/index.js';
-import type { HarnessPlugin } from '../../../harness/types.js';
+import type { RuntimeSourceRegistration, TurnContextCollector } from '../../../harness/types.js';
 import { getArgValue, getBooleanFlag } from './args.js';
 
 const DEFAULT_CHUNK_OVERLAP = 100;
@@ -25,7 +25,7 @@ export type MarkdownRagDefinition = {
 };
 
 export type MarkdownRagPluginResult = {
-  plugin: HarnessPlugin | null;
+  collectors: RuntimeSourceRegistration<TurnContextCollector>[];
   summaryLines: string[];
 };
 
@@ -81,7 +81,7 @@ export function getMarkdownRagDefinition(
 export async function createMarkdownRagPlugin(definition: MarkdownRagDefinition): Promise<MarkdownRagPluginResult> {
   if (!definition.enabled) {
     return {
-      plugin: null,
+      collectors: [],
       summaryLines: ['rag: disabled'],
     };
   }
@@ -90,7 +90,7 @@ export async function createMarkdownRagPlugin(definition: MarkdownRagDefinition)
 
   if (canReuseExistingIndex) {
     return {
-      plugin: createConfiguredLanceDbPlugin(definition),
+      collectors: [createConfiguredLanceDbCollector(definition)],
       summaryLines: [
         `rag: enabled (topK=${definition.topK}, index reused)`,
         `rag source: ${definition.sourceDir} (not re-read; rebuild to refresh index)`,
@@ -106,7 +106,7 @@ export async function createMarkdownRagPlugin(definition: MarkdownRagDefinition)
   } catch (error: unknown) {
     if (isMissingPathError(error)) {
       return {
-        plugin: null,
+        collectors: [],
         summaryLines: [`rag: disabled (data path not found)`, `rag source: ${definition.sourceDir}`],
       };
     }
@@ -118,7 +118,7 @@ export async function createMarkdownRagPlugin(definition: MarkdownRagDefinition)
 
   if (documents.length === 0) {
     return {
-      plugin: null,
+      collectors: [],
       summaryLines: [`rag: disabled (no markdown content found)`, `rag source: ${definition.sourceDir}`],
     };
   }
@@ -135,7 +135,7 @@ export async function createMarkdownRagPlugin(definition: MarkdownRagDefinition)
   }
 
   return {
-    plugin: createConfiguredLanceDbPlugin(definition),
+    collectors: [createConfiguredLanceDbCollector(definition)],
     summaryLines: [
       `rag: enabled (${fileCount} files, ${documents.length} chunks, topK=${definition.topK}, index ${didRebuild ? 'rebuilt' : 'reused'})`,
       `rag source: ${definition.sourceDir}`,
@@ -144,13 +144,19 @@ export async function createMarkdownRagPlugin(definition: MarkdownRagDefinition)
   };
 }
 
-function createConfiguredLanceDbPlugin(definition: MarkdownRagDefinition): HarnessPlugin {
-  return createLanceDbRetrievalPlugin({
-    dbPath: definition.indexDir,
-    embedQuery: async (text) => embedText(text),
-    maxContextChars: definition.maxContextChars,
-    topK: definition.topK,
-  });
+function createConfiguredLanceDbCollector(
+  definition: MarkdownRagDefinition,
+): RuntimeSourceRegistration<TurnContextCollector> {
+  return {
+    required: false,
+    sourceId: 'markdown-rag',
+    value: createLanceDbRetrievalPlugin({
+      dbPath: definition.indexDir,
+      embedQuery: async (text) => embedText(text),
+      maxContextChars: definition.maxContextChars,
+      topK: definition.topK,
+    }),
+  };
 }
 
 async function hasDataIndex(indexDir: string): Promise<boolean> {

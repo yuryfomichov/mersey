@@ -14,7 +14,7 @@ The repo is organized around a reusable `harness` package and thin apps that sit
 
 - `harness/`: reusable runtime for model turns, sessions, tools, and events
 - `harness/index.ts`: public package entry point for apps consuming `harness`
-- `harness/runtime/harness.ts`: implementation behind `createHarness()`
+- `harness/runtime/harness.ts`: runtime assembly and `createHarnessRuntime()` implementation
 - `harness/runtime/core/`: provider-agnostic turn loop and streaming turn wrapper
 - `harness/runtime/models/`: provider contracts and shared request/response types
 - `harness/providers/`: provider implementations, codecs, factory, and provider-facing types
@@ -42,12 +42,11 @@ The repo is organized around a reusable `harness` package and thin apps that sit
 
 - Apps own interaction and presentation.
 - `harness` owns turn orchestration, tool execution, session state, and event emission.
-- `harness/index.ts` exports `createHarness` and shared runtime types.
+- `harness/index.ts` exports `createHarnessRuntime`, low-level `createHarness`, and shared runtime types.
 - Built-in plugins, sessions, and tools stay namespaced under `harness/plugins/`, `harness/sessions/`, and `harness/tools/`.
-- Apps must inject both `providerInstance` and `session` into `createHarness()`.
-- Logging is plugin-based: apps inject logging plugins through `createHarness({ plugins, providerInstance, session })`.
-- Memory is also plugin-based: memory plugins can recall external memory ephemerally before the first provider call in a turn, then remember useful turn data after commit.
-- Retrieval is also plugin-based: request-prep plugins can inject ephemeral RAG context without persisting it into session messages.
+- Apps compose providers, sessions, tool catalogs, collectors, commit observers, and plugins through `createHarnessRuntime()`.
+- Logging remains event-driven and plugin-based.
+- Memory and retrieval use runtime-owned collectors and commit observers instead of request-mutation hooks.
 - Shared app-side provider, session, tool, and logging plugin wiring lives under `apps/helpers/cli/` so apps do not depend on each other.
 - The turn loop depends on `ModelProvider`, not SDK-specific request or response types.
 - Provider-specific translation belongs in `harness/providers/` and `harness/providers/codecs/`.
@@ -63,9 +62,10 @@ See `docs/harness.md` for the main integration guide, including:
 - creating a harness
 - configuring providers and sessions
 - registering tools
+- registering collectors and commit observers
 - consuming streaming turn chunks
 - subscribing to events
-- wiring request-prep plugins such as the built-in LanceDB retrieval backend
+- wiring retrieval and memory integrations through collectors and observers
 
 ## Getting Started
 

@@ -3,8 +3,8 @@ import { appendFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { createInterface } from 'node:readline';
 
-import type { HarnessPlugin } from '../../runtime/plugins/types.js';
 import { createMemoryPlugin } from './memory.js';
+import type { MemoryIntegration } from './memory.js';
 import type { MemoryItem, MemoryRememberContext } from './types.js';
 
 export type JsonlMemoryPluginOptions = {
@@ -25,7 +25,7 @@ type StoredMemoryRecord = {
 
 const MAX_STORED_RECORDS = 2_000;
 
-export function createJsonlMemoryPlugin(options: JsonlMemoryPluginOptions): HarnessPlugin {
+export function createJsonlMemoryPlugin(options: JsonlMemoryPluginOptions): MemoryIntegration {
   return createMemoryPlugin({
     maxContextChars: options.maxContextChars,
     name: options.name ?? 'jsonl-memory',

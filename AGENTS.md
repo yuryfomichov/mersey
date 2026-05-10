@@ -15,7 +15,7 @@ Main goals:
 - `harness/`
   - shared runtime
 - `harness/runtime/harness.ts`
-  - main app-facing entry point through `createHarness()`
+  - runtime assembly and canonical root through `createHarnessRuntime()`
 - `harness/runtime/core/`
   - provider-agnostic turn loop and session-aware streaming wrapper around a turn
 - `harness/runtime/models/`
@@ -55,18 +55,19 @@ Main goals:
 - CLI owns the user interaction loop.
 - `harness` owns the model turn loop, tool execution, session updates, and event emission.
 - The `harness` client contract is the most important interface in the repo and should stay as simple as possible for apps to connect to.
-- `harness/runtime/harness.ts` is the contract surface apps should build against first.
+- `createHarnessRuntime()` is the main app composition entrypoint.
+- `createHarness()` is a low-level assembly helper for focused tests and internal runtime wiring.
 - The turn-loop code in `harness/runtime/core/` should depend on `ModelProvider`, not SDK-specific request or response types.
 - The turn-streaming code in `harness/runtime/core/` should stay responsible for session locking, turn execution, and persisting turn results.
 - Provider-specific request/response mapping belongs in `harness/providers/` and `harness/providers/codecs/`.
 - Tool-specific workspace, command, and output policy belongs in `harness/runtime/tools/runtime/`, not in apps.
 - Apps should decide which tools are registered, but the runtime behavior should stay inside `harness`.
-- `createHarness()` should receive provider and session instances from app-side wiring; core should not construct built-in sessions internally.
+- Apps should pass provider, session, tool catalogs, collectors, commit observers, and plugins into `createHarnessRuntime()`; core should not construct built-in sessions internally.
 - Core session contracts belong in `harness/runtime/sessions/`; built-in session implementations belong in `harness/sessions/` so apps can swap them without changing loop behavior.
 - Event shape and safe telemetry belong in `harness/runtime/events/` so apps can observe runtime behavior without coupling to implementation details.
 - Logging is plugin-based and app-injected; core harness stays event-only.
-- Retrieval context injection should happen through request-prep plugins around provider request creation, not inside providers or apps.
-- Tool registration and behavior are unchanged in the logging refactor phase.
+- Retrieval, memory recall, and similar ephemeral inputs should flow through turn context collectors.
+- Memory write-back and similar post-commit work should flow through turn commit observers.
 
 ## Providers
 

@@ -7,6 +7,29 @@ import { createEmptyModelUsage } from '../runtime/models/types.js';
 import { AnthropicProvider } from './anthropic.js';
 import { collectEvents, collectResponse } from './test/provider-test-helpers.js';
 
+function createReadFileToolCall(id: string, path: string) {
+  return {
+    id,
+    input: { path },
+    name: 'read_file',
+    originalName: 'read_file',
+    publicName: 'read_file',
+    sourceId: 'local-tools',
+    toolId: 'local-tools:read_file',
+  };
+}
+
+function createReadFileToolResult(id: string, content: string) {
+  return {
+    content,
+    parts: [{ text: content, type: 'text' as const }],
+    publicName: 'read_file',
+    role: 'tool' as const,
+    toolCallId: id,
+    toolId: 'local-tools:read_file',
+  };
+}
+
 function createAnthropicMessage(content: Anthropic.Message['content']): Anthropic.Message {
   return {
     container: null,
@@ -211,9 +234,9 @@ test('AnthropicProvider forwards codec-produced messages and tools to messages.c
         {
           content: '',
           role: 'assistant',
-          toolCalls: [{ id: 'toolu_1', input: { path: 'note.txt' }, name: 'read_file' }],
+          toolCalls: [createReadFileToolCall('toolu_1', 'note.txt')],
         },
-        { content: 'hello from file', name: 'read_file', role: 'tool', toolCallId: 'toolu_1' },
+        createReadFileToolResult('toolu_1', 'hello from file'),
       ],
       stream: false,
       tools: [

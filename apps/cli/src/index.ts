@@ -1,6 +1,6 @@
 import { argv } from 'node:process';
 
-import { createHarness } from '../../../harness/index.js';
+import { createHarnessRuntime } from '../../../harness/index.js';
 import { createProvider } from '../../../harness/providers/index.js';
 import { getBooleanFlag, getProviderName, getSessionId } from '../../helpers/cli/args.js';
 import { createDefaultTools, getProviderModel, getToolExecutionPolicy } from '../../helpers/cli/harness-config.js';
@@ -8,6 +8,7 @@ import { runInteractiveCli } from '../../helpers/cli/interactive.js';
 import { createCliLoggingPlugins } from '../../helpers/cli/logging.js';
 import { getProviderDefinition } from '../../helpers/cli/provider-config.js';
 import { createSession, formatSessionStore, getSessionStoreDefinition } from '../../helpers/cli/session-store.js';
+import { getStartupStatusLines } from '../../helpers/cli/startup.js';
 
 async function main(): Promise<void> {
   const args = argv.slice(2);
@@ -22,7 +23,7 @@ async function main(): Promise<void> {
   const session = createSession(sessionStoreDefinition, sessionId);
   const { logPaths, plugins: loggingPlugins } = await createCliLoggingPlugins(sessionId);
   const toolExecutionPolicy = getToolExecutionPolicy();
-  const harness = createHarness({
+  const runtimeResult = await createHarnessRuntime({
     debug,
     plugins: loggingPlugins,
     providerInstance,
@@ -30,19 +31,30 @@ async function main(): Promise<void> {
     systemPrompt: 'You are a helpful assistant.',
     tools: createDefaultTools({ toolExecutionPolicy }),
   });
-  const providerModel = getProviderModel(providerDefinition);
+  if (!runtimeResult.ok) {
+    throw new Error(runtimeResult.startup.diagnostics.map((diagnostic) => diagnostic.message).join('\n'));
+  }
 
-  await runInteractiveCli({
-    appName: 'Mersey CLI',
-    cache,
-    debug,
-    harness,
-    logLine: `logs: ${logPaths.jsonlPath}, ${logPaths.textPath}`,
-    providerModel,
-    providerName,
-    sessionStoreLine: formatSessionStore(sessionStoreDefinition),
-    stream,
-  });
+  const harness = runtimeResult.runtime.harness;
+  const providerModel = getProviderModel(providerDefinition);
+  const startupStatusLines = getStartupStatusLines(runtimeResult.runtime.startup);
+
+  try {
+    await runInteractiveCli({
+      appName: 'Mersey CLI',
+      cache,
+      debug,
+      extraStatusLines: startupStatusLines,
+      harness,
+      logLine: `logs: ${logPaths.jsonlPath}, ${logPaths.textPath}`,
+      providerModel,
+      providerName,
+      sessionStoreLine: formatSessionStore(sessionStoreDefinition),
+      stream,
+    });
+  } finally {
+    await runtimeResult.runtime.dispose();
+  }
 }
 
 main().catch((error: unknown) => {

@@ -6,7 +6,7 @@ import { FakeProvider } from '../providers/fake.js';
 import { MemorySessionStore, Session } from '../sessions/index.js';
 import { ReadFileTool } from '../tools/read-file.js';
 import type { HarnessEvent } from './events/types.js';
-import { createHarness, type CreateHarnessOptions } from './harness.js';
+import { createHarness, createHarnessRuntime, type CreateHarnessOptions } from './harness.js';
 import type { ModelProvider } from './models/provider.js';
 import { createEmptyModelUsage, type ModelRequest, type ModelStreamEvent } from './models/types.js';
 import type { SessionStore } from './sessions/store.js';
@@ -50,8 +50,47 @@ test('createHarness requires a session', () => {
       createHarness({
         providerInstance: new FakeProvider(),
       } as unknown as CreateHarnessOptions),
-    /Missing session\. Pass session to createHarness\(\)\./,
+    /Missing session\. Pass session to createHarnessRuntime\(\)\./,
   );
+});
+
+test('createHarnessRuntime degrades instead of failing for optional startup failures', async () => {
+  const runtimeResult = await createHarnessRuntime({
+    collectors: [
+      {
+        required: false,
+        sourceId: 'optional-context',
+        startup: async () => ({
+          diagnostics: [
+            {
+              code: 'optional_failed',
+              message: 'optional source unavailable',
+              severity: 'error',
+            },
+          ],
+          status: 'failed',
+        }),
+        value: {
+          async collect() {
+            return [];
+          },
+        },
+      },
+    ],
+    providerInstance: new FakeProvider(),
+    session: createTestSession(),
+  });
+
+  assert.equal(runtimeResult.ok, true);
+  if (runtimeResult.ok) {
+    assert.equal(runtimeResult.runtime.startup.status, 'degraded');
+    assert.equal(
+      runtimeResult.runtime.startup.sources.find((source) => source.sourceId === 'optional-context')?.status,
+      'degraded',
+    );
+    assert.equal(runtimeResult.runtime.startup.diagnostics[0]?.sourceId, 'optional-context');
+    await runtimeResult.runtime.dispose();
+  }
 });
 
 test('createHarness uses the injected provider and appends session history', async () => {
@@ -64,7 +103,10 @@ test('createHarness uses the injected provider and appends session history', asy
   assert.equal(reply.role, 'assistant');
   assert.equal(reply.content, 'reply:hello');
   assert.equal(harness.session.id, 'test-session');
-  assert.deepEqual(provider.requests[0]?.messages, [{ role: 'user', content: 'hello' }]);
+  assert.deepEqual(
+    provider.requests[0]?.messages.map((message) => ({ content: message.content, role: message.role })),
+    [{ role: 'user', content: 'hello' }],
+  );
   assert.deepEqual(
     harness.session.messages.map((message) => ({ content: message.content, role: message.role })),
     [
@@ -76,6 +118,22 @@ test('createHarness uses the injected provider and appends session history', asy
     (await sessionStore.getSession('test-session'))?.messages.map((message) => message.content),
     ['hello', 'reply:hello'],
   );
+});
+
+test('createHarness sends provider messages without session-only fields', async () => {
+  const provider = new FakeProvider();
+  const harness = createTestHarness({ providerInstance: provider });
+
+  await harness.sendMessage('first');
+  await harness.sendMessage('second');
+
+  const messages = provider.requests[1]?.messages ?? [];
+  const firstUserMessage = messages[0] as Record<string, unknown> | undefined;
+  const firstAssistantMessage = messages[1] as Record<string, unknown> | undefined;
+
+  assert.equal(Object.hasOwn(firstUserMessage ?? {}, 'createdAt'), false);
+  assert.equal(Object.hasOwn(firstAssistantMessage ?? {}, 'createdAt'), false);
+  assert.equal(Object.hasOwn(firstAssistantMessage ?? {}, 'usage'), false);
 });
 
 test('createHarness emits events with the canonical session id after ensure', async () => {
@@ -165,11 +223,14 @@ test('createHarness serializes concurrent sendMessage calls for one session', as
 
   assert.equal(firstReply.content, 'reply:first');
   assert.equal(secondReply.content, 'reply:second');
-  assert.deepEqual(requests[1]?.messages, [
-    { content: 'first', role: 'user' },
-    { content: 'reply:first', role: 'assistant' },
-    { content: 'second', role: 'user' },
-  ]);
+  assert.deepEqual(
+    requests[1]?.messages.map((message) => ({ content: message.content, role: message.role })),
+    [
+      { content: 'first', role: 'user' },
+      { content: 'reply:first', role: 'assistant' },
+      { content: 'second', role: 'user' },
+    ],
+  );
 });
 
 test('createHarness serializes turns after canonical session id hydration', async () => {
@@ -245,11 +306,14 @@ test('createHarness serializes turns after canonical session id hydration', asyn
 
   assert.equal(firstReply.content, 'reply:first');
   assert.equal(secondReply.content, 'reply:second');
-  assert.deepEqual(requests[1]?.messages, [
-    { content: 'first', role: 'user' },
-    { content: 'reply:first', role: 'assistant' },
-    { content: 'second', role: 'user' },
-  ]);
+  assert.deepEqual(
+    requests[1]?.messages.map((message) => ({ content: message.content, role: message.role })),
+    [
+      { content: 'first', role: 'user' },
+      { content: 'reply:first', role: 'assistant' },
+      { content: 'second', role: 'user' },
+    ],
+  );
 });
 
 test('createHarness sendMessage supports explicit cancellation', async () => {
@@ -346,7 +410,7 @@ test('createHarness emits live events in stable order without leaking raw conten
                 {
                   id: 'call-read-1',
                   input: { path: 'note.txt' },
-                  name: 'read_file',
+                  name: 'workspace_read_file',
                 },
               ],
               usage: createEmptyModelUsage(),
@@ -372,6 +436,8 @@ test('createHarness emits live events in stable order without leaking raw conten
       [
         'session_started',
         'turn_started',
+        'turn_snapshot_started',
+        'turn_snapshot_completed',
         'iteration_started',
         'provider_requested',
         'provider_responded',

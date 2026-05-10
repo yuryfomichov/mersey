@@ -6,7 +6,7 @@ import { z } from 'zod';
 
 import { FileService } from './services/files/file-service.js';
 import type { ToolExecutionContext, ToolExecutionPolicy, ToolFileService } from './services/index.js';
-import type { Tool, ToolExecuteResult, ToolInput } from './types.js';
+import { createTextToolResult, type Tool, type ToolExecuteResult, type ToolInput } from './types.js';
 import { createCanonicalWorkspaceRootGetter, resolveToolExecutionPolicy } from './utils/policy.js';
 import { parseToolInput, toToolInputSchema } from './utils/schema.js';
 
@@ -30,7 +30,7 @@ export class WriteFileTool implements Tool {
 
   readonly description = 'Write a UTF-8 text file to disk.';
   readonly inputSchema = toToolInputSchema(WriteFileTool.input);
-  readonly name = 'write_file';
+  readonly name = 'workspace.write_file';
 
   constructor(options: WriteFileToolOptions = {}) {
     const policy = resolveToolExecutionPolicy(options.policy);
@@ -74,12 +74,11 @@ export class WriteFileTool implements Tool {
 
     context.cancellation.throwIfAborted();
 
-    return {
-      content: `Wrote file: ${resolvedPath}`,
-      data: {
+    return createTextToolResult(`Wrote file: ${resolvedPath}`, {
+      metadata: {
         overwritten: Boolean(overwrite),
         path: resolvedPath,
       },
-    };
+    });
   }
 }

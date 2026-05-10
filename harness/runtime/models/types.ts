@@ -1,6 +1,24 @@
+import type { NormalizedTurnContext } from '../context/types.js';
+
 export type ModelToolInput = {
   [key: string]: unknown;
 };
+
+export type ToolContentPart =
+  | {
+      type: 'text';
+      text: string;
+    }
+  | {
+      type: 'json';
+      value: unknown;
+    }
+  | {
+      type: 'resource';
+      uri: string;
+      mimeType?: string;
+      text?: string;
+    };
 
 export type ModelToolDefinition = {
   description: string;
@@ -17,6 +35,13 @@ export type ModelToolCall = {
   id: string;
   input: ModelToolInput;
   name: string;
+};
+
+export type AssistantToolCall = ModelToolCall & {
+  originalName: string;
+  publicName: string;
+  sourceId: string;
+  toolId: string;
 };
 
 export type ModelUsage = {
@@ -43,21 +68,24 @@ export type ModelUserMessage = {
 export type ModelAssistantMessage = {
   role: 'assistant';
   content: string;
-  toolCalls?: ModelToolCall[];
+  toolCalls?: AssistantToolCall[];
 };
 
 export type ModelToolResultMessage = {
   role: 'tool';
   content: string;
-  data?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
   isError?: boolean;
-  name: string;
+  parts: ToolContentPart[];
+  publicName: string;
   toolCallId: string;
+  toolId: string;
 };
 
 export type ModelMessage = ModelUserMessage | ModelAssistantMessage | ModelToolResultMessage;
 
 export type ModelRequest = {
+  context?: NormalizedTurnContext;
   messages: ModelMessage[];
   signal?: AbortSignal;
   stream: boolean;

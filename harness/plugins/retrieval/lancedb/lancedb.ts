@@ -1,6 +1,6 @@
 import { connect } from '@lancedb/lancedb';
 
-import type { HarnessPlugin, PrepareProviderRequestContext } from '../../../runtime/plugins/types.js';
+import type { TurnContextCollectContext } from '../../../runtime/plugins/types.js';
 import { createRetrievalPlugin } from '../retrieval.js';
 import type { RetrievedChunk } from '../types.js';
 import type {
@@ -47,7 +47,7 @@ export async function buildLanceDbIndex(options: BuildLanceDbIndexOptions): Prom
   }
 }
 
-export function createLanceDbRetrievalPlugin(options: LanceDbRetrievalPluginOptions): HarnessPlugin {
+export function createLanceDbRetrievalPlugin(options: LanceDbRetrievalPluginOptions) {
   const tableName = options.tableName ?? DEFAULT_TABLE_NAME;
   let tablePromise: Promise<LanceDbTable> | undefined;
 
@@ -67,7 +67,7 @@ export function createLanceDbRetrievalPlugin(options: LanceDbRetrievalPluginOpti
     formatChunks: options.formatChunks,
     maxContextChars: options.maxContextChars,
     name: options.name ?? 'lancedb-retrieval',
-    async retrieve(query: string, ctx: PrepareProviderRequestContext): Promise<RetrievedChunk[]> {
+    async retrieve(query: string, ctx: TurnContextCollectContext): Promise<RetrievedChunk[]> {
       ctx.signal?.throwIfAborted();
       const vector = await options.embedQuery(query);
       ctx.signal?.throwIfAborted();

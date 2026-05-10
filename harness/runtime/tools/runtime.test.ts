@@ -3,62 +3,91 @@ import test from 'node:test';
 
 import { ReadFileTool } from '../../tools/read-file.js';
 import { withTempDir, writeWorkspaceFiles } from '../test/test-helpers.js';
-import { createToolRuntime } from './runtime/index.js';
+import { createStaticToolCatalog } from './runtime/index.js';
 
-test('executeToolCall returns an error result for unknown tools', async () => {
-  const result = await createToolRuntime({
+test('tool catalog resolves unknown tools to null', async () => {
+  const snapshot = await createStaticToolCatalog({
     tools: [new ReadFileTool({ policy: { workspaceRoot: process.cwd() } })],
-  }).executeToolCall({
-    id: 'call-1',
-    input: { path: 'note.txt' },
-    name: 'missing_tool',
-  });
+  }).snapshot({ iteration: 1, sessionId: 'session', turnId: 'turn' });
 
-  assert.equal(result.isError, true);
-  assert.equal(result.content, 'Unknown tool: missing_tool');
+  assert.equal(
+    snapshot.resolve({
+      id: 'call-1',
+      input: { path: 'note.txt' },
+      name: 'missing_tool',
+    }),
+    null,
+  );
 });
 
-test('executeToolCall wraps tool execution errors', async () => {
-  const result = await createToolRuntime({
+test('tool catalog wraps tool execution errors', async () => {
+  const snapshot = await createStaticToolCatalog({
     tools: [new ReadFileTool({ policy: { workspaceRoot: process.cwd() } })],
-  }).executeToolCall({
+  }).snapshot({ iteration: 1, sessionId: 'session', turnId: 'turn' });
+  assert.equal(snapshot.descriptors[0]?.definition.name, 'workspace_read_file');
+  assert.equal(snapshot.descriptors[0]?.identity.originalName, 'workspace.read_file');
+  assert.equal(snapshot.descriptors[0]?.identity.publicName, 'workspace_read_file');
+
+  const resolved = snapshot.resolve({
     id: 'call-1',
     input: {},
-    name: 'read_file',
+    name: 'workspace_read_file',
+  });
+  assert.ok(resolved);
+
+  const result = await snapshot.execute(resolved, {
+    cancellation: {
+      signal: () => undefined,
+      throwIfAborted() {},
+    },
   });
 
   assert.equal(result.isError, true);
-  assert.equal(result.content, 'read_file requires a string path.');
+  assert.equal(result.parts[0]?.type, 'text');
+  assert.match(result.parts[0]?.type === 'text' ? result.parts[0].text : '', /requires a string path/);
 });
 
-test('executeToolCall returns tool results with tool metadata', async () => {
+test('tool catalog returns structured results and stable tool identity', async () => {
   await withTempDir(async (rootDir) => {
     await writeWorkspaceFiles(rootDir, { 'note.txt': 'hello from file' });
 
-    const result = await createToolRuntime({
+    const snapshot = await createStaticToolCatalog({
+      sourceId: 'local-tools',
       tools: [new ReadFileTool({ policy: { workspaceRoot: rootDir } })],
-    }).executeToolCall({
+    }).snapshot({ iteration: 1, sessionId: 'session', turnId: 'turn' });
+    const resolved = snapshot.resolve({
       id: 'call-1',
       input: { path: 'note.txt' },
-      name: 'read_file',
+      name: 'workspace_read_file',
+    });
+    assert.ok(resolved);
+    assert.equal(resolved.originalName, 'workspace.read_file');
+    assert.equal(resolved.publicName, 'workspace_read_file');
+    assert.equal(resolved.toolId, 'local-tools:workspace.read_file');
+
+    const result = await snapshot.execute(resolved, {
+      cancellation: {
+        signal: () => undefined,
+        throwIfAborted() {},
+      },
     });
 
     assert.equal(result.isError, undefined);
-    assert.equal(result.name, 'read_file');
-    assert.equal(result.toolCallId, 'call-1');
-    assert.equal(result.content, 'hello from file');
+    assert.equal(result.parts[0]?.type, 'text');
+    assert.equal(result.parts[0]?.type === 'text' ? result.parts[0].text : '', 'hello from file');
+    assert.equal(result.metadata?.path?.toString().endsWith('note.txt'), true);
   });
 });
 
-test('createToolRuntime rejects duplicate tool names', () => {
+test('static tool catalog rejects duplicate tool names', () => {
   assert.throws(
     () =>
-      createToolRuntime({
+      createStaticToolCatalog({
         tools: [
           new ReadFileTool({ policy: { workspaceRoot: process.cwd() } }),
           new ReadFileTool({ policy: { workspaceRoot: process.cwd() } }),
         ],
       }),
-    /Duplicate tool name registered: read_file/,
+    /Duplicate tool name registered: workspace.read_file/,
   );
 });

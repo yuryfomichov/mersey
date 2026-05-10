@@ -40,4 +40,6 @@ pnpm cli -- --provider openai --cache
 
 When `--debug` is enabled, `provider_requested` events include the final provider request payload after request-prep hooks run.
 
+If an optional startup source comes up degraded, the CLI prints startup warning lines before the prompt.
+
 `apps/cli` registers a small set of built-in file and command tools from `harness/tools/index.ts`. Shared app-side wiring lives under `apps/helpers/cli/`.

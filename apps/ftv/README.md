@@ -36,3 +36,5 @@ pnpm ftv -- --provider openai --session-store filesystem --sessions-dir tmp/sess
 `apps/ftv` registers a small set of built-in file and command tools from `harness/tools/index.ts`. Shared app-side wiring lives under `apps/helpers/cli/`.
 
 When `--debug` is enabled, `provider_requested` events include the final provider request payload after request-prep hooks run.
+
+If an optional startup source comes up degraded, the TUI shows a startup warning line in the status area.

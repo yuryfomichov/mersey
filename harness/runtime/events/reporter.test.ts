@@ -1,15 +1,24 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createEmptyModelUsage, type ModelToolCall } from '../models/types.js';
+import { createEmptyModelUsage } from '../models/types.js';
+import type { ResolvedToolCall } from '../tools/catalog.js';
 import { HarnessEventReporter } from './reporter.js';
 import type { HarnessEvent } from './types.js';
 
-function createToolCall(input: Record<string, unknown>): ModelToolCall {
+function createToolCall(input: Record<string, unknown>): ResolvedToolCall {
   return {
-    id: 'call-1',
     input,
-    name: 'read_file',
+    originalName: 'read_file',
+    publicName: 'read_file',
+    rawCall: {
+      id: 'call-1',
+      input,
+      name: 'read_file',
+    },
+    sourceId: 'local-tools',
+    toolCallId: 'call-1',
+    toolId: 'local-tools:read_file',
   };
 }
 
@@ -106,10 +115,12 @@ test('HarnessEventReporter sanitizes debug provider request payloads for event d
       messages: [
         {
           content: 'tool output',
-          data: { callback: () => 'not cloneable', first: sharedValue, second: sharedValue },
-          name: 'example_tool',
+          metadata: { callback: () => 'not cloneable', first: sharedValue, second: sharedValue },
+          parts: [{ text: 'tool output', type: 'text' }],
+          publicName: 'example_tool',
           role: 'tool',
           toolCallId: 'call-1',
+          toolId: 'local-tools:example_tool',
         },
       ],
       stream: false,
@@ -125,10 +136,12 @@ test('HarnessEventReporter sanitizes debug provider request payloads for event d
     messages: [
       {
         content: 'tool output',
-        data: { callback: '[function]', first: { kind: 'shared' }, second: { kind: 'shared' } },
-        name: 'example_tool',
+        metadata: { callback: '[function]', first: { kind: 'shared' }, second: { kind: 'shared' } },
+        parts: [{ text: 'tool output', type: 'text' }],
+        publicName: 'example_tool',
         role: 'tool',
         toolCallId: 'call-1',
+        toolId: 'local-tools:example_tool',
       },
     ],
     stream: false,
@@ -205,6 +218,36 @@ test('HarnessEventReporter includes debug tool args when debug is enabled', () =
       cwd: '.',
     },
   );
+});
+
+test('HarnessEventReporter reports cyclic JSON tool parts without throwing', () => {
+  const events: HarnessEvent[] = [];
+  const reporter = new HarnessEventReporter({
+    getSessionId: () => 'session-1',
+    providerName: 'fake',
+  });
+  const value: Record<string, unknown> = { name: 'root' };
+  value.self = value;
+
+  reporter.subscribe((event) => {
+    events.push(event);
+  });
+
+  reporter.turnStarted(5);
+  assert.doesNotThrow(() => {
+    reporter.toolFinished(
+      1,
+      createToolCall({ path: 'notes/note.txt' }),
+      {
+        parts: [{ type: 'json', value }],
+      },
+      12,
+    );
+  });
+
+  const event = events.at(-1);
+  assert.equal(event?.type, 'tool_finished');
+  assert.equal(event && event.type === 'tool_finished' ? event.resultContentLength > 0 : false, true);
 });
 
 test('HarnessEventReporter sanitizes provider failures in turn_failed events', () => {

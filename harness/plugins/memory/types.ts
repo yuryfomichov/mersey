@@ -1,10 +1,5 @@
-import type {
-  PrepareProviderRequestContext,
-  PrepareProviderRequestMessage,
-  PrepareProviderRequestResult,
-  PrepareProviderRequestUserMessage,
-} from '../../runtime/plugins/types.js';
-import type { Message } from '../../runtime/sessions/types.js';
+import type { TurnContextContribution } from '../../runtime/context/types.js';
+import type { TurnCommitContext, TurnContextCollectContext } from '../../runtime/plugins/types.js';
 
 export type MemoryItem = {
   content: string;
@@ -14,30 +9,16 @@ export type MemoryItem = {
   title?: string;
 };
 
-export type MemoryRecallContext = {
-  model: string;
-  providerName: string;
-  sessionId: string;
-  signal?: AbortSignal;
-  transcript: readonly Readonly<PrepareProviderRequestMessage>[];
-  turnId: string;
-  userMessage: Readonly<PrepareProviderRequestUserMessage>;
-};
+export type MemoryRecallContext = TurnContextCollectContext;
 
-export type MemoryRememberContext = {
-  historyBeforeTurn: readonly Message[];
-  model: string;
-  sessionId: string;
-  turnId: string;
-  turnMessages: readonly Message[];
-};
+export type MemoryRememberContext = TurnCommitContext;
 
 export type MemoryPluginOptions = {
   buildQuery?(ctx: MemoryRecallContext): string;
   formatMemories?(
     memories: MemoryItem[],
     ctx: MemoryRecallContext,
-  ): PrepareProviderRequestResult | undefined | Promise<PrepareProviderRequestResult | undefined>;
+  ): TurnContextContribution[] | undefined | Promise<TurnContextContribution[] | undefined>;
   maxContextChars?: number;
   name?: string;
   recall(query: string, ctx: MemoryRecallContext): Promise<MemoryItem[]>;
@@ -45,15 +26,3 @@ export type MemoryPluginOptions = {
   swallowRecallErrors?: boolean;
   topK?: number;
 };
-
-export function toMemoryRecallContext(ctx: PrepareProviderRequestContext): MemoryRecallContext {
-  return {
-    model: ctx.model,
-    providerName: ctx.providerName,
-    sessionId: ctx.sessionId,
-    signal: ctx.signal,
-    transcript: ctx.transcript,
-    turnId: ctx.turnId,
-    userMessage: ctx.userMessage,
-  };
-}

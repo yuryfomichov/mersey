@@ -16,6 +16,10 @@ function createToolExecutionContext(): ToolExecutionContext {
   };
 }
 
+function getText(result: Awaited<ReturnType<WriteFileTool['execute']>>): string | undefined {
+  return result.parts[0]?.type === 'text' ? result.parts[0].text : undefined;
+}
+
 test('WriteFileTool writes files relative to the workspace root', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
 
@@ -30,8 +34,8 @@ test('WriteFileTool writes files relative to the workspace root', async () => {
 
     assert.equal(content, 'hello from write');
     assert.equal(typeof result, 'object');
-    assert.match(result.content.replaceAll('\\', '/'), /^Wrote file: .*notes\/note\.txt$/);
-    assert.equal(result.data && 'overwritten' in result.data ? result.data.overwritten : undefined, false);
+    assert.match((getText(result) ?? '').replaceAll('\\', '/'), /^Wrote file: .*notes\/note\.txt$/);
+    assert.equal(result.metadata?.overwritten, false);
   } finally {
     await rm(rootDir, { force: true, recursive: true });
   }
@@ -160,14 +164,14 @@ test('WriteFileTool supports tool-specific denylist rules in shared policy', asy
   try {
     const tool = new WriteFileTool({
       policy: {
-        pathDenylist: [{ basename: '.env', reason: 'sensitive file', tools: ['write_file'] }],
+        pathDenylist: [{ basename: '.env', reason: 'sensitive file', tools: ['workspace.write_file'] }],
         workspaceRoot: rootDir,
       },
     });
 
     await assert.rejects(
       () => tool.execute({ content: 'SECRET=1', path: '.env' }, createToolExecutionContext()),
-      /write_file path is blocked by tool policy: \.env \(sensitive file\)/,
+      /workspace\.write_file path is blocked by tool policy: \.env \(sensitive file\)/,
     );
   } finally {
     await rm(rootDir, { force: true, recursive: true });

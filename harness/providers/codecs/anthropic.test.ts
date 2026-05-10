@@ -8,6 +8,29 @@ import { AnthropicCodec } from './anthropic.js';
 
 const codec = new AnthropicCodec();
 
+function createReadFileToolCall(id: string, path: string) {
+  return {
+    id,
+    input: { path },
+    name: 'read_file',
+    originalName: 'read_file',
+    publicName: 'read_file',
+    sourceId: 'local-tools',
+    toolId: 'local-tools:read_file',
+  };
+}
+
+function createReadFileToolResult(id: string, content: string) {
+  return {
+    content,
+    parts: [{ text: content, type: 'text' as const }],
+    publicName: 'read_file',
+    role: 'tool' as const,
+    toolCallId: id,
+    toolId: 'local-tools:read_file',
+  };
+}
+
 function createAnthropicMessage(content: Anthropic.Message['content']): Anthropic.Message {
   return {
     container: null,
@@ -39,20 +62,9 @@ test('getMessages replays tool-only assistant responses without fake text', () =
       {
         content: '',
         role: 'assistant',
-        toolCalls: [
-          {
-            id: 'toolu_123',
-            input: { path: 'note.txt' },
-            name: 'read_file',
-          },
-        ],
+        toolCalls: [createReadFileToolCall('toolu_123', 'note.txt')],
       },
-      {
-        content: 'hello from file',
-        name: 'read_file',
-        role: 'tool',
-        toolCallId: 'toolu_123',
-      },
+      createReadFileToolResult('toolu_123', 'hello from file'),
     ],
     stream: false,
   });
@@ -77,31 +89,10 @@ test('getMessages groups consecutive tool results into one user message', () => 
       {
         content: '',
         role: 'assistant',
-        toolCalls: [
-          {
-            id: 'toolu_1',
-            input: { path: 'a.txt' },
-            name: 'read_file',
-          },
-          {
-            id: 'toolu_2',
-            input: { path: 'b.txt' },
-            name: 'read_file',
-          },
-        ],
+        toolCalls: [createReadFileToolCall('toolu_1', 'a.txt'), createReadFileToolCall('toolu_2', 'b.txt')],
       },
-      {
-        content: 'A',
-        name: 'read_file',
-        role: 'tool',
-        toolCallId: 'toolu_1',
-      },
-      {
-        content: 'B',
-        name: 'read_file',
-        role: 'tool',
-        toolCallId: 'toolu_2',
-      },
+      createReadFileToolResult('toolu_1', 'A'),
+      createReadFileToolResult('toolu_2', 'B'),
     ],
     stream: false,
   });

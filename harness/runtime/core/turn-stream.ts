@@ -1,31 +1,33 @@
+import type { TurnCommitObserverRunner } from '../commit/runner.js';
+import type { TurnContextCollectorRunner } from '../context/runner.js';
 import { HarnessEventReporter } from '../events/reporter.js';
+import { RuntimeWorkTracker } from '../lifecycle.js';
 import type { ModelProvider } from '../models/provider.js';
 import type { PluginRunner } from '../plugins/runner.js';
 import type { HarnessSession } from '../sessions/runtime.js';
 import type { Message } from '../sessions/types.js';
-import type { ToolRuntimeFactory } from '../tools/runtime/index.js';
+import type { ComposedToolCatalog } from '../tools/composed-catalog.js';
 import { snapshot } from '../utils/object.js';
 import { createAsyncQueue } from './async-queue.js';
 import { streamLoop, type TurnChunk } from './loop.js';
 
-/**
- * Options for creating a turn stream.
- */
 type TurnStreamOptions = {
+  commitObservers: TurnCommitObserverRunner;
   content: string;
-  reporter: HarnessEventReporter;
+  contextCollectors: TurnContextCollectorRunner;
   pluginRunner: PluginRunner;
   provider: ModelProvider;
-  signal?: AbortSignal;
+  reporter: HarnessEventReporter;
+  runtimeSignal?: AbortSignal;
   session: HarnessSession;
+  signal?: AbortSignal;
   stream: boolean;
   systemPrompt?: string;
-  toolRuntimeFactory: ToolRuntimeFactory;
+  toolCatalog: ComposedToolCatalog;
+  workTracker: RuntimeWorkTracker;
 };
 
-export type TurnStreamFactoryOptions = Omit<TurnStreamOptions, 'content' | 'stream' | 'pluginRunner'> & {
-  pluginRunner: PluginRunner;
-};
+export type TurnStreamFactoryOptions = Omit<TurnStreamOptions, 'content' | 'stream' | 'signal'>;
 
 export type TurnStream = AsyncIterable<TurnChunk> & AsyncIterator<TurnChunk>;
 
@@ -35,47 +37,25 @@ function isAbortReason(error: unknown, signal: AbortSignal): boolean {
   return error === signal.reason || (error instanceof Error && error.name === 'AbortError');
 }
 
-/**
- * Executes a single turn (user message → model response → optional tool calls)
- * within a session. This is the core turn execution wrapper that handles:
- *
- * 1. **Session locking** — Only one turn can run per session at a time. The
- *    {@link Session.runExclusive} call ensures turns are serialized.
- *
- * 2. **Lazy start** — The turn does not begin until the first call to `next()`
- *    on the returned iterator. This allows the caller to attach abort signals
- *    or other setup before work begins.
- *
- * 3. **Async queue bridge** — The synchronous {@link streamLoop} generator
- *    yields {@link TurnChunk} values, which are pushed to an {@link AsyncQueue}
- *    for async consumption. This decouples the producer and consumer rates.
- *
- * 4. **Lifecycle** — On success, messages are committed to the session and
- *    the queue is ended. On error, the queue is failed and the error is rethrown.
- *
- * The returned iterator yields {@link TurnChunk} values:
- * - `{ delta, type: 'assistant_delta' }` — Streaming text from the model
- * - `{ type: 'assistant_message_completed' }` — All deltas streamed, tool calls incoming
- * - `{ message, type: 'final_message' }` — Turn complete, no tool calls
- *
- * @returns An async iterable/iterator that yields {@link TurnChunk} values.
- *          The underlying turn is aborted when `return()` is called.
- */
 function createTurnStream({
+  commitObservers,
   content,
+  contextCollectors,
   reporter,
   pluginRunner,
   provider,
+  runtimeSignal,
   signal,
   session,
   stream,
   systemPrompt,
-  toolRuntimeFactory,
+  toolCatalog,
+  workTracker,
 }: TurnStreamOptions): AsyncIterable<TurnChunk> & AsyncIterator<TurnChunk> {
   const queue = createAsyncQueue<TurnChunk>();
   const abortController = new AbortController();
   const onAbort = () => {
-    abortController.abort(signal?.reason);
+    abortController.abort(signal?.reason ?? runtimeSignal?.reason);
   };
   let backgroundTask: Promise<void> | null = null;
   let started = false;
@@ -87,10 +67,11 @@ function createTurnStream({
 
     started = true;
 
-    if (signal?.aborted) {
+    if (signal?.aborted || runtimeSignal?.aborted) {
       onAbort();
     } else {
       signal?.addEventListener('abort', onAbort, { once: true });
+      runtimeSignal?.addEventListener('abort', onAbort, { once: true });
     }
 
     backgroundTask = session.runExclusive(async () => {
@@ -108,14 +89,15 @@ function createTurnStream({
 
         const iterator = streamLoop({
           content,
+          contextCollectors,
           history: historyBeforeTurn,
-          reporter,
           pluginRunner,
           provider,
+          reporter,
           signal: abortController.signal,
           stream,
           systemPrompt,
-          toolRuntimeFactory,
+          toolCatalog,
         });
         let turnMessages: Message[] = [];
         let finalMessageChunk: TurnChunk | null = null;
@@ -155,7 +137,7 @@ function createTurnStream({
         }
 
         if (afterTurnCommittedContext) {
-          pluginRunner.runAfterTurnCommitted(afterTurnCommittedContext);
+          commitObservers.runAfterCommit(afterTurnCommittedContext);
         }
 
         queue.end();
@@ -164,11 +146,12 @@ function createTurnStream({
         throw error;
       } finally {
         signal?.removeEventListener('abort', onAbort);
+        runtimeSignal?.removeEventListener('abort', onAbort);
         unsubscribe();
       }
     });
 
-    void backgroundTask.catch(() => {});
+    void workTracker.track(backgroundTask.catch(() => {}));
   };
 
   return {

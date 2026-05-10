@@ -7,6 +7,18 @@ import type { Message, SessionState, StoredSessionState } from '../runtime/sessi
 import { MemorySessionStore } from './memory-store.js';
 import { Session } from './session.js';
 
+function createReadFileToolCall(id: string, path: string) {
+  return {
+    id,
+    input: { path },
+    name: 'read_file',
+    originalName: 'read_file',
+    publicName: 'read_file',
+    sourceId: 'local-tools',
+    toolId: 'local-tools:read_file',
+  };
+}
+
 test('Session snapshots tolerate cyclic message data', async () => {
   const cycle: Record<string, unknown> = {};
 
@@ -22,10 +34,12 @@ test('Session snapshots tolerate cyclic message data', async () => {
           {
             content: 'tool output',
             createdAt: '2026-03-29T00:00:01.000Z',
-            data: cycle,
-            name: 'read_file',
+            metadata: cycle,
+            parts: [{ text: 'tool output', type: 'text' }],
+            publicName: 'read_file',
             role: 'tool',
             toolCallId: 'call-1',
+            toolId: 'local-tools:read_file',
           },
         ],
         usage: createEmptyModelUsage(),
@@ -56,18 +70,12 @@ test('Session.commit snapshots caller messages before persistence', async () => 
     content: 'hello',
     createdAt: '2026-03-29T00:00:01.000Z',
     role: 'assistant',
-    toolCalls: [
-      {
-        id: 'call-1',
-        input: { path: 'note.txt' },
-        name: 'read_file',
-      },
-    ],
+    toolCalls: [createReadFileToolCall('call-1', 'note.txt')],
   };
 
   await session.commit([message]);
 
-  if (message.toolCalls?.[0]) {
+  if (message.role === 'assistant' && message.toolCalls?.[0]) {
     message.toolCalls[0].input = { path: 'changed.txt' };
   }
 

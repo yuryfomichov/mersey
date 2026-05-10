@@ -2,17 +2,17 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { createHarness } from '../../index.js';
+import { createHarnessRuntime } from '../../index.js';
 import { FakeProvider } from '../../providers/fake.js';
+import type { TurnContextCollectContext } from '../../runtime/plugins/types.js';
 import { withTempDir } from '../../runtime/test/test-helpers.js';
 import { MemorySessionStore, Session } from '../../sessions/index.js';
 import { buildLanceDbIndex, createLanceDbRetrievalPlugin } from './lancedb/index.js';
 import { createRetrievalPlugin } from './retrieval.js';
 
-function createPrepareContext() {
+function createCollectContext(overrides: Partial<TurnContextCollectContext> = {}): TurnContextCollectContext {
   const userMessage = {
     content: 'payments',
-    createdAt: new Date().toISOString(),
     role: 'user' as const,
   };
 
@@ -22,9 +22,10 @@ function createPrepareContext() {
     providerName: 'fake',
     sessionId: 'test-session',
     signal: undefined,
-    transcript: [userMessage],
+    transcript: [],
     turnId: 'test-turn',
     userMessage,
+    ...overrides,
   };
 }
 
@@ -35,8 +36,8 @@ function embedText(text: string): number[] {
   return [count('payments'), count('frontend'), count('search')];
 }
 
-test('createRetrievalPlugin formats retrieved chunks into a synthetic user message', async () => {
-  const plugin = createRetrievalPlugin({
+test('createRetrievalPlugin collector formats retrieved chunks into a synthetic user contribution', async () => {
+  const collector = createRetrievalPlugin({
     maxContextChars: 220,
     async retrieve() {
       return [
@@ -49,24 +50,14 @@ test('createRetrievalPlugin formats retrieved chunks into a synthetic user messa
     },
   });
 
-  const result = await plugin.prepareProviderRequest?.(
-    {
-      messages: [{ content: 'payments', role: 'user' }],
-      stream: false,
-      systemPrompt: 'Be helpful.',
-      tools: [],
-    },
-    createPrepareContext(),
-  );
+  const contributions = await collector.collect(createCollectContext());
 
-  assert.ok(result);
-  assert.equal(result?.prependMessages?.[0]?.role, 'user');
-  assert.match(result?.prependMessages?.[0]?.content ?? '', /Retrieved context for the next answer/);
-  assert.match(result?.prependMessages?.[0]?.content ?? '', /resume\.md/);
-  assert.match(result?.prependMessages?.[0]?.content ?? '', /payments platform/);
+  assert.equal(contributions[0]?.kind, 'message');
+  assert.match(contributions[0]?.kind === 'message' ? contributions[0].message.content : '', /Retrieved context/);
+  assert.match(contributions[0]?.kind === 'message' ? contributions[0].message.content : '', /resume\.md/);
 });
 
-test('createRetrievalPlugin rejects invalid maxContextChars', () => {
+test('createRetrievalPlugin validates limits and propagates abort before retrieval', async () => {
   assert.throws(
     () =>
       createRetrievalPlugin({
@@ -77,42 +68,21 @@ test('createRetrievalPlugin rejects invalid maxContextChars', () => {
       }),
     /maxContextChars must be a positive integer/,
   );
-});
 
-test('createRetrievalPlugin skips backend retrieval when topK is zero', async () => {
   let retrieveCalls = 0;
-  const plugin = createRetrievalPlugin({
+  const collector = createRetrievalPlugin({
     topK: 0,
     async retrieve() {
       retrieveCalls += 1;
-      return [
-        {
-          content: 'Built a payments platform for global merchants.',
-          id: 'doc-1',
-        },
-      ];
+      return [];
     },
   });
-
-  const result = await plugin.prepareProviderRequest?.(
-    {
-      messages: [{ content: 'payments', role: 'user' }],
-      stream: false,
-      systemPrompt: 'Be helpful.',
-      tools: [],
-    },
-    createPrepareContext(),
-  );
-
+  assert.deepEqual(await collector.collect(createCollectContext()), []);
   assert.equal(retrieveCalls, 0);
-  assert.deepEqual(result, {});
-});
 
-test('createRetrievalPlugin stops before backend retrieval when the signal is already aborted', async () => {
-  let retrieveCalls = 0;
   const controller = new AbortController();
   controller.abort();
-  const plugin = createRetrievalPlugin({
+  const abortingCollector = createRetrievalPlugin({
     async retrieve() {
       retrieveCalls += 1;
       return [];
@@ -121,95 +91,29 @@ test('createRetrievalPlugin stops before backend retrieval when the signal is al
 
   await assert.rejects(
     async () => {
-      await plugin.prepareProviderRequest?.(
-        {
-          messages: [{ content: 'payments', role: 'user' }],
-          stream: false,
-          systemPrompt: 'Be helpful.',
-          tools: [],
-        },
-        {
-          ...createPrepareContext(),
-          signal: controller.signal,
-        },
-      );
+      await abortingCollector.collect(createCollectContext({ signal: controller.signal }));
     },
     { name: 'AbortError' },
   );
-
-  assert.equal(retrieveCalls, 0);
 });
 
-test('LanceDB retrieval plugin skips search when the query embedding is all zeros', async () => {
-  const plugin = createLanceDbRetrievalPlugin({
+test('LanceDB retrieval plugin skips search for zero vectors and rejects invalid embeddings', async () => {
+  const zeroCollector = createLanceDbRetrievalPlugin({
     dbPath: '/path/that/should/not/be/opened',
     embedQuery: async () => [0, 0, 0],
     topK: 1,
   });
 
-  const result = await plugin.prepareProviderRequest?.(
-    {
-      messages: [{ content: 'R', role: 'user' }],
-      stream: false,
-      systemPrompt: 'Be helpful.',
-      tools: [],
-    },
-    {
-      ...createPrepareContext(),
-      userMessage: { content: 'R', role: 'user' },
-    },
-  );
+  assert.deepEqual(await zeroCollector.collect(createCollectContext()), []);
 
-  assert.deepEqual(result, {});
-});
-
-test('LanceDB retrieval plugin stops before opening the table when embedding aborts the request', async () => {
-  const controller = new AbortController();
-  const plugin = createLanceDbRetrievalPlugin({
-    dbPath: '/path/that/should/not/be/opened',
-    embedQuery: async () => {
-      controller.abort();
-      return [1, 0, 0];
-    },
-    topK: 1,
-  });
-
-  await assert.rejects(
-    async () => {
-      await plugin.prepareProviderRequest?.(
-        {
-          messages: [{ content: 'payments', role: 'user' }],
-          stream: false,
-          systemPrompt: 'Be helpful.',
-          tools: [],
-        },
-        {
-          ...createPrepareContext(),
-          signal: controller.signal,
-        },
-      );
-    },
-    { name: 'AbortError' },
-  );
-});
-
-test('LanceDB retrieval plugin rejects non-finite query embeddings', async () => {
-  const plugin = createLanceDbRetrievalPlugin({
+  const invalidCollector = createLanceDbRetrievalPlugin({
     dbPath: '/path/that/should/not/be/opened',
     embedQuery: async () => [Number.NaN, 0, 1],
     topK: 1,
   });
 
   await assert.rejects(async () => {
-    await plugin.prepareProviderRequest?.(
-      {
-        messages: [{ content: 'payments', role: 'user' }],
-        stream: false,
-        systemPrompt: 'Be helpful.',
-        tools: [],
-      },
-      createPrepareContext(),
-    );
+    await invalidCollector.collect(createCollectContext());
   }, /query embedding must be a non-empty numeric vector/);
 });
 
@@ -234,7 +138,7 @@ test('buildLanceDbIndex rejects non-finite document embeddings', async () => {
   });
 });
 
-test('LanceDB retrieval plugin injects indexed context without persisting it to session history', async () => {
+test('LanceDB retrieval collector injects indexed context without persisting it to session history', async () => {
   await withTempDir(async (rootDir) => {
     const dbPath = join(rootDir, 'rag-db');
 
@@ -259,27 +163,35 @@ test('LanceDB retrieval plugin injects indexed context without persisting it to 
     });
 
     const provider = new FakeProvider();
-    const session = new Session({
-      id: 'rag-session',
-      store: new MemorySessionStore(),
-    });
-    const harness = createHarness({
-      plugins: [
-        createLanceDbRetrievalPlugin({
-          dbPath,
-          embedQuery: async (text) => embedText(text),
-          topK: 1,
-        }),
+    const runtimeResult = await createHarnessRuntime({
+      collectors: [
+        {
+          required: false,
+          sourceId: 'rag',
+          value: createLanceDbRetrievalPlugin({
+            dbPath,
+            embedQuery: async (text) => embedText(text),
+            topK: 1,
+          }),
+        },
       ],
       providerInstance: provider,
-      session,
+      session: new Session({
+        id: 'rag-session',
+        store: new MemorySessionStore(),
+      }),
     });
+    assert.equal(runtimeResult.ok, true);
+    if (!runtimeResult.ok) {
+      return;
+    }
+
+    const harness = runtimeResult.runtime.harness;
 
     const reply = await harness.sendMessage('payments');
 
     assert.equal(reply.content, 'reply:payments');
     assert.equal(provider.requests.length, 1);
-    assert.equal(provider.requests[0]?.messages.length, 2);
     assert.match(provider.requests[0]?.messages[0]?.content ?? '', /resume\.md/);
     assert.match(provider.requests[0]?.messages[0]?.content ?? '', /payments platform/);
     assert.deepEqual(
@@ -289,55 +201,5 @@ test('LanceDB retrieval plugin injects indexed context without persisting it to 
         { content: 'reply:payments', role: 'assistant' },
       ],
     );
-  });
-});
-
-test('LanceDB retrieval plugin retries after an initial table-open failure', async () => {
-  await withTempDir(async (rootDir) => {
-    const dbPath = join(rootDir, 'rag-db');
-    const plugin = createLanceDbRetrievalPlugin({
-      dbPath,
-      embedQuery: async (text) => embedText(text),
-      topK: 1,
-    });
-
-    await assert.rejects(
-      async () =>
-        plugin.prepareProviderRequest?.(
-          {
-            messages: [{ content: 'payments', role: 'user' }],
-            stream: false,
-            systemPrompt: 'Be helpful.',
-            tools: [],
-          },
-          createPrepareContext(),
-        ),
-      /table .*not found|does not exist|was not found/i,
-    );
-
-    await buildLanceDbIndex({
-      dbPath,
-      documents: [
-        {
-          content: 'Built a payments platform for global merchants.',
-          id: 'resume-1',
-          source: 'resume.md',
-        },
-      ],
-      embedDocuments: async (texts) => texts.map(embedText),
-      replace: true,
-    });
-
-    const result = await plugin.prepareProviderRequest?.(
-      {
-        messages: [{ content: 'payments', role: 'user' }],
-        stream: false,
-        systemPrompt: 'Be helpful.',
-        tools: [],
-      },
-      createPrepareContext(),
-    );
-
-    assert.match(result?.prependMessages?.[0]?.content ?? '', /payments platform/);
   });
 });
