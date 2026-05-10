@@ -11,7 +11,7 @@ import type {
   ToolOutputService,
 } from './services/index.js';
 import { OutputService } from './services/output/output-service.js';
-import type { Tool, ToolExecuteResult, ToolInput } from './types.js';
+import { createTextToolResult, type Tool, type ToolExecuteResult, type ToolInput } from './types.js';
 import { createCanonicalWorkspaceRootGetter, resolveToolExecutionPolicy } from './utils/policy.js';
 import { parseToolInput, toToolInputSchema } from './utils/schema.js';
 
@@ -32,7 +32,7 @@ export class ReadFileTool implements Tool {
 
   readonly description = 'Read a UTF-8 text file from disk.';
   readonly inputSchema = toToolInputSchema(ReadFileTool.input);
-  readonly name = 'read_file';
+  readonly name = 'workspace.read_file';
 
   constructor(options: ReadFileToolOptions = {}) {
     const policy = resolveToolExecutionPolicy(options.policy);
@@ -67,12 +67,11 @@ export class ReadFileTool implements Tool {
     context.cancellation.throwIfAborted();
     const limited = this.output.limitResult(content);
 
-    return {
-      content: limited.text,
-      data: {
+    return createTextToolResult(limited.text, {
+      metadata: {
         path: resolvedPath,
         truncated: limited.truncated,
       },
-    };
+    });
   }
 }

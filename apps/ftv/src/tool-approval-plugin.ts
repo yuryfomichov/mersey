@@ -1,6 +1,6 @@
-import type { BeforeToolCallContext, HarnessPlugin, HookDecision } from '../../../harness/types.js';
+import type { BeforeToolExecutionContext, HarnessPlugin, HookDecision } from '../../../harness/types.js';
 
-export type BlockAndAskUser = (ctx: BeforeToolCallContext) => Promise<HookDecision> | HookDecision;
+export type BlockAndAskUser = (ctx: BeforeToolExecutionContext) => Promise<HookDecision> | HookDecision;
 
 export type ToolApprovalPluginOptions = {
   blockAndAskUser: BlockAndAskUser;
@@ -12,7 +12,7 @@ export function createAwaitableToolApprovalPlugin(options: ToolApprovalPluginOpt
 
   return {
     name: pluginName,
-    beforeToolCall(ctx: BeforeToolCallContext): Promise<HookDecision> | HookDecision {
+    beforeToolExecution(ctx: BeforeToolExecutionContext): Promise<HookDecision> | HookDecision {
       return options.blockAndAskUser(ctx);
     },
   };

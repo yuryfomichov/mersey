@@ -56,3 +56,5 @@ RAG indexes are reused across restarts by default. Pass `--rebuild-rag` to rebui
 For local memory testing, `--memory` enables a file-backed memory plugin that stores remembered turns in newline-delimited JSON under `tmp/memory/rag-cli.jsonl` by default.
 
 When `--debug` is enabled, `provider_requested` events include the final provider request payload after request-prep hooks run.
+
+If an optional startup source comes up degraded, the CLI prints startup warning lines before the prompt.

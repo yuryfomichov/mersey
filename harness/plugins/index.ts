@@ -6,6 +6,7 @@ export { createRetrievalPlugin } from './retrieval/index.js';
 export type {
   JsonlMemoryPluginOptions,
   MemoryItem,
+  MemoryIntegration,
   MemoryPluginOptions,
   MemoryRecallContext,
   MemoryRememberContext,

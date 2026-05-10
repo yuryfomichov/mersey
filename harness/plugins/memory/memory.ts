@@ -1,21 +1,17 @@
-import type { ModelMessage } from '../../runtime/models/types.js';
-import type {
-  AfterTurnCommittedContext,
-  HarnessPlugin,
-  PrepareProviderRequestResult,
-} from '../../runtime/plugins/types.js';
-import {
-  toMemoryRecallContext,
-  type MemoryItem,
-  type MemoryPluginOptions,
-  type MemoryRememberContext,
-} from './types.js';
+import type { TurnContextContribution } from '../../runtime/context/types.js';
+import type { TurnCommitObserver, TurnContextCollector } from '../../runtime/plugins/types.js';
+import { type MemoryItem, type MemoryPluginOptions } from './types.js';
 
 const DEFAULT_MAX_CONTEXT_CHARS = 5_000;
 const DEFAULT_TOP_K = 5;
 
-export function createMemoryPlugin(options: MemoryPluginOptions): HarnessPlugin {
-  const pluginName = options.name ?? 'memory';
+export type MemoryIntegration = {
+  collector: TurnContextCollector;
+  commitObserver: TurnCommitObserver;
+};
+
+export function createMemoryPlugin(options: MemoryPluginOptions): MemoryIntegration {
+  const sourceId = options.name ?? 'memory';
   const maxContextChars = options.maxContextChars ?? DEFAULT_MAX_CONTEXT_CHARS;
   const swallowRecallErrors = options.swallowRecallErrors ?? true;
   const topK = options.topK ?? DEFAULT_TOP_K;
@@ -24,42 +20,44 @@ export function createMemoryPlugin(options: MemoryPluginOptions): HarnessPlugin 
   assertPositiveInteger(maxContextChars, 'maxContextChars');
 
   return {
-    name: pluginName,
-    async afterTurnCommitted(ctx): Promise<void> {
-      await options.remember(toMemoryRememberContext(ctx));
+    collector: {
+      async collect(ctx): Promise<TurnContextContribution[]> {
+        if (ctx.iteration > 1) {
+          return [];
+        }
+
+        const query = (options.buildQuery?.(ctx) ?? ctx.userMessage.content).trim();
+
+        if (query.length === 0 || topK === 0) {
+          return [];
+        }
+
+        ctx.signal?.throwIfAborted();
+        const memories = await recallMemories({
+          query,
+          recall: options.recall,
+          recallContext: ctx,
+          signal: ctx.signal,
+          swallowRecallErrors,
+          topK,
+        });
+
+        if (memories.length === 0) {
+          return [];
+        }
+
+        ctx.signal?.throwIfAborted();
+
+        return (
+          (await options.formatMemories?.(memories, ctx)) ??
+          defaultFormatMemories(memories, { maxContextChars, sourceId })
+        );
+      },
     },
-    async prepareProviderRequest(_request, ctx): Promise<PrepareProviderRequestResult> {
-      if (ctx.iteration > 1) {
-        return {};
-      }
-
-      const recallContext = toMemoryRecallContext(ctx);
-      const query = (options.buildQuery?.(recallContext) ?? recallContext.userMessage.content).trim();
-
-      if (query.length === 0 || topK === 0) {
-        return {};
-      }
-
-      ctx.signal?.throwIfAborted();
-      const memories = await recallMemories({
-        query,
-        recall: options.recall,
-        recallContext,
-        signal: ctx.signal,
-        swallowRecallErrors,
-        topK,
-      });
-
-      if (memories.length === 0) {
-        return {};
-      }
-
-      ctx.signal?.throwIfAborted();
-
-      return (
-        (await options.formatMemories?.(memories, recallContext)) ??
-        defaultFormatMemories(memories, { maxContextChars })
-      );
+    commitObserver: {
+      async afterTurnCommitted(ctx): Promise<void> {
+        await options.remember(ctx);
+      },
     },
   };
 }
@@ -67,7 +65,7 @@ export function createMemoryPlugin(options: MemoryPluginOptions): HarnessPlugin 
 async function recallMemories(options: {
   query: string;
   recall: MemoryPluginOptions['recall'];
-  recallContext: ReturnType<typeof toMemoryRecallContext>;
+  recallContext: Parameters<NonNullable<MemoryPluginOptions['buildQuery']>>[0];
   signal?: AbortSignal;
   swallowRecallErrors: boolean;
   topK: number;
@@ -99,25 +97,28 @@ function defaultFormatMemories(
   memories: MemoryItem[],
   options: {
     maxContextChars: number;
+    sourceId: string;
   },
-): PrepareProviderRequestResult {
+): TurnContextContribution[] {
   const intro =
     'Relevant memory for the next answer. Use only memory that helps with this request. If memory conflicts with the conversation, prefer the conversation.';
   const budget = Math.max(options.maxContextChars - intro.length - 2, 0);
   const rendered = renderMemories(memories, budget);
 
   if (!rendered) {
-    return {};
+    return [];
   }
 
-  const message: ModelMessage = {
-    content: `${intro}\n\n${rendered}`,
-    role: 'user',
-  };
-
-  return {
-    prependMessages: [message],
-  };
+  return [
+    {
+      kind: 'message',
+      message: {
+        content: `${intro}\n\n${rendered}`,
+        role: 'user',
+      },
+      sourceId: options.sourceId,
+    },
+  ];
 }
 
 function renderMemories(memories: MemoryItem[], budget: number): string {
@@ -170,14 +171,4 @@ function isAbortError(error: unknown, signal?: AbortSignal): boolean {
   return (
     signal?.aborted === true && (error === signal.reason || (error instanceof Error && error.name === 'AbortError'))
   );
-}
-
-function toMemoryRememberContext(ctx: AfterTurnCommittedContext): MemoryRememberContext {
-  return {
-    historyBeforeTurn: ctx.historyBeforeTurn,
-    model: ctx.model,
-    sessionId: ctx.sessionId,
-    turnId: ctx.turnId,
-    turnMessages: ctx.turnMessages,
-  };
 }

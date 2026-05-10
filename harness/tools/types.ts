@@ -5,8 +5,9 @@ export type {
   ToolExecutionResult,
   ToolInput,
   ToolInputSchema,
-  ToolResultData,
 } from '../runtime/tools/types.js';
+
+export { createTextToolResult } from '../runtime/tools/types.js';
 
 export type {
   ToolCancellationService,

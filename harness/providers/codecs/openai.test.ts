@@ -10,6 +10,18 @@ import { OpenAICodec } from './openai.js';
 
 const codec = new OpenAICodec();
 
+function createReadFileToolCall(id: string, path: string) {
+  return {
+    id,
+    input: { path },
+    name: 'read_file',
+    originalName: 'read_file',
+    publicName: 'read_file',
+    sourceId: 'local-tools',
+    toolId: 'local-tools:read_file',
+  };
+}
+
 function createResponse(overrides: Partial<OpenAI.Responses.Response>): OpenAI.Responses.Response {
   return {
     created_at: 0,
@@ -150,15 +162,21 @@ test('getTools normalizes real built-in tool schemas for strict OpenAI responses
     messages: [{ content: 'hello', role: 'user' }],
     stream: false,
     tools: [
-      new WriteFileTool({ policy: { workspaceRoot: process.cwd() } }),
-      new RunCommandTool({ policy: { workspaceRoot: process.cwd() } }),
+      {
+        ...new WriteFileTool({ policy: { workspaceRoot: process.cwd() } }),
+        name: 'workspace_write_file',
+      },
+      {
+        ...new RunCommandTool({ policy: { workspaceRoot: process.cwd() } }),
+        name: 'shell_run_command',
+      },
     ],
   };
 
   assert.deepEqual(codec.getTools(request), [
     {
       description: 'Write a UTF-8 text file to disk.',
-      name: 'write_file',
+      name: 'workspace_write_file',
       parameters: {
         additionalProperties: false,
         properties: {
@@ -185,7 +203,7 @@ test('getTools normalizes real built-in tool schemas for strict OpenAI responses
     {
       description:
         'Run one allowed executable directly inside the workspace without a shell. Put the executable in `command` and only trailing arguments in `args`. Example: `{ "command": "pwd" }` or `{ "command": "git", "args": ["status"] }`.',
-      name: 'run_command',
+      name: 'shell_run_command',
       parameters: {
         additionalProperties: false,
         properties: {
@@ -247,7 +265,7 @@ test('getInputItems skips empty assistant placeholder text while keeping tool ca
         {
           content: '',
           role: 'assistant',
-          toolCalls: [{ id: 'call_1', input: { path: 'note.txt' }, name: 'read_file' }],
+          toolCalls: [createReadFileToolCall('call_1', 'note.txt')],
         },
       ],
       stream: false,

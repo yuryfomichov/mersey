@@ -2,7 +2,7 @@ import { useApp } from 'ink';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type {
-  BeforeToolCallContext,
+  BeforeToolExecutionContext,
   Harness,
   HarnessEvent,
   HookDecision,
@@ -29,6 +29,7 @@ export interface UseFtvControllerOptions {
 export interface FtvControllerState {
   messages: Message[];
   streamingContent: string;
+  startupLines: string[];
   isThinking: boolean;
   currentTool: string | null;
   turnCount: number;
@@ -57,6 +58,7 @@ export function useFtvController(options: UseFtvControllerOptions): UseFtvContro
   const [state, setState] = useState<FtvControllerState>({
     messages: [],
     streamingContent: '',
+    startupLines: [],
     isThinking: false,
     currentTool: null,
     turnCount: 0,
@@ -91,7 +93,7 @@ export function useFtvController(options: UseFtvControllerOptions): UseFtvContro
   }, []);
 
   const blockAndAskUser = useCallback(
-    (ctx: BeforeToolCallContext): Promise<HookDecision> => {
+    (ctx: BeforeToolExecutionContext): Promise<HookDecision> => {
       if (pendingApprovalResolverRef.current) {
         return Promise.resolve({
           continue: false,
@@ -103,7 +105,7 @@ export function useFtvController(options: UseFtvControllerOptions): UseFtvContro
       setState((s) => ({
         ...s,
         pendingApproval: {
-          toolName: ctx.toolCall.name,
+          toolName: ctx.tool.publicName,
           summary: formatToolApprovalSummary(ctx),
         },
       }));
@@ -156,7 +158,7 @@ export function useFtvController(options: UseFtvControllerOptions): UseFtvContro
                 }));
                 break;
               case 'tool_started':
-                setState((s) => ({ ...s, currentTool: event.toolName }));
+                setState((s) => ({ ...s, currentTool: event.publicName }));
                 break;
               case 'tool_finished':
                 setState((s) => ({ ...s, currentTool: null }));
@@ -217,6 +219,7 @@ export function useFtvController(options: UseFtvControllerOptions): UseFtvContro
           ...s,
           messages: [...runtime.harness.session.messages],
           providerModel: runtime.providerModel,
+          startupLines: [...runtime.startupLines],
         }));
 
         await updateUsage();
@@ -312,15 +315,15 @@ export function useFtvController(options: UseFtvControllerOptions): UseFtvContro
   };
 }
 
-function formatToolApprovalSummary(ctx: BeforeToolCallContext): string | undefined {
-  const input = toToolInputRecord(ctx.toolCall.input);
+function formatToolApprovalSummary(ctx: BeforeToolExecutionContext): string | undefined {
+  const input = toToolInputRecord(ctx.tool.input);
 
-  switch (ctx.toolCall.name) {
-    case 'read_file':
-    case 'write_file':
-    case 'edit_file':
+  switch (ctx.tool.originalName) {
+    case 'workspace.read_file':
+    case 'workspace.write_file':
+    case 'workspace.edit_file':
       return formatPathSummary(input.path);
-    case 'run_command':
+    case 'shell.run_command':
       return formatCommandSummary(input.command, input.args, input.cwd);
     default:
       return undefined;

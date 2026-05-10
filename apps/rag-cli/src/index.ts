@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { argv } from 'node:process';
 
-import { createHarness } from '../../../harness/index.js';
+import { createHarnessRuntime } from '../../../harness/index.js';
 import { createProvider } from '../../../harness/providers/index.js';
 import { getBooleanFlag, getProviderName, getSessionId } from '../../helpers/cli/args.js';
 import { getProviderModel } from '../../helpers/cli/harness-config.js';
@@ -11,6 +11,7 @@ import { createLocalMemoryPlugin, getLocalMemoryDefinition } from '../../helpers
 import { getProviderDefinition } from '../../helpers/cli/provider-config.js';
 import { createMarkdownRagPlugin, getMarkdownRagDefinition } from '../../helpers/cli/rag.js';
 import { createSession, formatSessionStore, getSessionStoreDefinition } from '../../helpers/cli/session-store.js';
+import { getStartupStatusLines } from '../../helpers/cli/startup.js';
 import { getRagCliSystemPrompt } from './system-prompt.js';
 
 async function main(): Promise<void> {
@@ -32,36 +33,41 @@ async function main(): Promise<void> {
     defaultIndexDir: join('tmp', 'rag', 'rag-cli-data'),
   });
   const ragResult = await createMarkdownRagPlugin(ragDefinition);
-  const retrievalEnabled = Boolean(ragResult.plugin);
-  const harness = createHarness({
+  const retrievalEnabled = ragResult.collectors.length > 0;
+  const runtimeResult = await createHarnessRuntime({
+    collectors: [...ragResult.collectors, ...memoryResult.collectors],
+    commitObservers: [...memoryResult.commitObservers],
     debug,
-    // prepareProviderRequest prepends compose in reverse registration order,
-    // so keep memory before retrieval here to leave recalled memory closest to the live user message.
-    plugins: [
-      ...loggingPlugins,
-      ...(memoryResult.plugin ? [memoryResult.plugin] : []),
-      ...(ragResult.plugin ? [ragResult.plugin] : []),
-    ],
+    plugins: [...loggingPlugins],
     providerInstance,
     session,
     systemPrompt: getRagCliSystemPrompt({ retrievalEnabled }),
-    tools: [],
   });
-  const providerModel = getProviderModel(providerDefinition);
+  if (!runtimeResult.ok) {
+    throw new Error(runtimeResult.startup.diagnostics.map((diagnostic) => diagnostic.message).join('\n'));
+  }
 
-  await runInteractiveCli({
-    appName: 'RAG CLI',
-    cache,
-    debug,
-    extraStatusLines: [...memoryResult.summaryLines, ...ragResult.summaryLines],
-    harness,
-    instructionLine: "Ask a question or type 'exit' to quit.",
-    logLine: `logs: ${logPaths.jsonlPath}, ${logPaths.textPath}`,
-    providerModel,
-    providerName,
-    sessionStoreLine: formatSessionStore(sessionStoreDefinition),
-    stream,
-  });
+  const harness = runtimeResult.runtime.harness;
+  const providerModel = getProviderModel(providerDefinition);
+  const startupStatusLines = getStartupStatusLines(runtimeResult.runtime.startup);
+
+  try {
+    await runInteractiveCli({
+      appName: 'RAG CLI',
+      cache,
+      debug,
+      extraStatusLines: [...startupStatusLines, ...memoryResult.summaryLines, ...ragResult.summaryLines],
+      harness,
+      instructionLine: "Ask a question or type 'exit' to quit.",
+      logLine: `logs: ${logPaths.jsonlPath}, ${logPaths.textPath}`,
+      providerModel,
+      providerName,
+      sessionStoreLine: formatSessionStore(sessionStoreDefinition),
+      stream,
+    });
+  } finally {
+    await runtimeResult.runtime.dispose();
+  }
 }
 
 main().catch((error: unknown) => {

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { createHarness } from '../../../harness/index.js';
+import { createHarnessRuntime } from '../../../harness/index.js';
 import { FakeProvider } from '../../../harness/providers/index.js';
 import { withTempDir } from '../../../harness/runtime/test/test-helpers.js';
 import { MemorySessionStore, Session } from '../../../harness/sessions/index.js';
@@ -51,7 +51,8 @@ test('createLocalMemoryPlugin disables memory cleanly when the flag is off', asy
     topK: 3,
   });
 
-  assert.equal(result.plugin, null);
+  assert.deepEqual(result.collectors, []);
+  assert.deepEqual(result.commitObservers, []);
   assert.deepEqual(result.summaryLines, ['memory: disabled']);
 });
 
@@ -65,34 +66,41 @@ test('createLocalMemoryPlugin remembers turns and recalls them across sessions',
       topK: 2,
     });
 
-    assert.ok(memoryResult.plugin);
+    assert.equal(memoryResult.collectors.length, 1);
+    assert.equal(memoryResult.commitObservers.length, 1);
     assert.deepEqual(memoryResult.summaryLines, [`memory: enabled (topK=2)`, `memory file: ${filePath}`]);
 
-    const writerHarness = createHarness({
-      plugins: [memoryResult.plugin!],
+    const writerRuntime = await createHarnessRuntime({
+      collectors: memoryResult.collectors,
+      commitObservers: memoryResult.commitObservers,
       providerInstance: new FakeProvider(),
       session: new Session({
         id: 'memory-writer-session',
         store: new MemorySessionStore(),
       }),
       systemPrompt: 'You are a helpful assistant.',
-      tools: [],
     });
+    assert.equal(writerRuntime.ok, true);
+    const writerHarness = writerRuntime.ok ? writerRuntime.runtime.harness : null;
+    assert.ok(writerHarness);
 
     await writerHarness.sendMessage('I prefer concise answers about payments.');
     await waitForMemoryWrite(filePath, /concise answers about payments/);
 
     const readerProvider = new FakeProvider();
-    const readerHarness = createHarness({
-      plugins: [memoryResult.plugin!],
+    const readerRuntime = await createHarnessRuntime({
+      collectors: memoryResult.collectors,
+      commitObservers: memoryResult.commitObservers,
       providerInstance: readerProvider,
       session: new Session({
         id: 'memory-reader-session',
         store: new MemorySessionStore(),
       }),
       systemPrompt: 'You are a helpful assistant.',
-      tools: [],
     });
+    assert.equal(readerRuntime.ok, true);
+    const readerHarness = readerRuntime.ok ? readerRuntime.runtime.harness : null;
+    assert.ok(readerHarness);
 
     const reply = await readerHarness.sendMessage('What do I prefer about payments?');
 
@@ -120,16 +128,19 @@ test('createLocalMemoryPlugin skips malformed JSONL rows and still recalls valid
       topK: 2,
     });
     const readerProvider = new FakeProvider();
-    const harness = createHarness({
-      plugins: [memoryResult.plugin!],
+    const runtime = await createHarnessRuntime({
+      collectors: memoryResult.collectors,
+      commitObservers: memoryResult.commitObservers,
       providerInstance: readerProvider,
       session: new Session({
         id: 'memory-reader-session',
         store: new MemorySessionStore(),
       }),
       systemPrompt: 'You are a helpful assistant.',
-      tools: [],
     });
+    assert.equal(runtime.ok, true);
+    const harness = runtime.ok ? runtime.runtime.harness : null;
+    assert.ok(harness);
 
     await writeFile(
       filePath,
@@ -176,16 +187,19 @@ test('createLocalMemoryPlugin propagates aborts while local recall is running', 
     await writeFile(filePath, records.map((record) => JSON.stringify(record)).join('\n'), 'utf8');
 
     const controller = new AbortController();
-    const harness = createHarness({
-      plugins: [memoryResult.plugin!],
+    const runtime = await createHarnessRuntime({
+      collectors: memoryResult.collectors,
+      commitObservers: memoryResult.commitObservers,
       providerInstance: new FakeProvider(),
       session: new Session({
         id: 'memory-reader-session',
         store: new MemorySessionStore(),
       }),
       systemPrompt: 'You are a helpful assistant.',
-      tools: [],
     });
+    assert.equal(runtime.ok, true);
+    const harness = runtime.ok ? runtime.runtime.harness : null;
+    assert.ok(harness);
 
     const pendingReply = harness.sendMessage('What do I prefer about payments?', { signal: controller.signal });
     controller.abort();
@@ -210,16 +224,19 @@ test('createLocalMemoryPlugin recalls Unicode memory content', async () => {
       topK: 2,
     });
     const provider = new FakeProvider();
-    const harness = createHarness({
-      plugins: [memoryResult.plugin!],
+    const runtime = await createHarnessRuntime({
+      collectors: memoryResult.collectors,
+      commitObservers: memoryResult.commitObservers,
       providerInstance: provider,
       session: new Session({
         id: 'memory-reader-session',
         store: new MemorySessionStore(),
       }),
       systemPrompt: 'You are a helpful assistant.',
-      tools: [],
     });
+    assert.equal(runtime.ok, true);
+    const harness = runtime.ok ? runtime.runtime.harness : null;
+    assert.ok(harness);
 
     await writeFile(
       filePath,

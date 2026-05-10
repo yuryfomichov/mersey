@@ -1,32 +1,24 @@
 import type { ModelToolCall, ModelToolDefinition } from '../../models/types.js';
-import type { Tool, ToolExecutionResult } from '../types.js';
-import { CancellationService } from './cancellation/cancellation-service.js';
+import { freezeDeep } from '../../utils/object.js';
 import type {
+  ResolvedToolCall,
+  ToolCatalog,
+  ToolCatalogSnapshot,
+  ToolDescriptor,
   ToolExecutionContext,
-  ToolRuntime,
-  ToolRuntimeFactory,
-  ToolRuntimeFactoryOptions,
-  ToolRuntimeOptions,
-} from './types.js';
+  ToolIdentity,
+} from '../catalog.js';
+import { createTextToolResult, type Tool } from '../types.js';
 
-function getToolDefinitions(tools: Tool[]): ModelToolDefinition[] | undefined {
-  if (tools.length === 0) {
-    return undefined;
-  }
-
-  return tools.map(({ description, inputSchema, name }) => ({
-    description,
-    inputSchema,
-    name,
-  }));
-}
-
-function getToolMap(tools: Tool[]): Map<string, Tool> {
-  return new Map(tools.map((tool) => [tool.name, tool]));
-}
+type StaticToolCatalogOptions = {
+  sourceId?: string;
+  sourceType?: 'local' | 'mcp';
+  tools: Tool[];
+};
 
 function assertUniqueToolNames(tools: Tool[]): void {
   const seen = new Set<string>();
+  const seenPublicNames = new Map<string, string>();
 
   for (const tool of tools) {
     if (seen.has(tool.name)) {
@@ -34,83 +26,105 @@ function assertUniqueToolNames(tools: Tool[]): void {
     }
 
     seen.add(tool.name);
+
+    const publicName = toProviderSafeToolName(tool.name);
+    const existingName = seenPublicNames.get(publicName);
+
+    if (existingName) {
+      throw new Error(`Duplicate provider-safe tool name registered: ${publicName} (${existingName}, ${tool.name})`);
+    }
+
+    seenPublicNames.set(publicName, tool.name);
   }
 }
 
-async function executeToolCall(
-  toolCall: ModelToolCall,
-  tools: Map<string, Tool>,
-  executionContext: ToolExecutionContext,
-): Promise<ToolExecutionResult> {
-  const tool = tools.get(toolCall.name);
-
-  if (!tool) {
-    return {
-      content: `Unknown tool: ${toolCall.name}`,
-      isError: true,
-      name: toolCall.name,
-      toolCallId: toolCall.id,
-    };
-  }
-
-  try {
-    const result = await tool.execute(toolCall.input, executionContext);
-
-    return {
-      content: result.content,
-      data: result.data,
-      isError: result.isError,
-      name: toolCall.name,
-      toolCallId: toolCall.id,
-    };
-  } catch (error: unknown) {
-    return {
-      content: error instanceof Error ? error.message : String(error),
-      isError: true,
-      name: toolCall.name,
-      toolCallId: toolCall.id,
-    };
-  }
+function toProviderSafeToolName(name: string): string {
+  return name.replaceAll(/[^a-zA-Z0-9_-]/g, '_');
 }
 
-export function createToolRuntimeFactory({ tools }: ToolRuntimeFactoryOptions): ToolRuntimeFactory {
-  assertUniqueToolNames(tools);
-  const toolDefinitions = getToolDefinitions(tools);
-  const toolMap = getToolMap(tools);
-
-  const toolRuntimeFactory = (options: { signal?: AbortSignal } = {}): ToolRuntime => {
-    const cancellation = new CancellationService({ signal: options.signal });
-
-    const executionContext: ToolExecutionContext = {
-      cancellation,
-    };
-
-    return {
-      ...executionContext,
-      executeToolCall(toolCall: ModelToolCall): Promise<ToolExecutionResult> {
-        return executeToolCall(toolCall, toolMap, executionContext);
-      },
-      toolDefinitions,
-    };
+function toDescriptor(tool: Tool, sourceId: string, sourceType: 'local' | 'mcp'): ToolDescriptor {
+  const publicName = toProviderSafeToolName(tool.name);
+  const identity: ToolIdentity = {
+    originalName: tool.name,
+    publicName,
+    sourceId,
+    sourceType,
+    toolId: `${sourceId}:${tool.name}`,
   };
 
-  toolRuntimeFactory.toolDefinitions = toolDefinitions;
+  const definition: ModelToolDefinition = {
+    description: tool.description,
+    inputSchema: structuredClone(tool.inputSchema),
+    name: publicName,
+  };
 
-  return toolRuntimeFactory;
+  return freezeDeep({ definition, identity });
 }
 
-export function createToolRuntime({ signal, tools }: ToolRuntimeOptions): ToolRuntime {
-  return createToolRuntimeFactory({ tools })({ signal });
+function createSnapshot(
+  toolsByToolId: Map<string, Tool>,
+  descriptors: readonly ToolDescriptor[],
+  descriptorsByName: Map<string, ToolDescriptor>,
+): ToolCatalogSnapshot {
+  return Object.freeze({
+    descriptors,
+    async execute(call: ResolvedToolCall, ctx: ToolExecutionContext) {
+      const tool = toolsByToolId.get(call.toolId);
+
+      if (!tool) {
+        return createTextToolResult(`Unknown tool: ${call.publicName}`, { isError: true });
+      }
+
+      try {
+        return await tool.execute(call.input, ctx);
+      } catch (error: unknown) {
+        return createTextToolResult(error instanceof Error ? error.message : String(error), { isError: true });
+      }
+    },
+    resolve(call: ModelToolCall) {
+      const descriptor = descriptorsByName.get(call.name);
+
+      if (!descriptor) {
+        return null;
+      }
+
+      return Object.freeze({
+        input: structuredClone(call.input),
+        originalName: descriptor.identity.originalName,
+        publicName: descriptor.identity.publicName,
+        rawCall: structuredClone(call),
+        sourceId: descriptor.identity.sourceId,
+        toolCallId: call.id,
+        toolId: descriptor.identity.toolId,
+      });
+    },
+  });
 }
 
-export type {
-  ToolExecutionContext,
-  ToolRuntime,
-  ToolRuntimeFactory,
-  ToolRuntimeFactoryOptions,
-  ToolRuntimeOptions,
-  ToolExecutionPolicy,
-  ToolFileAccess,
-  ToolOutputLimitResult,
-  ToolPathDenyRule,
-} from './types.js';
+export function createEmptyToolCatalog(): ToolCatalog {
+  return {
+    async snapshot() {
+      return createSnapshot(new Map<string, Tool>(), Object.freeze([]), new Map<string, ToolDescriptor>());
+    },
+  };
+}
+
+export function createStaticToolCatalog(options: StaticToolCatalogOptions): ToolCatalog {
+  assertUniqueToolNames(options.tools);
+
+  const sourceId = options.sourceId ?? 'local-tools';
+  const sourceType = options.sourceType ?? 'local';
+  const descriptors = Object.freeze(options.tools.map((tool) => toDescriptor(tool, sourceId, sourceType)));
+  const toolMap = new Map(
+    descriptors.map((descriptor, index) => [descriptor.identity.toolId, options.tools[index] as Tool]),
+  );
+  const descriptorsByName = new Map(descriptors.map((descriptor) => [descriptor.definition.name, descriptor]));
+
+  return {
+    async snapshot() {
+      return createSnapshot(toolMap, descriptors, descriptorsByName);
+    },
+  };
+}
+
+export type { ToolCatalog, ToolCatalogSnapshot, ToolDescriptor, ToolExecutionContext, ToolIdentity };

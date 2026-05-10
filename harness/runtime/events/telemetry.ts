@@ -93,8 +93,8 @@ export function getDebugToolArgs(input: unknown, options: TelemetryOptions = {})
   return Object.keys(debugArgs).length > 0 ? debugArgs : undefined;
 }
 
-export function getResultDataKeys(data: Record<string, unknown> | undefined): string[] {
-  return data ? Object.keys(data).sort() : [];
+export function getResultMetadataKeys(metadata: Record<string, unknown> | undefined): string[] {
+  return metadata ? Object.keys(metadata).sort() : [];
 }
 
 export function sanitizeErrorMessage(errorType: 'provider' | 'tool' | 'runtime', error: unknown): string {

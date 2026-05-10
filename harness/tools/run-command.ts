@@ -5,7 +5,7 @@ import type { ToolCommandPolicy, ToolCommandResult } from './services/commands/t
 import { resolvePathInWorkspace } from './services/files/path-utils.js';
 import type { ToolExecutionContext, ToolExecutionPolicy, ToolOutputService } from './services/index.js';
 import { OutputService } from './services/output/output-service.js';
-import type { Tool, ToolExecuteResult, ToolInput } from './types.js';
+import { createTextToolResult, type Tool, type ToolExecuteResult, type ToolInput } from './types.js';
 import { createCanonicalWorkspaceRootGetter, resolveToolExecutionPolicy } from './utils/policy.js';
 import { parseToolInput, toToolInputSchema } from './utils/schema.js';
 
@@ -78,7 +78,7 @@ export class RunCommandTool implements Tool {
   readonly description =
     'Run one allowed executable directly inside the workspace without a shell. Put the executable in `command` and only trailing arguments in `args`. Example: `{ "command": "pwd" }` or `{ "command": "git", "args": ["status"] }`.';
   readonly inputSchema = toToolInputSchema(RunCommandTool.input);
-  readonly name = 'run_command';
+  readonly name = 'shell.run_command';
 
   constructor(options: RunCommandToolOptions = {}) {
     this.policy = resolveToolExecutionPolicy(options.policy);
@@ -111,14 +111,13 @@ export class RunCommandTool implements Tool {
     context.cancellation.throwIfAborted();
     const content = this.output.limitResult(toResultContent(result));
 
-    return {
-      content: content.text,
-      data: {
+    return createTextToolResult(content.text, {
+      metadata: {
         ...result,
         contentBytes: content.originalBytes,
         contentTruncated: content.truncated,
       },
       isError: result.timedOut || result.exitCode !== 0,
-    };
+    });
   }
 }

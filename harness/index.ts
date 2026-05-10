@@ -1,3 +1,3 @@
-export { createHarness } from './runtime/harness.js';
+export { createHarness, createHarnessRuntime } from './runtime/harness.js';
 
 export type * from './types.js';

@@ -11,6 +11,30 @@ import { FilesystemSessionStore } from './filesystem-store.js';
 import { MemorySessionStore } from './memory-store.js';
 import { cloneStoredSession, commitSessionTurn } from './store-state.js';
 
+function createReadFileToolCall(id: string, path: string) {
+  return {
+    id,
+    input: { path },
+    name: 'read_file',
+    originalName: 'read_file',
+    publicName: 'read_file',
+    sourceId: 'local-tools',
+    toolId: 'local-tools:read_file',
+  };
+}
+
+function createReadFileToolMessage(id: string, content: string): Message {
+  return {
+    content,
+    createdAt: '2026-03-29T00:00:03.000Z',
+    parts: [{ text: content, type: 'text' }],
+    publicName: 'read_file',
+    role: 'tool',
+    toolCallId: id,
+    toolId: 'local-tools:read_file',
+  };
+}
+
 async function verifyStoreRoundTrip(store: {
   commitTurn(sessionId: string, turnMessages: readonly Message[]): Promise<StoredSessionState>;
   createSession(session: SessionState): Promise<StoredSessionState>;
@@ -43,21 +67,9 @@ async function verifyStoreRoundTrip(store: {
         outputTokens: 3,
         uncachedInputTokens: 4,
       },
-      toolCalls: [
-        {
-          id: 'call-1',
-          input: { path: 'note.txt' },
-          name: 'read_file',
-        },
-      ],
+      toolCalls: [createReadFileToolCall('call-1', 'note.txt')],
     },
-    {
-      content: 'file contents',
-      createdAt: '2026-03-29T00:00:03.000Z',
-      name: 'read_file',
-      role: 'tool',
-      toolCallId: 'call-1',
-    },
+    createReadFileToolMessage('call-1', 'file contents'),
   ]);
 
   const storedSession = await store.getSession(session.id);
@@ -77,13 +89,7 @@ async function verifyStoreRoundTrip(store: {
     storedSession?.messages[1] && 'toolCalls' in storedSession.messages[1]
       ? storedSession.messages[1].toolCalls
       : undefined,
-    [
-      {
-        id: 'call-1',
-        input: { path: 'note.txt' },
-        name: 'read_file',
-      },
-    ],
+    [createReadFileToolCall('call-1', 'note.txt')],
   );
   assert.equal(
     storedSession?.messages[2] && 'toolCallId' in storedSession.messages[2]
@@ -301,19 +307,13 @@ test('MemorySessionStore isolates nested message mutations', async () => {
     content: 'hi',
     createdAt: '2026-03-29T00:00:02.000Z',
     role: 'assistant',
-    toolCalls: [
-      {
-        id: 'call-1',
-        input: { path: 'note.txt' },
-        name: 'read_file',
-      },
-    ],
+    toolCalls: [createReadFileToolCall('call-1', 'note.txt')],
   };
 
   await store.createSession(session);
   await store.commitTurn(session.id, [message]);
 
-  if (message.toolCalls?.[0]) {
+  if (message.role === 'assistant' && message.toolCalls?.[0]) {
     message.toolCalls[0].input = { path: 'changed.txt' };
   }
 

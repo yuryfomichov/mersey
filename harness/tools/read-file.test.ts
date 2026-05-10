@@ -16,6 +16,10 @@ function createToolExecutionContext(): ToolExecutionContext {
   };
 }
 
+function getText(result: Awaited<ReturnType<ReadFileTool['execute']>>): string | undefined {
+  return result.parts[0]?.type === 'text' ? result.parts[0].text : undefined;
+}
+
 test('ReadFileTool reads files relative to the workspace root', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
 
@@ -26,9 +30,9 @@ test('ReadFileTool reads files relative to the workspace root', async () => {
     const result = await tool.execute({ path: 'note.txt' }, createToolExecutionContext());
 
     assert.equal(typeof result, 'object');
-    assert.equal(result.content, 'hello from file');
-    assert.deepEqual(result.data && 'truncated' in result.data ? result.data.truncated : undefined, false);
-    assert.match(String(result.data && 'path' in result.data ? result.data.path : ''), /note\.txt$/);
+    assert.equal(getText(result), 'hello from file');
+    assert.deepEqual(result.metadata?.truncated, false);
+    assert.match(String(result.metadata?.path ?? ''), /note\.txt$/);
   } finally {
     await rm(rootDir, { force: true, recursive: true });
   }
@@ -44,7 +48,7 @@ test('ReadFileTool allows in-workspace paths that start with two dots', async ()
     const result = await tool.execute({ path: '..note.txt' }, createToolExecutionContext());
 
     assert.equal(typeof result, 'object');
-    assert.equal(result.content, 'hidden but valid');
+    assert.equal(getText(result), 'hidden but valid');
   } finally {
     await rm(rootDir, { force: true, recursive: true });
   }
@@ -60,9 +64,9 @@ test('ReadFileTool truncates large output to the shared result limit', async () 
     const result = await tool.execute({ path: 'note.txt' }, createToolExecutionContext());
 
     assert.equal(typeof result, 'object');
-    assert.equal(result.content, 'abcd');
-    assert.deepEqual(result.data && 'truncated' in result.data ? result.data.truncated : undefined, true);
-    assert.match(String(result.data && 'path' in result.data ? result.data.path : ''), /note\.txt$/);
+    assert.equal(getText(result), 'abcd');
+    assert.deepEqual(result.metadata?.truncated, true);
+    assert.match(String(result.metadata?.path ?? ''), /note\.txt$/);
   } finally {
     await rm(rootDir, { force: true, recursive: true });
   }

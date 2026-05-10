@@ -1,7 +1,9 @@
+import type { NormalizedTurnContext, TurnContextContribution } from '../context/types.js';
 import type { HarnessEvent } from '../events/types.js';
 import type { ModelProvider } from '../models/provider.js';
-import type { ModelToolCall, ModelToolDefinition } from '../models/types.js';
+import type { ModelMessage, ModelToolDefinition } from '../models/types.js';
 import type { Message } from '../sessions/types.js';
+import type { ResolvedToolCall } from '../tools/catalog.js';
 
 export type HookDecision =
   | { continue: true }
@@ -11,86 +13,49 @@ export type HookDecision =
       exposeToModel?: boolean;
     };
 
-export type HookName =
-  | 'beforeProviderCall'
-  | 'prepareProviderRequest'
-  | 'beforeToolCall'
-  | 'afterTurnCommitted'
-  | 'onEvent';
-
-export type BeforeProviderCallContext = {
-  sessionId: string;
-  turnId: string;
-  iteration: number;
-  providerName: string;
-  model: string;
-  messageCount: number;
-  messageCountsByRole: { user: number; assistant: number; tool: number };
-  request: ProviderRequestSnapshot;
-  toolDefinitionNames: string[];
-};
-
-export type PrepareProviderRequestMessage =
-  | {
-      content: string;
-      role: 'user';
-    }
-  | {
-      content: string;
-      role: 'assistant';
-      toolCalls?: ModelToolCall[];
-    }
-  | {
-      content: string;
-      data?: Record<string, unknown>;
-      isError?: boolean;
-      name: string;
-      role: 'tool';
-      toolCallId: string;
-    };
-
-export type PrepareProviderRequestUserMessage = {
-  content: string;
-  role: 'user';
-};
-
-export type PrepareProviderRequestContext = {
-  sessionId: string;
-  turnId: string;
-  iteration: number;
-  providerName: string;
-  model: string;
-  transcript: readonly Readonly<PrepareProviderRequestMessage>[];
-  userMessage: Readonly<PrepareProviderRequestUserMessage>;
-  signal?: AbortSignal;
-};
+export type HookName = 'beforeProviderCall' | 'beforeToolExecution' | 'onEvent';
 
 export type ProviderRequestSnapshot = Readonly<{
-  messages: readonly Readonly<PrepareProviderRequestMessage>[];
+  context?: NormalizedTurnContext;
+  messages: readonly Readonly<ModelMessage>[];
   stream: boolean;
   systemPrompt?: string;
   tools?: readonly Readonly<ModelToolDefinition>[];
 }>;
 
-export type PrepareProviderRequestResult = {
-  appendMessages?: PrepareProviderRequestMessage[];
-  messages?: PrepareProviderRequestMessage[];
-  prependMessages?: PrepareProviderRequestMessage[];
-  systemPrompt?: string;
-};
-
-export type BeforeToolCallContext = {
-  sessionId: string;
-  turnId: string;
+export type BeforeProviderCallContext = {
   iteration: number;
-  toolCall: {
-    id: string;
-    name: string;
-    input: unknown;
-  };
+  messageCount: number;
+  messageCountsByRole: { assistant: number; tool: number; user: number };
+  model: string;
+  providerName: string;
+  request: ProviderRequestSnapshot;
+  sessionId: string;
+  toolDefinitionNames: string[];
+  turnId: string;
 };
 
-export type AfterTurnCommittedContext = {
+export type TurnContextCollectContext = {
+  iteration: number;
+  model: string;
+  providerName: string;
+  sessionId: string;
+  signal?: AbortSignal;
+  transcript: readonly Readonly<Message>[];
+  turnId: string;
+  userMessage: Readonly<{
+    content: string;
+    role: 'user';
+  }>;
+};
+
+export interface TurnContextCollector {
+  priority?: number;
+
+  collect(ctx: TurnContextCollectContext): Promise<TurnContextContribution[]>;
+}
+
+export type TurnCommitContext = {
   historyBeforeTurn: readonly Message[];
   model: string;
   provider: ModelProvider;
@@ -98,6 +63,17 @@ export type AfterTurnCommittedContext = {
   sessionId: string;
   turnId: string;
   turnMessages: readonly Message[];
+};
+
+export interface TurnCommitObserver {
+  afterTurnCommitted(ctx: TurnCommitContext): Promise<void>;
+}
+
+export type BeforeToolExecutionContext = {
+  iteration: number;
+  sessionId: string;
+  tool: ResolvedToolCall;
+  turnId: string;
 };
 
 export type PluginEventContext = {
@@ -111,22 +87,12 @@ export type HarnessPlugin = {
   name: string;
 
   beforeProviderCall?(ctx: BeforeProviderCallContext): Promise<HookDecision> | HookDecision;
-  prepareProviderRequest?(
-    request: ProviderRequestSnapshot,
-    ctx: PrepareProviderRequestContext,
-  ): Promise<PrepareProviderRequestResult> | PrepareProviderRequestResult;
-  beforeToolCall?(ctx: BeforeToolCallContext): Promise<HookDecision> | HookDecision;
-  afterTurnCommitted?(ctx: AfterTurnCommittedContext): Promise<void> | void;
-
+  beforeToolExecution?(ctx: BeforeToolExecutionContext): Promise<HookDecision> | HookDecision;
   onEvent?(event: HarnessEvent, ctx: PluginEventContext): Promise<void> | void;
 };
 
 export function isHookDecision(value: unknown): value is HookDecision {
-  if (value === null || value === undefined) {
-    return false;
-  }
-
-  if (typeof value !== 'object') {
+  if (value === null || value === undefined || typeof value !== 'object') {
     return false;
   }
 
@@ -134,9 +100,5 @@ export function isHookDecision(value: unknown): value is HookDecision {
     return true;
   }
 
-  if ('continue' in value && value.continue === false && 'reason' in value) {
-    return true;
-  }
-
-  return false;
+  return 'continue' in value && value.continue === false && 'reason' in value;
 }

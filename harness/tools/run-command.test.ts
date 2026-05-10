@@ -16,6 +16,10 @@ function createToolExecutionContext(): ToolExecutionContext {
   };
 }
 
+function getText(result: Awaited<ReturnType<RunCommandTool['execute']>>): string | undefined {
+  return result.parts[0]?.type === 'text' ? result.parts[0].text : undefined;
+}
+
 test('RunCommandTool executes allowlisted commands with structured result data', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
 
@@ -27,9 +31,9 @@ test('RunCommandTool executes allowlisted commands with structured result data',
 
     assert.equal(typeof result, 'object');
     assert.equal(result.isError, false);
-    assert.match(result.content, /stdout:\nhello/);
-    assert.deepEqual(result.data && 'command' in result.data ? result.data.command : undefined, 'cat');
-    assert.deepEqual(result.data && 'exitCode' in result.data ? result.data.exitCode : undefined, 0);
+    assert.match(getText(result) ?? '', /stdout:\nhello/);
+    assert.deepEqual(result.metadata?.command, 'cat');
+    assert.deepEqual(result.metadata?.exitCode, 0);
   } finally {
     await rm(rootDir, { force: true, recursive: true });
   }
@@ -44,8 +48,8 @@ test('RunCommandTool normalizes duplicated zero-arg invocations like pwd + [pwd]
 
     assert.equal(typeof result, 'object');
     assert.equal(result.isError, false);
-    assert.deepEqual(result.data && 'args' in result.data ? result.data.args : undefined, []);
-    assert.match(String(result.data && 'cwd' in result.data ? result.data.cwd : ''), /mersey-/);
+    assert.deepEqual(result.metadata?.args, []);
+    assert.match(String(result.metadata?.cwd ?? ''), /mersey-/);
   } finally {
     await rm(rootDir, { force: true, recursive: true });
   }
@@ -69,7 +73,7 @@ test('RunCommandTool marks non-zero exits as tool errors', async () => {
 
     assert.equal(typeof result, 'object');
     assert.equal(result.isError, true);
-    assert.match(result.content, /exitCode: 1/);
+    assert.match(getText(result) ?? '', /exitCode: 1/);
   } finally {
     await rm(rootDir, { force: true, recursive: true });
   }
@@ -84,7 +88,7 @@ test('RunCommandTool enforces command timeouts', async () => {
 
     assert.equal(typeof result, 'object');
     assert.equal(result.isError, true);
-    assert.match(result.content, /timedOut: true/);
+    assert.match(getText(result) ?? '', /timedOut: true/);
   } finally {
     await rm(rootDir, { force: true, recursive: true });
   }
@@ -105,9 +109,9 @@ test('RunCommandTool truncates stdout and content separately through policy', as
     const result = await tool.execute({ args: ['abcdef'], command: 'printf' }, createToolExecutionContext());
 
     assert.equal(typeof result, 'object');
-    assert.deepEqual(result.data && 'stdout' in result.data ? result.data.stdout : undefined, 'abcd');
-    assert.deepEqual(result.data && 'stdoutBytes' in result.data ? result.data.stdoutBytes : undefined, 6);
-    assert.deepEqual(result.data && 'stdoutTruncated' in result.data ? result.data.stdoutTruncated : undefined, true);
+    assert.deepEqual(result.metadata?.stdout, 'abcd');
+    assert.deepEqual(result.metadata?.stdoutBytes, 6);
+    assert.deepEqual(result.metadata?.stdoutTruncated, true);
   } finally {
     await rm(rootDir, { force: true, recursive: true });
   }
@@ -130,7 +134,7 @@ test('RunCommandTool kills processes that ignore SIGTERM after the timeout grace
 
     assert.equal(typeof result, 'object');
     assert.equal(result.isError, true);
-    assert.match(result.content, /timedOut: true/);
+    assert.match(getText(result) ?? '', /timedOut: true/);
     assert.ok(Date.now() - startedAt < 2_000);
   } finally {
     await rm(rootDir, { force: true, recursive: true });

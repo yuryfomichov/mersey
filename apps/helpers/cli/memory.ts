@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 
 import { createJsonlMemoryPlugin } from '../../../harness/plugins/index.js';
-import type { HarnessPlugin } from '../../../harness/types.js';
+import type { RuntimeSourceRegistration, TurnCommitObserver, TurnContextCollector } from '../../../harness/types.js';
 import { getArgValue, getBooleanFlag } from './args.js';
 
 const DEFAULT_MAX_CONTEXT_CHARS = 2_000;
@@ -22,7 +22,8 @@ export type LocalMemoryDefinition = {
 };
 
 export type LocalMemoryPluginResult = {
-  plugin: HarnessPlugin | null;
+  collectors: RuntimeSourceRegistration<TurnContextCollector>[];
+  commitObservers: RuntimeSourceRegistration<TurnCommitObserver>[];
   summaryLines: string[];
 };
 
@@ -55,7 +56,8 @@ export function getLocalMemoryDefinition(
 export async function createLocalMemoryPlugin(definition: LocalMemoryDefinition): Promise<LocalMemoryPluginResult> {
   if (!definition.enabled) {
     return {
-      plugin: null,
+      collectors: [],
+      commitObservers: [],
       summaryLines: ['memory: disabled'],
     };
   }
@@ -63,13 +65,16 @@ export async function createLocalMemoryPlugin(definition: LocalMemoryDefinition)
   await mkdir(dirname(definition.filePath), { recursive: true });
   await writeFile(definition.filePath, '', { flag: 'a' });
 
+  const integration = createJsonlMemoryPlugin({
+    maxContextChars: definition.maxContextChars,
+    name: 'local-memory',
+    path: definition.filePath,
+    topK: definition.topK,
+  });
+
   return {
-    plugin: createJsonlMemoryPlugin({
-      maxContextChars: definition.maxContextChars,
-      name: 'local-memory',
-      path: definition.filePath,
-      topK: definition.topK,
-    }),
+    collectors: [{ required: false, sourceId: 'local-memory', value: integration.collector }],
+    commitObservers: [{ required: false, sourceId: 'local-memory', value: integration.commitObserver }],
     summaryLines: [`memory: enabled (topK=${definition.topK})`, `memory file: ${definition.filePath}`],
   };
 }

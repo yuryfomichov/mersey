@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { createHarness } from '../../../harness/index.js';
+import { createHarnessRuntime } from '../../../harness/index.js';
 import { FakeProvider } from '../../../harness/providers/index.js';
 import { withTempDir, writeWorkspaceFiles } from '../../../harness/runtime/test/test-helpers.js';
 import { MemorySessionStore, Session } from '../../../harness/sessions/index.js';
@@ -60,7 +60,7 @@ test('createMarkdownRagPlugin disables RAG cleanly when the data path is missing
     topK: 1,
   });
 
-  assert.equal(ragResult.plugin, null);
+  assert.deepEqual(ragResult.collectors, []);
   assert.deepEqual(ragResult.summaryLines, [
     'rag: disabled (data path not found)',
     'rag source: /workspace/mersey/data-that-does-not-exist',
@@ -84,7 +84,7 @@ test('createMarkdownRagPlugin disables RAG cleanly when markdown files contain n
       topK: 1,
     });
 
-    assert.equal(ragResult.plugin, null);
+    assert.deepEqual(ragResult.collectors, []);
     assert.deepEqual(ragResult.summaryLines, ['rag: disabled (no markdown content found)', `rag source: ${sourceDir}`]);
   });
 });
@@ -108,20 +108,22 @@ test('createMarkdownRagPlugin indexes markdown data and injects retrieved contex
       topK: 1,
     });
 
-    assert.ok(ragResult.plugin);
+    assert.equal(ragResult.collectors.length, 1);
     assert.match(ragResult.summaryLines[0] ?? '', /rag: enabled \(2 files,.*index rebuilt\)/);
 
     const provider = new FakeProvider();
-    const harness = createHarness({
-      plugins: [ragResult.plugin!],
+    const runtime = await createHarnessRuntime({
+      collectors: ragResult.collectors,
       providerInstance: provider,
       session: new Session({
         id: 'rag-session',
         store: new MemorySessionStore(),
       }),
       systemPrompt: 'You are a helpful assistant.',
-      tools: [],
     });
+    assert.equal(runtime.ok, true);
+    const harness = runtime.ok ? runtime.runtime.harness : null;
+    assert.ok(harness);
 
     const reply = await harness.sendMessage('payments');
 
@@ -173,16 +175,18 @@ test('createMarkdownRagPlugin reuses an existing index until rebuild is requeste
     });
 
     const reusedProvider = new FakeProvider();
-    const reusedHarness = createHarness({
-      plugins: [reused.plugin!],
+    const reusedRuntime = await createHarnessRuntime({
+      collectors: reused.collectors,
       providerInstance: reusedProvider,
       session: new Session({
         id: 'reused-rag-session',
         store: new MemorySessionStore(),
       }),
       systemPrompt: 'You are a helpful assistant.',
-      tools: [],
     });
+    assert.equal(reusedRuntime.ok, true);
+    const reusedHarness = reusedRuntime.ok ? reusedRuntime.runtime.harness : null;
+    assert.ok(reusedHarness);
 
     await reusedHarness.sendMessage('payments');
 
@@ -199,7 +203,7 @@ test('createMarkdownRagPlugin reuses an existing index until rebuild is requeste
       topK: 1,
     });
 
-    assert.ok(reusedWithoutSource.plugin);
+    assert.equal(reusedWithoutSource.collectors.length, 1);
     assert.match(reusedWithoutSource.summaryLines[0] ?? '', /index reused/);
     assert.equal(
       reusedWithoutSource.summaryLines[1],
@@ -207,16 +211,18 @@ test('createMarkdownRagPlugin reuses an existing index until rebuild is requeste
     );
 
     const missingSourceProvider = new FakeProvider();
-    const missingSourceHarness = createHarness({
-      plugins: [reusedWithoutSource.plugin],
+    const missingSourceRuntime = await createHarnessRuntime({
+      collectors: reusedWithoutSource.collectors,
       providerInstance: missingSourceProvider,
       session: new Session({
         id: 'missing-source-rag-session',
         store: new MemorySessionStore(),
       }),
       systemPrompt: 'You are a helpful assistant.',
-      tools: [],
     });
+    assert.equal(missingSourceRuntime.ok, true);
+    const missingSourceHarness = missingSourceRuntime.ok ? missingSourceRuntime.runtime.harness : null;
+    assert.ok(missingSourceHarness);
 
     await missingSourceHarness.sendMessage('payments');
 
@@ -232,16 +238,18 @@ test('createMarkdownRagPlugin reuses an existing index until rebuild is requeste
     });
 
     const rebuiltProvider = new FakeProvider();
-    const rebuiltHarness = createHarness({
-      plugins: [rebuilt.plugin!],
+    const rebuiltRuntime = await createHarnessRuntime({
+      collectors: rebuilt.collectors,
       providerInstance: rebuiltProvider,
       session: new Session({
         id: 'rebuilt-rag-session',
         store: new MemorySessionStore(),
       }),
       systemPrompt: 'You are a helpful assistant.',
-      tools: [],
     });
+    assert.equal(rebuiltRuntime.ok, true);
+    const rebuiltHarness = rebuiltRuntime.ok ? rebuiltRuntime.runtime.harness : null;
+    assert.ok(rebuiltHarness);
 
     await rebuiltHarness.sendMessage('frontend');
 

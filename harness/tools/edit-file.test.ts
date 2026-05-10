@@ -16,6 +16,10 @@ function createToolExecutionContext(): ToolExecutionContext {
   };
 }
 
+function getText(result: Awaited<ReturnType<EditFileTool['execute']>>): string | undefined {
+  return result.parts[0]?.type === 'text' ? result.parts[0].text : undefined;
+}
+
 test('EditFileTool replaces exactly one matching string', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'mersey-'));
 
@@ -31,7 +35,7 @@ test('EditFileTool replaces exactly one matching string', async () => {
 
     assert.equal(content, 'hello mersey');
     assert.equal(typeof result, 'object');
-    assert.match(result.content, /^Edited file: .*note\.txt$/);
+    assert.match(getText(result) ?? '', /^Edited file: .*note\.txt$/);
   } finally {
     await rm(rootDir, { force: true, recursive: true });
   }

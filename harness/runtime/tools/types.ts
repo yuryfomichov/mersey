@@ -1,5 +1,5 @@
-import type { ModelToolDefinition, ModelToolInput } from '../models/types.js';
-import type { ToolExecutionContext } from './runtime/index.js';
+import type { ModelToolDefinition, ModelToolInput, ToolContentPart } from '../models/types.js';
+import type { ToolExecutionContext, ToolExecutionResult } from './catalog.js';
 
 export type ToolInputSchema = {
   type: 'object';
@@ -12,24 +12,24 @@ export type ToolInput = {
   [key: string]: unknown;
 };
 
-export type ToolResultData = Record<string, unknown>;
+export type ToolExecuteResult = ToolExecutionResult;
 
-export type ToolExecuteResult = {
-  content: string;
-  data?: ToolResultData;
-  isError?: boolean;
-};
-
-export type ToolExecutionResult = {
-  content: string;
-  data?: ToolResultData;
-  isError?: boolean;
-  name: string;
-  toolCallId: string;
-};
+export function createTextToolResult(
+  text: string,
+  options: {
+    isError?: boolean;
+    metadata?: Record<string, unknown>;
+  } = {},
+): ToolExecutionResult {
+  return {
+    isError: options.isError,
+    metadata: options.metadata,
+    parts: [{ text, type: 'text' } satisfies ToolContentPart],
+  };
+}
 
 export interface Tool extends ModelToolDefinition {
   execute(input: ModelToolInput, context: ToolExecutionContext): Promise<ToolExecuteResult>;
 }
 
-export type { ToolExecutionContext } from './runtime/index.js';
+export type { ToolExecutionContext, ToolExecutionResult };

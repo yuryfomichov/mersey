@@ -7,6 +7,30 @@ import { createEmptyModelUsage } from '../runtime/models/types.js';
 import { OpenAIProvider } from './openai.js';
 import { collectEvents, collectResponse } from './test/provider-test-helpers.js';
 
+function createReadFileToolCall(id: string, path: string) {
+  return {
+    id,
+    input: { path },
+    name: 'read_file',
+    originalName: 'read_file',
+    publicName: 'read_file',
+    sourceId: 'local-tools',
+    toolId: 'local-tools:read_file',
+  };
+}
+
+function createReadFileToolResult(id: string, content: string) {
+  return {
+    content,
+    isError: false,
+    parts: [{ text: content, type: 'text' as const }],
+    publicName: 'read_file',
+    role: 'tool' as const,
+    toolCallId: id,
+    toolId: 'local-tools:read_file',
+  };
+}
+
 function createResponse(overrides: Partial<OpenAI.Responses.Response>): OpenAI.Responses.Response {
   return {
     created_at: 0,
@@ -200,9 +224,9 @@ test('OpenAIProvider forwards codec-produced input and tools to responses.create
         {
           content: '',
           role: 'assistant',
-          toolCalls: [{ id: 'call_1', input: { path: 'note.txt' }, name: 'read_file' }],
+          toolCalls: [createReadFileToolCall('call_1', 'note.txt')],
         },
-        { content: 'hello from file', isError: false, name: 'read_file', role: 'tool', toolCallId: 'call_1' },
+        createReadFileToolResult('call_1', 'hello from file'),
       ],
       stream: false,
       tools: [

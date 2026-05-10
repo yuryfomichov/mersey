@@ -1,12 +1,12 @@
-import type { ModelMessage } from '../../runtime/models/types.js';
-import type { HarnessPlugin, PrepareProviderRequestResult } from '../../runtime/plugins/types.js';
+import type { TurnContextContribution } from '../../runtime/context/types.js';
+import type { TurnContextCollector } from '../../runtime/plugins/types.js';
 import type { RetrievedChunk, RetrievalPluginOptions } from './types.js';
 
 const DEFAULT_MAX_CONTEXT_CHARS = 5_000;
 const DEFAULT_TOP_K = 5;
 
-export function createRetrievalPlugin(options: RetrievalPluginOptions): HarnessPlugin {
-  const pluginName = options.name ?? 'retrieval';
+export function createRetrievalPlugin(options: RetrievalPluginOptions): TurnContextCollector {
+  const sourceId = options.name ?? 'retrieval';
   const maxContextChars = options.maxContextChars ?? DEFAULT_MAX_CONTEXT_CHARS;
   const topK = options.topK ?? DEFAULT_TOP_K;
 
@@ -14,27 +14,22 @@ export function createRetrievalPlugin(options: RetrievalPluginOptions): HarnessP
   assertPositiveInteger(maxContextChars, 'maxContextChars');
 
   return {
-    name: pluginName,
-    async prepareProviderRequest(_request, ctx): Promise<PrepareProviderRequestResult> {
+    async collect(ctx): Promise<TurnContextContribution[]> {
       const query = (options.buildQuery?.(ctx) ?? ctx.userMessage.content).trim();
 
       if (query.length === 0 || topK === 0) {
-        return {};
+        return [];
       }
 
       ctx.signal?.throwIfAborted();
       const chunks = (await options.retrieve(query, ctx)).slice(0, topK);
 
       if (chunks.length === 0) {
-        return {};
+        return [];
       }
 
       ctx.signal?.throwIfAborted();
-      const prepared = (await options.formatChunks?.(chunks, ctx)) ?? defaultFormatChunks(chunks, { maxContextChars });
-
-      return {
-        ...prepared,
-      };
+      return (await options.formatChunks?.(chunks, ctx)) ?? defaultFormatChunks(chunks, { maxContextChars, sourceId });
     },
   };
 }
@@ -55,25 +50,28 @@ function defaultFormatChunks(
   chunks: RetrievedChunk[],
   options: {
     maxContextChars: number;
+    sourceId: string;
   },
-): PrepareProviderRequestResult {
+): TurnContextContribution[] {
   const intro =
     'Retrieved context for the next answer. Use only relevant facts. If the context is insufficient, say so.';
   const budget = Math.max(options.maxContextChars - intro.length - 2, 0);
   const rendered = renderChunks(chunks, budget);
 
   if (!rendered) {
-    return {};
+    return [];
   }
 
-  const message: ModelMessage = {
-    content: `${intro}\n\n${rendered}`,
-    role: 'user',
-  };
-
-  return {
-    prependMessages: [message],
-  };
+  return [
+    {
+      kind: 'message',
+      message: {
+        content: `${intro}\n\n${rendered}`,
+        role: 'user',
+      },
+      sourceId: options.sourceId,
+    },
+  ];
 }
 
 function renderChunks(chunks: RetrievedChunk[], budget: number): string {
@@ -108,7 +106,7 @@ function renderChunks(chunks: RetrievedChunk[], budget: number): string {
       break;
     }
 
-    sections.push(`${header}\n${body.slice(0, Math.max(allowedBodyLength - 1, 0)).trimEnd()}…`);
+    sections.push(`${header}\n${body.slice(0, Math.max(allowedBodyLength - 1, 0)).trimEnd()}...`);
     break;
   }
 

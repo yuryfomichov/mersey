@@ -29,7 +29,7 @@ export function MessageItem({ msg }: MessageItemProps) {
     const preview = content.length > 80 ? content.slice(0, 80) + '...' : content;
     return (
       <Text dimColor wrap='truncate-end'>
-        tool [{msg.name}]: {preview}
+        tool [{msg.publicName}]: {preview}
       </Text>
     );
   }

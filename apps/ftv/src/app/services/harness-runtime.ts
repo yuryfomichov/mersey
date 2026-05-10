@@ -1,4 +1,4 @@
-import { createHarness } from '../../../../../harness/index.js';
+import { createHarnessRuntime as createRootHarnessRuntime } from '../../../../../harness/index.js';
 import { createProvider } from '../../../../../harness/providers/index.js';
 import { type ProviderName } from '../../../../../harness/providers/types.js';
 import { type Harness, type HarnessEvent } from '../../../../../harness/types.js';
@@ -10,6 +10,7 @@ import {
 import { createCliLoggingPlugins } from '../../../../helpers/cli/logging.js';
 import { getProviderDefinition } from '../../../../helpers/cli/provider-config.js';
 import { createSession, type SessionStoreDefinition } from '../../../../helpers/cli/session-store.js';
+import { getStartupStatusLines } from '../../../../helpers/cli/startup.js';
 import { createAwaitableToolApprovalPlugin, type BlockAndAskUser } from '../../tool-approval-plugin.js';
 import { FTV_COMMAND_ALLOWLIST } from '../constants.js';
 import { getSystemPrompt } from '../system-prompt.js';
@@ -26,7 +27,8 @@ export interface HarnessRuntimeOptions {
 export interface HarnessRuntime {
   harness: Harness;
   providerModel: string | null;
-  dispose: () => void;
+  startupLines: string[];
+  dispose: () => Promise<void>;
 }
 
 export async function createHarnessRuntime(
@@ -43,7 +45,7 @@ export async function createHarnessRuntime(
 
   const { plugins: loggingPlugins } = await createCliLoggingPlugins(sessionId);
 
-  const harness = createHarness({
+  const runtimeResult = await createRootHarnessRuntime({
     debug,
     plugins: [...loggingPlugins, toolApprovalPlugin],
     providerInstance,
@@ -51,6 +53,11 @@ export async function createHarnessRuntime(
     systemPrompt: getSystemPrompt(),
     tools: createDefaultTools({ commandAllowlist: FTV_COMMAND_ALLOWLIST, toolExecutionPolicy }),
   });
+  if (!runtimeResult.ok) {
+    throw new Error(runtimeResult.startup.diagnostics.map((diagnostic) => diagnostic.message).join('\n'));
+  }
+
+  const harness = runtimeResult.runtime.harness;
 
   const unsubscribe = harness.subscribe(onEvent);
   const providerModel = getProviderModel(providerDef);
@@ -58,8 +65,10 @@ export async function createHarnessRuntime(
   return {
     harness,
     providerModel,
-    dispose: () => {
+    startupLines: getStartupStatusLines(runtimeResult.runtime.startup),
+    dispose: async () => {
       unsubscribe();
+      await runtimeResult.runtime.dispose();
     },
   };
 }

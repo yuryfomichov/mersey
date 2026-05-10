@@ -1,11 +1,16 @@
+import { injectTurnContextMessages } from '../context/pipeline.js';
+import type { TurnContextCollectorRunner } from '../context/runner.js';
 import { getMessageCountsByRole, HarnessEventReporter } from '../events/reporter.js';
 import type { ModelProvider } from '../models/provider.js';
-import type { ModelMessage, ModelRequest, ModelResponse } from '../models/types.js';
-import { toPrepareProviderRequestTranscript, toProviderRequestSnapshot } from '../plugins/request-snapshots.js';
+import type { AssistantToolCall, ModelMessage, ModelRequest, ModelResponse } from '../models/types.js';
 import type { PluginRunner } from '../plugins/runner.js';
 import type { Message } from '../sessions/types.js';
-import type { ToolRuntimeFactory } from '../tools/runtime/index.js';
-import { freezeDeep } from '../utils/object.js';
+import { getRuntimeSourceErrorSourceIds } from '../sources.js';
+import type { ResolvedToolCall } from '../tools/catalog.js';
+import type { ComposedToolCatalog } from '../tools/composed-catalog.js';
+import { projectToolResultToText, sanitizeToolExecutionResult } from '../tools/result.js';
+import { CancellationService } from '../tools/runtime/cancellation/cancellation-service.js';
+import { createTextToolResult } from '../tools/types.js';
 
 export type LoopOptions = {
   maxToolIterations?: number;
@@ -13,31 +18,18 @@ export type LoopOptions = {
 
 export type LoopInput = {
   content: string;
+  contextCollectors: TurnContextCollectorRunner;
   history: readonly Message[];
-  reporter: HarnessEventReporter;
   options?: LoopOptions;
   pluginRunner: PluginRunner;
   provider: ModelProvider;
+  reporter: HarnessEventReporter;
   signal?: AbortSignal;
   stream: boolean;
   systemPrompt?: string;
-  toolRuntimeFactory: ToolRuntimeFactory;
+  toolCatalog: ComposedToolCatalog;
 };
 
-/**
- * Values yielded by the turn loop during execution.
- *
- * - `assistant_delta`: A chunk of text streamed from the model. Multiple deltas
- *   are yielded as the model generates output token-by-token.
- *
- * - `assistant_message_completed`: Emitted after all deltas when the assistant
- *   message contains tool calls and at least one delta was streamed. Signals
- *   that tool execution is about to begin.
- *
- * - `final_message`: The turn is complete. This is the final {@link Message}
- *   produced by the loop, either because the model responded without tool calls
- *   or after all tool calls were executed and a final response was generated.
- */
 export type TurnChunk =
   | {
       delta: string;
@@ -57,6 +49,10 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
   signal?.throwIfAborted();
 }
 
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function getFallbackAssistantContent(response: { text: string; toolCalls?: { length: number } }): string {
   if (response.text.trim()) {
     return response.text;
@@ -71,14 +67,10 @@ function getFallbackAssistantContent(response: { text: string; toolCalls?: { len
 
 function toModelMessages(messages: readonly Message[]): ModelMessage[] {
   return messages.map((message) => {
-    if (message.role === 'tool') {
+    if (message.role === 'user') {
       return {
         content: message.content,
-        data: message.data,
-        isError: message.isError,
-        name: message.name,
-        role: 'tool',
-        toolCallId: message.toolCallId,
+        role: 'user',
       };
     }
 
@@ -92,7 +84,13 @@ function toModelMessages(messages: readonly Message[]): ModelMessage[] {
 
     return {
       content: message.content,
-      role: 'user',
+      ...(message.isError === undefined ? {} : { isError: message.isError }),
+      ...(message.metadata === undefined ? {} : { metadata: structuredClone(message.metadata) }),
+      parts: structuredClone(message.parts),
+      publicName: message.publicName,
+      role: 'tool',
+      toolCallId: message.toolCallId,
+      toolId: message.toolId,
     };
   });
 }
@@ -101,25 +99,35 @@ function appendMessage(messages: Message[], message: Message): void {
   messages.push(message);
 }
 
-function toToolInputRecord(input: unknown): Record<string, unknown> {
-  return input && typeof input === 'object' && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
+function resolveToolCall(
+  toolCall: NonNullable<ModelResponse['toolCalls']>[number],
+  toolSnapshot: Awaited<ReturnType<ComposedToolCatalog['snapshot']>>['snapshot'],
+): ResolvedToolCall {
+  return (
+    toolSnapshot.resolve(toolCall) ?? {
+      input: structuredClone(toolCall.input),
+      originalName: toolCall.name,
+      publicName: toolCall.name,
+      rawCall: structuredClone(toolCall),
+      sourceId: 'unknown',
+      toolCallId: toolCall.id,
+      toolId: `unknown:${toolCall.name}`,
+    }
+  );
 }
 
-/**
- * Wraps a provider's streaming response in a simple async generator interface.
- *
- * Consumes the provider's {@link ModelProvider.generate} async iterable, which
- * yields mixed event types. This function normalizes the output to either:
- * - `text_delta` — A piece of streaming text
- * - `response_completed` — The final response object with text and/or tool calls
- *
- * The provider stream must emit exactly one `response_completed` event. If
- * multiple appear, an error is thrown (protocol violation).
- *
- * If the stream ends without a `response_completed`, an error is thrown.
- *
- * The {@link reporter} is notified when the response completes.
- */
+function toAssistantToolCall(tool: ResolvedToolCall): AssistantToolCall {
+  return {
+    id: tool.toolCallId,
+    input: structuredClone(tool.input),
+    name: tool.publicName,
+    originalName: tool.originalName,
+    publicName: tool.publicName,
+    sourceId: tool.sourceId,
+    toolId: tool.toolId,
+  };
+}
+
 async function* getProviderResponse({
   reporter,
   provider,
@@ -127,10 +135,10 @@ async function* getProviderResponse({
   iteration,
   signal,
 }: {
-  reporter: HarnessEventReporter;
-  provider: ModelProvider;
-  request: ModelRequest;
   iteration: number;
+  provider: ModelProvider;
+  reporter: HarnessEventReporter;
+  request: ModelRequest;
   signal: AbortSignal | undefined;
 }): AsyncIterable<{ delta: string; type: 'text_delta' } | { response: ModelResponse; type: 'response_completed' }> {
   const providerStartTime = Date.now();
@@ -180,43 +188,9 @@ async function* getProviderResponse({
   };
 }
 
-/**
- * Runs a single conversation turn: user message → model → optional tools → model → ...
- *
- * This is an async generator that yields {@link TurnChunk} values as the turn
- * progresses. Each turn consists of:
- *
- * 1. Adding the user message to the transcript
- * 2. Sending the transcript to the model provider
- * 3. Yielding text deltas as the model streams output
- * 4. If the model requests tools:
- *    - Execute each tool and append the result to the transcript
- *    - Loop back to step 2 with the updated transcript
- * 5. If no tools are requested, yield `final_message` and return
- *
- * **Tool iteration limit**: To prevent infinite loops, the loop exits after
- * {@link DEFAULT_MAX_TOOL_ITERATIONS} (12) iterations of tool execution.
- * Each iteration may execute multiple tool calls, but once the 13th iteration
- * begins, an error is thrown.
- *
- * **Abort handling**: The {@link signal} is checked at key points (before
- * provider calls, before tool execution). If aborted, the loop throws
- * an `AbortError`.
- *
- * **Events**: The {@link reporter} is notified at each phase (turn started,
- * iteration started, provider requested/responded, tool requested/started/finished,
- * turn finished/failed).
- *
- * **Transcript building**: The transcript is built from `history` (prior messages
- * in the session) plus `turnMessages` (messages added during this turn). The
- * `getTranscript()` function reconstructs this on each iteration.
- *
- * @returns An async generator that yields {@link TurnChunk} values. When the
- *          turn completes, returns an array of all messages in the turn
- *          (user message, assistant messages, tool result messages).
- */
 export async function* streamLoop({
   content,
+  contextCollectors,
   history,
   reporter,
   options,
@@ -225,7 +199,7 @@ export async function* streamLoop({
   signal,
   stream,
   systemPrompt,
-  toolRuntimeFactory,
+  toolCatalog,
 }: LoopInput): AsyncGenerator<TurnChunk, Message[]> {
   let currentIteration = 0;
   let currentErrorType: 'provider' | 'tool' | 'runtime' = 'runtime';
@@ -237,57 +211,93 @@ export async function* streamLoop({
     content,
     createdAt: new Date().toISOString(),
   };
-  const toolRuntime = toolRuntimeFactory({ signal });
   const maxToolIterations = options?.maxToolIterations ?? DEFAULT_MAX_TOOL_ITERATIONS;
   let toolIterations = 0;
   reporter.turnStarted(content.length);
   const resolvedSystemPrompt = systemPrompt?.trim() ? systemPrompt : undefined;
   const getTranscript = (): Message[] => [...history, ...turnMessages];
+  const cancellation = new CancellationService({ signal });
 
   try {
     throwIfAborted(signal);
     appendMessage(turnMessages, userMessage);
 
-    while (true) {
-      const transcript = getTranscript();
-      const modelMessages = toModelMessages(transcript);
-      const hasPrepareProviderRequestHooks = pluginRunner.hasPrepareProviderRequestHooks();
+    reporter.turnSnapshotStarted(1);
+    let toolSnapshotResult: Awaited<ReturnType<ComposedToolCatalog['snapshot']>>;
+    let contextSnapshot: Awaited<ReturnType<TurnContextCollectorRunner['collect']>>;
 
-      currentIteration += 1;
-      reporter.iterationStarted(currentIteration, transcript.length);
-
-      let request: ModelRequest = {
-        messages: modelMessages,
-        signal,
-        stream,
-        systemPrompt: resolvedSystemPrompt,
-        tools: toolRuntime.toolDefinitions,
-      };
-
-      currentErrorType = 'provider';
-
-      if (hasPrepareProviderRequestHooks) {
-        request = await pluginRunner.runPrepareProviderRequest(request, {
-          iteration: currentIteration,
+    try {
+      toolSnapshotResult = await toolCatalog.snapshot({
+        iteration: 1,
+        reporter,
+        sessionId: reporter.getSessionId(),
+        turnId: reporter.getTurnId(),
+      });
+      contextSnapshot = await contextCollectors.collect(
+        {
+          iteration: 1,
           model: provider.model,
           providerName: provider.name,
           sessionId: reporter.getSessionId(),
           signal,
-          transcript: freezeDeep(toPrepareProviderRequestTranscript(transcript)),
+          transcript: getTranscript(),
           turnId: reporter.getTurnId(),
-          userMessage: freezeDeep({
+          userMessage: {
             content: userMessage.content,
-            role: 'user' as const,
-          }),
-        });
-      }
+            role: 'user',
+          },
+        },
+        reporter,
+      );
+    } catch (error: unknown) {
+      reporter.turnSnapshotFailed(1, getRuntimeSourceErrorSourceIds(error), getErrorMessage(error));
+      throw error;
+    }
+
+    reporter.turnSnapshotCompleted(1, {
+      context: contextSnapshot.context,
+      toolDefinitionCount: toolSnapshotResult.snapshot.descriptors.length,
+    });
+
+    const toolDefinitions = toolSnapshotResult.snapshot.descriptors.map((descriptor) => descriptor.definition);
+    const injectedContextMessages = injectTurnContextMessages(contextSnapshot.context);
+
+    while (true) {
+      const transcript = getTranscript();
+      const modelMessages = [
+        ...injectedContextMessages.map((message) => structuredClone(message)),
+        ...toModelMessages(transcript),
+      ];
+
+      currentIteration += 1;
+      reporter.iterationStarted(currentIteration, transcript.length);
+
+      const request: ModelRequest = {
+        context: contextSnapshot.context,
+        messages: modelMessages,
+        signal,
+        stream,
+        systemPrompt: resolvedSystemPrompt,
+        tools: toolDefinitions.length > 0 ? toolDefinitions : undefined,
+      };
+
+      currentErrorType = 'provider';
+
       const providerCtx = {
         iteration: currentIteration,
         messageCount: request.messages.length,
         messageCountsByRole: getMessageCountsByRole(request.messages),
         model: provider.model,
         providerName: provider.name,
-        request: toProviderRequestSnapshot(request),
+        request: Object.freeze({
+          ...(request.context ? { context: request.context } : {}),
+          messages: Object.freeze(request.messages.map((message) => Object.freeze(structuredClone(message)))),
+          stream: request.stream,
+          ...(request.systemPrompt === undefined ? {} : { systemPrompt: request.systemPrompt }),
+          ...(request.tools
+            ? { tools: Object.freeze(request.tools.map((tool) => Object.freeze(structuredClone(tool)))) }
+            : {}),
+        }),
         sessionId: reporter.getSessionId(),
         toolDefinitionNames: request.tools?.map((tool) => tool.name) ?? [],
         turnId: reporter.getTurnId(),
@@ -340,9 +350,12 @@ export async function* streamLoop({
       currentErrorType = 'runtime';
       throwIfAborted(signal);
 
-      if (response.toolCalls?.length) {
+      const resolvedToolCalls =
+        response.toolCalls?.map((toolCall) => resolveToolCall(toolCall, toolSnapshotResult.snapshot)) ?? [];
+
+      if (resolvedToolCalls.length > 0) {
         toolIterations += 1;
-        totalToolCalls += response.toolCalls.length;
+        totalToolCalls += resolvedToolCalls.length;
 
         if (toolIterations > maxToolIterations) {
           throw new Error(`Tool loop exceeded ${maxToolIterations} iterations.`);
@@ -353,13 +366,13 @@ export async function* streamLoop({
         content: getFallbackAssistantContent(response),
         createdAt: new Date().toISOString(),
         role: 'assistant',
-        toolCalls: response.toolCalls,
+        toolCalls: resolvedToolCalls.map((tool) => toAssistantToolCall(tool)),
         usage: response.usage,
       };
 
       appendMessage(turnMessages, assistantMessage);
 
-      if (!response.toolCalls?.length) {
+      if (resolvedToolCalls.length === 0) {
         reporter.turnFinished(currentIteration, totalToolCalls, assistantMessage.content.length);
 
         yield {
@@ -376,52 +389,66 @@ export async function* streamLoop({
         };
       }
 
-      for (const toolCall of response.toolCalls) {
+      for (const tool of resolvedToolCalls) {
         throwIfAborted(signal);
-        reporter.toolRequested(currentIteration, toolCall);
+        reporter.toolRequested(currentIteration, tool);
 
-        const toolCtx = {
+        const toolDecision = await pluginRunner.runBeforeToolExecution({
           iteration: currentIteration,
           sessionId: reporter.getSessionId(),
-          toolCall: {
-            id: toolCall.id,
-            input: toToolInputRecord(toolCall.input),
-            name: toolCall.name,
-          },
+          tool,
           turnId: reporter.getTurnId(),
-        };
-
-        const toolDecision = await pluginRunner.runBeforeToolCall(toolCtx);
+        });
 
         if (toolDecision.continue === false) {
           const exposeToModel = toolDecision.exposeToModel ?? false;
-          reporter.toolBlocked(currentIteration, toolCall, toolDecision.reason, exposeToModel);
+          reporter.toolBlocked(currentIteration, tool, toolDecision.reason, exposeToModel);
+
+          const blockedResult = createTextToolResult(
+            exposeToModel ? toolDecision.reason : 'Tool call denied by policy.',
+            {
+              isError: true,
+            },
+          );
 
           appendMessage(turnMessages, {
-            content: exposeToModel ? toolDecision.reason : 'Tool call denied by policy.',
+            content: projectToolResultToText(blockedResult),
             createdAt: new Date().toISOString(),
             isError: true,
-            name: toolCall.name,
+            metadata: blockedResult.metadata,
+            parts: blockedResult.parts,
+            publicName: tool.publicName,
             role: 'tool',
-            toolCallId: toolCall.id,
+            toolCallId: tool.toolCallId,
+            toolId: tool.toolId,
           });
 
           continue;
         }
 
-        reporter.toolStarted(currentIteration, toolCall);
+        reporter.toolStarted(currentIteration, tool);
 
         currentErrorType = 'tool';
         const toolStartTime = Date.now();
-        const toolResult = await toolRuntime.executeToolCall(toolCall);
+        const toolResult = sanitizeToolExecutionResult(
+          tool.sourceId === 'unknown'
+            ? createTextToolResult(`Unknown tool: ${tool.publicName}`, { isError: true })
+            : await toolSnapshotResult.snapshot.execute(tool, { cancellation }),
+        );
         currentErrorType = 'runtime';
         throwIfAborted(signal);
-        reporter.toolFinished(currentIteration, toolCall, toolResult, Date.now() - toolStartTime);
+        reporter.toolFinished(currentIteration, tool, toolResult, Date.now() - toolStartTime);
 
         appendMessage(turnMessages, {
-          ...toolResult,
+          content: projectToolResultToText(toolResult),
           createdAt: new Date().toISOString(),
+          isError: toolResult.isError,
+          metadata: toolResult.metadata,
+          parts: toolResult.parts,
+          publicName: tool.publicName,
           role: 'tool',
+          toolCallId: tool.toolCallId,
+          toolId: tool.toolId,
         });
       }
     }

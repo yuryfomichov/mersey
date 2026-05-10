@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
 
+import type { NormalizedTurnContext } from '../context/types.js';
 import type { ModelProvider } from '../models/provider.js';
-import type { ModelMessage, ModelRequest, ModelResponse, ModelToolCall, ModelToolDefinition } from '../models/types.js';
-import type { ToolExecutionResult } from '../tools/types.js';
+import type { ModelMessage, ModelRequest, ModelResponse, ModelToolDefinition } from '../models/types.js';
+import type { ResolvedToolCall, ToolExecutionResult } from '../tools/catalog.js';
+import { getToolContentPartTelemetryLength } from '../tools/result.js';
 import { HarnessEventEmitter } from './emitter.js';
 import {
   getDebugToolArgs,
-  getResultDataKeys,
+  getResultMetadataKeys,
   getSafeToolArgs,
   sanitizeErrorMessage,
   sanitizeHookErrorMessage,
@@ -90,6 +92,57 @@ export class HarnessEventReporter {
     });
   }
 
+  turnSnapshotStarted(iteration: number): void {
+    this.eventEmitter.publish({
+      iteration,
+      sessionId: this.getSessionId(),
+      timestamp: new Date().toISOString(),
+      turnId: this.getTurnId(),
+      type: 'turn_snapshot_started',
+    });
+  }
+
+  turnSnapshotDegraded(iteration: number, affectedSourceIds: string[], reason: string): void {
+    this.eventEmitter.publish({
+      affectedSourceIds,
+      iteration,
+      reason,
+      sessionId: this.getSessionId(),
+      timestamp: new Date().toISOString(),
+      turnId: this.getTurnId(),
+      type: 'turn_snapshot_degraded',
+    });
+  }
+
+  turnSnapshotFailed(iteration: number, affectedSourceIds: string[], reason: string): void {
+    this.eventEmitter.publish({
+      affectedSourceIds,
+      iteration,
+      reason,
+      sessionId: this.getSessionId(),
+      timestamp: new Date().toISOString(),
+      turnId: this.getTurnId(),
+      type: 'turn_snapshot_failed',
+    });
+  }
+
+  turnSnapshotCompleted(
+    iteration: number,
+    options: { context: NormalizedTurnContext; toolDefinitionCount: number },
+  ): void {
+    this.eventEmitter.publish({
+      contextMessageCount: options.context.messages.length,
+      contextMetadataKeys: Object.keys(options.context.metadata).sort(),
+      contextResourceCount: options.context.resources.length,
+      iteration,
+      sessionId: this.getSessionId(),
+      timestamp: new Date().toISOString(),
+      toolDefinitionCount: options.toolDefinitionCount,
+      turnId: this.getTurnId(),
+      type: 'turn_snapshot_completed',
+    });
+  }
+
   providerRequested(iteration: number, request: Readonly<ModelRequest>, provider: ProviderMetadata): void {
     const debugRequest = this.getDebugProviderRequest(request);
 
@@ -130,61 +183,72 @@ export class HarnessEventReporter {
     });
   }
 
-  toolFinished(iteration: number, toolCall: ModelToolCall, toolResult: ToolExecutionResult, durationMs: number): void {
-    this.eventEmitter.publish({
-      durationMs,
-      isError: Boolean(toolResult.isError),
-      iteration,
-      resultContentLength: toolResult.content.length,
-      resultDataKeys: getResultDataKeys(toolResult.data),
-      sessionId: this.getSessionId(),
-      timestamp: new Date().toISOString(),
-      toolCallId: toolCall.id,
-      toolName: toolCall.name,
-      turnId: this.getTurnId(),
-      type: 'tool_finished',
-    });
-  }
-
-  toolRequested(iteration: number, toolCall: ModelToolCall): void {
-    const debugArgs = getDebugToolArgs(toolCall.input, { debug: this.debug });
+  toolRequested(iteration: number, tool: ResolvedToolCall): void {
+    const debugArgs = getDebugToolArgs(tool.input, { debug: this.debug });
 
     this.eventEmitter.publish({
       ...(debugArgs ? { debugArgs } : {}),
       iteration,
-      safeArgs: getSafeToolArgs(toolCall.input),
+      originalName: tool.originalName,
+      publicName: tool.publicName,
+      safeArgs: getSafeToolArgs(tool.input),
       sessionId: this.getSessionId(),
+      sourceId: tool.sourceId,
       timestamp: new Date().toISOString(),
-      toolCallId: toolCall.id,
-      toolName: toolCall.name,
+      toolCallId: tool.toolCallId,
+      toolId: tool.toolId,
       turnId: this.getTurnId(),
       type: 'tool_requested',
     });
   }
 
-  toolStarted(iteration: number, toolCall: ModelToolCall): void {
+  toolStarted(iteration: number, tool: ResolvedToolCall): void {
     this.eventEmitter.publish({
       iteration,
+      publicName: tool.publicName,
       sessionId: this.getSessionId(),
+      sourceId: tool.sourceId,
       timestamp: new Date().toISOString(),
-      toolCallId: toolCall.id,
-      toolName: toolCall.name,
+      toolCallId: tool.toolCallId,
+      toolId: tool.toolId,
       turnId: this.getTurnId(),
       type: 'tool_started',
     });
   }
 
-  toolBlocked(iteration: number, toolCall: ModelToolCall, reason: string, exposeToModel: boolean): void {
+  toolBlocked(iteration: number, tool: ResolvedToolCall, reason: string, exposeToModel: boolean): void {
     this.eventEmitter.publish({
       exposeToModel,
       iteration,
+      publicName: tool.publicName,
       reason,
       sessionId: this.getSessionId(),
+      sourceId: tool.sourceId,
       timestamp: new Date().toISOString(),
-      toolCallId: toolCall.id,
-      toolName: toolCall.name,
+      toolCallId: tool.toolCallId,
+      toolId: tool.toolId,
       turnId: this.getTurnId(),
       type: 'tool_blocked',
+    });
+  }
+
+  toolFinished(iteration: number, tool: ResolvedToolCall, toolResult: ToolExecutionResult, durationMs: number): void {
+    this.eventEmitter.publish({
+      durationMs,
+      isError: Boolean(toolResult.isError),
+      iteration,
+      publicName: tool.publicName,
+      resultContentLength: toolResult.parts
+        .map((part) => getToolContentPartTelemetryLength(part))
+        .reduce((sum, length) => sum + length, 0),
+      resultMetadataKeys: getResultMetadataKeys(toolResult.metadata),
+      sessionId: this.getSessionId(),
+      sourceId: tool.sourceId,
+      timestamp: new Date().toISOString(),
+      toolCallId: tool.toolCallId,
+      toolId: tool.toolId,
+      turnId: this.getTurnId(),
+      type: 'tool_finished',
     });
   }
 
@@ -294,6 +358,7 @@ export class HarnessEventReporter {
     }
 
     return {
+      ...(request.context ? { context: structuredClone(request.context) } : {}),
       messages: request.messages.map(cloneModelMessage),
       stream: request.stream,
       ...(request.systemPrompt === undefined ? {} : { systemPrompt: request.systemPrompt }),
@@ -311,37 +376,11 @@ export class HarnessEventReporter {
 }
 
 function cloneModelMessage(message: ModelMessage): ModelMessage {
-  if (message.role === 'assistant') {
-    return {
-      ...message,
-      ...(message.toolCalls
-        ? {
-            toolCalls: message.toolCalls.map((toolCall) => ({
-              ...toolCall,
-              input: sanitizeDebugValue(toolCall.input) as typeof toolCall.input,
-            })),
-          }
-        : {}),
-    };
-  }
-
-  if (message.role === 'tool') {
-    return {
-      ...message,
-      ...(message.data ? { data: sanitizeDebugValue(message.data) as typeof message.data } : {}),
-    };
-  }
-
-  return {
-    ...message,
-  };
+  return sanitizeDebugValue(message) as ModelMessage;
 }
 
 function cloneToolDefinition(tool: ModelToolDefinition): ModelToolDefinition {
-  return {
-    ...tool,
-    inputSchema: sanitizeDebugValue(tool.inputSchema) as ModelToolDefinition['inputSchema'],
-  };
+  return sanitizeDebugValue(tool) as ModelToolDefinition;
 }
 
 function sanitizeDebugValue(value: unknown, ancestors: WeakSet<object> = new WeakSet<object>()): unknown {
