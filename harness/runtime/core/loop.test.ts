@@ -76,6 +76,52 @@ test('streamLoop injects collected context without persisting it to turn message
   );
 });
 
+test('streamLoop gives collectors transcript snapshots instead of live turn messages', async () => {
+  const provider = new FakeProvider();
+  const reporter = createReporter();
+  const pluginRunner = createPluginRunner({
+    plugins: [],
+    reporter,
+    runId: 'run-1',
+    workTracker: new RuntimeWorkTracker(),
+  });
+  const collectorRunner = new TurnContextCollectorRunner([
+    {
+      sourceId: 'mutating-collector',
+      value: {
+        async collect(ctx) {
+          const firstMessage = ctx.transcript[0];
+
+          if (firstMessage) {
+            (firstMessage as { content: string }).content = 'mutated by collector';
+          }
+
+          return [];
+        },
+      },
+    },
+  ]);
+
+  const iterator = streamLoop({
+    content: 'original user input',
+    contextCollectors: collectorRunner,
+    history: [],
+    pluginRunner,
+    provider,
+    reporter,
+    stream: false,
+    toolCatalog: new ComposedToolCatalog([]),
+  });
+
+  let result = await iterator.next();
+  while (!result.done) {
+    result = await iterator.next();
+  }
+
+  assert.equal(provider.requests[0]?.messages.at(-1)?.content, 'original user input');
+  assert.equal(result.value[0]?.content, 'original user input');
+});
+
 test('streamLoop resolves tools and appends structured tool result messages', async () => {
   const tool: Tool = {
     description: 'Return hello',
@@ -124,6 +170,7 @@ test('streamLoop resolves tools and appends structured tool result messages', as
     provider,
     reporter,
     stream: false,
+    systemPrompt: 'Use tools carefully.',
     toolCatalog,
   });
 
@@ -142,6 +189,10 @@ test('streamLoop resolves tools and appends structured tool result messages', as
   assert.equal(toolMessage.toolId, 'local-tools:workspace.hello');
   assert.equal(toolMessage.parts[0]?.type, 'text');
   assert.equal(toolMessage.parts[0]?.type === 'text' ? toolMessage.parts[0].text : '', 'tool-output');
+  assert.deepEqual(
+    provider.requests.map((request) => request.systemPrompt),
+    ['Use tools carefully.', 'Use tools carefully.'],
+  );
 });
 
 test('streamLoop returns unknown-tool error results when resolution fails', async () => {

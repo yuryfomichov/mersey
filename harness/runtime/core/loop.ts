@@ -240,7 +240,7 @@ export async function* streamLoop({
           providerName: provider.name,
           sessionId: reporter.getSessionId(),
           signal,
-          transcript: getTranscript(),
+          transcript: getTranscript().map((message) => structuredClone(message)),
           turnId: reporter.getTurnId(),
           userMessage: {
             content: userMessage.content,

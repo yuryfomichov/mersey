@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import { FakeProvider } from '../../providers/fake.js';
 import { MemorySessionStore, Session } from '../../sessions/index.js';
@@ -11,7 +12,13 @@ import { createPluginRunner } from '../plugins/runner.js';
 import { ComposedToolCatalog } from '../tools/composed-catalog.js';
 import { asFinalMessage, createTurnStreamFactory } from './turn-stream.js';
 
-function createFactory(options: { provider?: FakeProvider; remember?(turnId: string): Promise<void> | void } = {}) {
+function createFactory(
+  options: {
+    provider?: FakeProvider;
+    remember?(turnId: string): Promise<void> | void;
+    store?: MemorySessionStore;
+  } = {},
+) {
   const reporter = new HarnessEventReporter({
     getSessionId: () => 'session-1',
     providerName: 'fake',
@@ -43,7 +50,7 @@ function createFactory(options: { provider?: FakeProvider; remember?(turnId: str
       pluginRunner,
       provider,
       reporter,
-      session: new Session({ id: 'session-1', store: new MemorySessionStore() }),
+      session: new Session({ id: 'session-1', store: options.store ?? new MemorySessionStore() }),
       toolCatalog: new ComposedToolCatalog([]),
       workTracker,
     }),
@@ -79,6 +86,38 @@ test('createTurnStreamFactory runs commit observers after a successful commit', 
 
   assert.equal(message.content, 'reply:hello');
   assert.ok(rememberedTurnId);
+});
+
+test('createTurnStreamFactory does not yield final_message before commit succeeds', async () => {
+  let releaseCommit!: () => void;
+  let commitStarted!: () => void;
+  const commitStartedPromise = new Promise<void>((resolve) => {
+    commitStarted = resolve;
+  });
+  const releaseCommitPromise = new Promise<void>((resolve) => {
+    releaseCommit = resolve;
+  });
+
+  class BlockingCommitStore extends MemorySessionStore {
+    override async commitTurnExclusive(...args: Parameters<MemorySessionStore['commitTurnExclusive']>) {
+      commitStarted();
+      await releaseCommitPromise;
+      return super.commitTurnExclusive(...args);
+    }
+  }
+
+  const { factory } = createFactory({ store: new BlockingCommitStore() });
+  const iterator = factory('hello', false)[Symbol.asyncIterator]();
+  const nextResult = iterator.next();
+
+  await commitStartedPromise;
+  assert.equal(await Promise.race([nextResult.then(() => 'yielded'), delay(20).then(() => 'waiting')]), 'waiting');
+
+  releaseCommit();
+  const result = await nextResult;
+
+  assert.equal(result.done, false);
+  assert.equal(result.value?.type, 'final_message');
 });
 
 test('turn stream return aborts an in-flight provider request', async () => {
